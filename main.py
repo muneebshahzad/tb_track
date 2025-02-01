@@ -601,11 +601,11 @@ def verify_shopify_webhook(request):
 def shopify_order_updated():
     global order_details  # Ensure we're modifying the global variable
     try:
-        # Verify the webhook request is from Shopify
+        # Verify the webhook request is from Shopify.
         if not verify_shopify_webhook(request):
             return jsonify({'error': 'Invalid webhook signature'}), 401
 
-        # Parse the JSON payload sent by Shopify
+        # Parse the JSON payload sent by Shopify.
         order_data = request.get_json()
         order_id = order_data.get('id')
         if not order_id:
@@ -613,43 +613,56 @@ def shopify_order_updated():
 
         print(f"Received webhook for order ID: {order_id}")
 
-        # Fetch the complete order from Shopify
+        # Fetch the complete order from Shopify (this gives you all other data).
         order = shopify.Order.find(order_id)
         if not order:
             return jsonify({'error': f'Order {order_id} not found'}), 404
 
-        # Process the order update asynchronously.
+        # Extract customer details from the webhook payload.
+        # (Prefer webhook data over what Shopify API provides)
+        customer = order_data.get('customer', {})
+        updated_customer_details = {
+            "name": f"{customer.get('first_name', '')} {customer.get('last_name', '')}".strip(),
+            # Try shipping address first, then fallback to billing address if not available.
+            "address": (order_data.get('shipping_address', {}) or {}).get('address1', '') or (order_data.get('billing_address', {}) or {}).get('address1', ''),
+            "phone": customer.get('phone') or (order_data.get('billing_address', {}) or {}).get('phone', '')
+        }
+
+        # Process the order using your existing process_order function.
         async def update_order():
             async with aiohttp.ClientSession() as session:
-                updated_order_info = await process_order(session, order)
-                return updated_order_info
+                processed_order = await process_order(session, order)
+                # Override the customer details with those from the webhook.
+                processed_order['customer_details'].update(updated_customer_details)
+                return processed_order
 
         updated_order_info = asyncio.run(update_order())
 
         # Update the global order_details list with the new info.
-        # Assuming each order has a unique 'id' field:
+        # Look for the order by its unique 'id' field.
         updated = False
         for idx, existing_order in enumerate(order_details):
             if existing_order.get('id') == updated_order_info.get('id'):
                 order_details[idx] = updated_order_info
                 updated = True
                 break
-        # If the order wasn't in the list, you might want to add it:
+
+        # If the order wasn't already in the list, add it.
         if not updated:
             order_details.append(updated_order_info)
 
-        # Optionally, log the updated global orders
         print("Updated order_details:", order_details)
 
         return jsonify({
             'success': True,
-            'message': f'Order {order_id} processed successfully',
+            'message': f'Order {order_id} processed successfully with updated customer details',
             'order': updated_order_info
         }), 200
 
     except Exception as e:
         print(f"Webhook processing error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 

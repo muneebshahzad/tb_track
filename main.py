@@ -140,13 +140,36 @@ async def process_line_item(session, line_item, fulfillments):
 async def process_order(session, order):
     order_start_time = time.time()
 
+    # Check if the order is cancelled. This assumes that cancelled orders have a cancelled_at attribute.
+    # If your API uses a different field or method, adjust the condition accordingly.
+    if getattr(order, 'cancelled_at', None):
+        print(f"Order {order.order_number} is cancelled. Skipping full processing.")
+        # Return a minimal order info for cancelled orders.
+        order_info = {
+            'order_id': order.name,
+            'tracking_id': 'N/A',
+            'created_at': order.created_at,
+            'total_price': order.total_price,
+            'line_items': [],
+            'financial_status': (order.financial_status).title() if order.financial_status else "Cancelled",
+            'fulfillment_status': "Cancelled",
+            'customer_details': {},
+            'tags': order.tags.split(", ") if order.tags else [],
+            'id': order.id,
+            'status': "Cancelled"
+        }
+        order_end_time = time.time()
+        print(f"Time taken to process (cancelled) order {order.order_number}: {order_end_time - order_start_time:.2f} seconds")
+        return order_info
+
+    # If the order isn't cancelled, process normally.
     input_datetime_str = order.created_at
     parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
     formatted_datetime = parsed_datetime.strftime("%b %d, %Y")
 
     try:
         status = (order.fulfillment_status).title()
-    except:
+    except Exception:
         status = "Un-fulfilled"
     print(order)
     tags = []
@@ -188,8 +211,8 @@ async def process_order(session, order):
         'line_items': [],
         'financial_status': (order.financial_status).title(),
         'fulfillment_status': status,
-        'customer_details' : customer_details,
-        'tags': order.tags.split(", "),
+        'customer_details': customer_details,
+        'tags': order.tags.split(", ") if order.tags else [],
         'id': order.id
     }
     print(order.tags)
@@ -576,13 +599,12 @@ def verify_shopify_webhook(request):
 
 @app.route('/shopify/webhook/order_updated', methods=['POST'])
 def shopify_order_updated():
-    global order_details  # Ensure we're modifying the global variable
     try:
-        # Verify the webhook request is from Shopify
+        # Verify the webhook request
         if not verify_shopify_webhook(request):
             return jsonify({'error': 'Invalid webhook signature'}), 401
 
-        # Parse the JSON payload sent by Shopify
+        # Parse the webhook payload
         order_data = request.get_json()
         order_id = order_data.get('id')
         if not order_id:
@@ -590,12 +612,25 @@ def shopify_order_updated():
 
         print(f"Received webhook for order ID: {order_id}")
 
-        # Fetch the complete order from Shopify
+        # Extract customer data if available
+        customer_data = order_data.get('customer')
+        if customer_data:
+            customer_info = {
+                'id': customer_data.get('id'),
+                'first_name': customer_data.get('first_name'),
+                'last_name': customer_data.get('last_name'),
+                'email': customer_data.get('email'),
+                'phone': customer_data.get('phone'),
+                # Add more fields as needed
+            }
+            print("Extracted customer data:", customer_info)
+            # You could store or update this information in your database here.
+
+        # (Optional) Fetch the complete order from Shopify for further processing.
         order = shopify.Order.find(order_id)
         if not order:
             return jsonify({'error': f'Order {order_id} not found'}), 404
 
-        # Process the order update asynchronously.
         async def update_order():
             async with aiohttp.ClientSession() as session:
                 updated_order_info = await process_order(session, order)
@@ -603,30 +638,19 @@ def shopify_order_updated():
 
         updated_order_info = asyncio.run(update_order())
 
-        # Update the global order_details list with the new info.
-        # Assuming each order has a unique 'id' field:
-        updated = False
-        for idx, existing_order in enumerate(order_details):
-            if existing_order.get('id') == updated_order_info.get('id'):
-                order_details[idx] = updated_order_info
-                updated = True
-                break
-        # If the order wasn't in the list, you might want to add it:
-        if not updated:
-            order_details.append(updated_order_info)
-
-        # Optionally, log the updated global orders
-        print("Updated order_details:", order_details)
+        # (Optional) Update your in-memory cache or database with the new order/customer data.
 
         return jsonify({
             'success': True,
             'message': f'Order {order_id} processed successfully',
-            'order': updated_order_info
+            'order': updated_order_info,
+            'customer': customer_data
         }), 200
 
     except Exception as e:
         print(f"Webhook processing error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 

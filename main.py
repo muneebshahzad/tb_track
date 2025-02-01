@@ -554,9 +554,15 @@ def verify_shopify_webhook(request):
     """
     shopify_hmac = request.headers.get('X-Shopify-Hmac-Sha256')
     data = request.get_data()  # Raw request body (bytes)
+
+    # Retrieve the secret from environment variables
     secret = os.getenv('SHOPIFY_WEBHOOK_SECRET')
 
-    # Compute HMAC digest and base64 encode it.
+    # Check that the secret is set. If not, raise an error.
+    if secret is None:
+        raise ValueError("SHOPIFY_WEBHOOK_SECRET is not set. Please configure the environment variable.")
+
+    # Compute the HMAC digest and base64 encode it.
     digest = hmac.new(
         secret.encode('utf-8'),
         data,

@@ -599,12 +599,13 @@ def verify_shopify_webhook(request):
 
 @app.route('/shopify/webhook/order_updated', methods=['POST'])
 def shopify_order_updated():
+    global order_details  # Ensure we're modifying the global variable
     try:
-        # Verify the webhook request
+        # Verify the webhook request is from Shopify
         if not verify_shopify_webhook(request):
             return jsonify({'error': 'Invalid webhook signature'}), 401
 
-        # Parse the webhook payload
+        # Parse the JSON payload sent by Shopify
         order_data = request.get_json()
         order_id = order_data.get('id')
         if not order_id:
@@ -612,25 +613,12 @@ def shopify_order_updated():
 
         print(f"Received webhook for order ID: {order_id}")
 
-        # Extract customer data if available
-        customer_data = order_data.get('customer')
-        if customer_data:
-            customer_info = {
-                'id': customer_data.get('id'),
-                'first_name': customer_data.get('first_name'),
-                'last_name': customer_data.get('last_name'),
-                'email': customer_data.get('email'),
-                'phone': customer_data.get('phone'),
-                # Add more fields as needed
-            }
-            print("Extracted customer data:", customer_info)
-            # You could store or update this information in your database here.
-
-        # (Optional) Fetch the complete order from Shopify for further processing.
+        # Fetch the complete order from Shopify
         order = shopify.Order.find(order_id)
         if not order:
             return jsonify({'error': f'Order {order_id} not found'}), 404
 
+        # Process the order update asynchronously.
         async def update_order():
             async with aiohttp.ClientSession() as session:
                 updated_order_info = await process_order(session, order)
@@ -638,19 +626,30 @@ def shopify_order_updated():
 
         updated_order_info = asyncio.run(update_order())
 
-        # (Optional) Update your in-memory cache or database with the new order/customer data.
+        # Update the global order_details list with the new info.
+        # Assuming each order has a unique 'id' field:
+        updated = False
+        for idx, existing_order in enumerate(order_details):
+            if existing_order.get('id') == updated_order_info.get('id'):
+                order_details[idx] = updated_order_info
+                updated = True
+                break
+        # If the order wasn't in the list, you might want to add it:
+        if not updated:
+            order_details.append(updated_order_info)
+
+        # Optionally, log the updated global orders
+        print("Updated order_details:", order_details)
 
         return jsonify({
             'success': True,
             'message': f'Order {order_id} processed successfully',
-            'order': updated_order_info,
-            'customer': customer_data
+            'order': updated_order_info
         }), 200
 
     except Exception as e:
         print(f"Webhook processing error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
-
 
 
 

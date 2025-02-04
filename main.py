@@ -299,7 +299,7 @@ def apply_tag():
 
 async def getShopifyOrders():
     global order_details
-    orders = shopify.Order.find(limit=10, order='created_at DESC')
+    orders = shopify.Order.find(limit=250, order='created_at DESC')
     order_details = []
     total_start_time = time.time()
 

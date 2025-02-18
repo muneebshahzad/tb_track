@@ -70,6 +70,42 @@ async def fetch_tracking_data(session, tracking_number):
     async with session.get(url) as response:
         return await response.json()
 
+from flask import Flask, request, jsonify
+import requests
+import os
+
+app = Flask(__name__)
+
+@app.route('/generate_loadsheet', methods=['POST'])
+def generate_loadsheet():
+    data = request.json
+    cn_numbers = data.get("cn_numbers", [])
+
+    if not cn_numbers:
+        return jsonify({"error": "No CN numbers provided"}), 400
+
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+    url = "https://merchantapi.leopardscourier.com/api/generateLoadSheet/"
+
+    payload = {
+        "api_key": api_key,
+        "api_password": api_password,
+        "cn_numbers": cn_numbers,
+        "courier_name": "1",
+        "courier_code": "1"
+    }
+
+    try:
+        response = requests.post(url, json=payload)
+        response_data = response.json()
+        print("Loadsheet Response:", response_data)  # ✅ Debugging: Print response
+        return jsonify(response_data)
+
+    except requests.exceptions.RequestException as e:
+        print("Error:", e)  # Log the error
+        return jsonify({"error": "Failed to connect to the API"}), 500
+
 
 async def process_line_item(session, line_item, fulfillments):
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
@@ -299,7 +335,7 @@ def apply_tag():
 
 async def getShopifyOrders():
     global order_details
-    orders = shopify.Order.find(limit=250, order='created_at DESC')
+    orders = shopify.Order.find(limit=10, order='created_at DESC')
     order_details = []
     total_start_time = time.time()
 
@@ -631,29 +667,47 @@ def shopify_order_updated():
 
 from flask import request, render_template, redirect, url_for
 
+
 @app.route('/scan', methods=['GET', 'POST'])
 def search():
-    search_term = ""
+    search_term = request.args.get('term', '').strip() if request.method == 'GET' else request.form.get('search_term',
+                                                                                                        '').strip()
     order_found = None
-    if request.method == 'POST':
-        search_term = request.form.get('search_term', '').strip()
-        # Search through orders
-        for order in order_details:
-            # Check if order-level keys match
-            if order.get('order_id') == search_term or order.get('tracking_id') == search_term:
+
+    for order in order_details:
+        if order.get('order_id') == search_term or order.get('tracking_id') == search_term:
+            order_found = order
+            break
+        for item in order.get('line_items', []):
+            if item.get('tracking_number') == search_term:
                 order_found = order
                 break
-            # Check each line item for a matching tracking_number
-            for item in order.get('line_items', []):
-                if item.get('tracking_number') == search_term:
-                    order_found = order
-                    break
-            if order_found:
-                break
-    return render_template('scan.html', search_term=search_term, order_found=order_found)
+        if order_found:
+            break
+
+    if request.method == 'POST':
+        return render_template('scan.html', search_term=search_term, order_found=order_found)
+
+    return jsonify(order_found if order_found else {"error": "Order not found"}), 200 if order_found else 404
 
 
+@app.route('/dispatch', methods=['GET'])
+def dispatch():
+    # Fetch orders for dispatch
+    dispatch_orders = []
+    for order in order_details:
+        # Add filtering logic if necessary
+        dispatch_orders.append(order)
+    return jsonify(dispatch_orders)
 
+@app.route('/return', methods=['GET'])
+def return_orders():
+    # Fetch orders for return
+    return_orders = []
+    for order in order_details:
+        # Add filtering logic if necessary
+        return_orders.append(order)
+    return jsonify(return_orders)
 
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
@@ -670,4 +724,4 @@ if __name__ == "__main__":
     shop_url = os.getenv('SHOP_URL')
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
-    app.run(port=5001)
+    app.run(host="0.0.0.0", port=5001)

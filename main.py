@@ -670,8 +670,7 @@ from flask import request, render_template, redirect, url_for
 
 @app.route('/scan', methods=['GET', 'POST'])
 def search():
-    search_term = request.args.get('term', '').strip() if request.method == 'GET' else request.form.get('search_term',
-                                                                                                            '').strip()
+    search_term = (request.args.get('term') or request.form.get('search_term') or "").split(',')[0].strip()
     if not search_term:
         return render_template('scan.html')
 

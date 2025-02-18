@@ -335,7 +335,7 @@ def apply_tag():
 
 async def getShopifyOrders():
     global order_details
-    orders = shopify.Order.find(limit=250, order='created_at DESC')
+    orders = shopify.Order.find(limit=10, order='created_at DESC')
     order_details = []
     total_start_time = time.time()
 
@@ -671,7 +671,10 @@ from flask import request, render_template, redirect, url_for
 @app.route('/scan', methods=['GET', 'POST'])
 def search():
     search_term = request.args.get('term', '').strip() if request.method == 'GET' else request.form.get('search_term',
-                                                                                                        '').strip()
+                                                                                                            '').strip()
+    if not search_term:
+        return render_template('scan.html')
+
     order_found = None
 
     for order in order_details:

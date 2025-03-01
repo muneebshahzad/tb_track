@@ -150,7 +150,7 @@ async def process_line_item(session, line_item, fulfillments):
                                             break
                             else:
                                 final_status = packet_list[0].get('booked_packet_status', 'Booked')
-                                final_status = "Booked" if "Pickup Request Sent" in status or "Pickup Request not Send" in status else status
+                                final_status = "Booked" if "Pickup Request Sent" in final_status or "Pickup Request not Send" in final_status else final_status
 
                                 print("No tracking details available.")
                         else:

@@ -148,7 +148,7 @@ async def process_line_item(session, line_item, fulfillments):
                                             final_status = "Being Return"
                                             break
                             else:
-                                final_status = packet_list[0].get('booked_packet_status', 'Booked'))
+                                final_status = packet_list[0].get('booked_packet_status', 'Booked')
                                 print("No tracking details available.")
                         else:
                             final_status = "Booked"

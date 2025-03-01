@@ -134,6 +134,7 @@ async def process_line_item(session, line_item, fulfillments):
                             tracking_details = packet_list[0].get('Tracking Detail', [])
                             if tracking_details:
                                 final_status = (packet_list[0]['Tracking Detail'][-1]['Status'] if packet_list[0].get('Tracking Detail') else packet_list[0].get('booked_packet_status', 'Unknown')) 
+                                
                                 keywords = ["Return", "hold", "UNTRACEABLE"]
                                 if not any(
                                         kw.lower() in final_status.lower() for kw in
@@ -149,6 +150,8 @@ async def process_line_item(session, line_item, fulfillments):
                                             break
                             else:
                                 final_status = packet_list[0].get('booked_packet_status', 'Booked')
+                                final_status = "Booked" if "Pickup Request Sent" in status or "Pickup Request not Send" in status else status
+
                                 print("No tracking details available.")
                         else:
                             final_status = "Booked"

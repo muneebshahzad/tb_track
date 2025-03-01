@@ -535,42 +535,47 @@ def pending_orders():
 
     # Process Shopify orders with the specified statuses
     for shopify_order in order_details:
-        if shopify_order['status'] in ['Booked', 'Un-Booked']:
-            shopify_items_list = [
-                {
-                    'item_image': item['image_src'],
-                    'item_title': item['product_title'],
-                    'quantity': item['quantity'],
-                    'tracking_number': item['tracking_number'],
-                    'status': item['status']
-                }
-                for item in shopify_order['line_items']
-            ]
+    # Skip orders with tags starting with "Dispatched"
+    if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
+        continue  
 
-            shopify_order_data = {
-                'order_via': 'Shopify',
-                'order_id': shopify_order['order_id'],
-                'status': shopify_order['status'],
-                'tracking_number': shopify_order['tracking_id'],
-                'date': shopify_order['created_at'],
-                'items_list': shopify_items_list
+    if shopify_order['status'] in ['Booked', 'Un-Booked']:
+        shopify_items_list = [
+            {
+                'item_image': item['image_src'],
+                'item_title': item['product_title'],
+                'quantity': item['quantity'],
+                'tracking_number': item['tracking_number'],
+                'status': item['status']
             }
-            all_orders.append(shopify_order_data)
+            for item in shopify_order['line_items']
+        ]
 
-            # Count quantities for each item in the Shopify order
-            for item in shopify_items_list:
-                product_title = item['item_title']
-                quantity = item['quantity']
-                item_image = item['item_image']
+        shopify_order_data = {
+            'order_via': 'Shopify',
+            'order_id': shopify_order['order_id'],
+            'status': shopify_order['status'],
+            'tracking_number': shopify_order['tracking_id'],
+            'date': shopify_order['created_at'],
+            'items_list': shopify_items_list
+        }
+        all_orders.append(shopify_order_data)
 
-                if product_title in pending_items_dict:
-                    pending_items_dict[product_title]['quantity'] += quantity
-                else:
-                    pending_items_dict[product_title] = {
-                        'item_image': item_image,
-                        'item_title': product_title,
-                        'quantity': quantity
-                    }
+        # Count quantities for each item in the Shopify order
+        for item in shopify_items_list:
+            product_title = item['item_title']
+            quantity = item['quantity']
+            item_image = item['item_image']
+
+            if product_title in pending_items_dict:
+                pending_items_dict[product_title]['quantity'] += quantity
+            else:
+                pending_items_dict[product_title] = {
+                    'item_image': item_image,
+                    'item_title': product_title,
+                    'quantity': quantity
+                }
+
 
     pending_items = list(pending_items_dict.values())
     pending_items_sorted = sorted(pending_items, key=lambda x: x['quantity'], reverse=True)

@@ -1,7 +1,7 @@
 import smtplib
 import time
 from email.mime.text import MIMEText
-from flask import  render_template
+from flask import render_template
 import datetime
 import lazop
 import os
@@ -12,7 +12,6 @@ import asyncio
 import aiohttp
 from flask import Flask
 import shopify
-
 
 app = Flask(__name__)
 app.debug = True
@@ -56,6 +55,7 @@ def send_email():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
 def format_date(date_str):
     # Parse the date string
     date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
@@ -70,11 +70,13 @@ async def fetch_tracking_data(session, tracking_number):
     async with session.get(url) as response:
         return await response.json()
 
+
 from flask import Flask, request, jsonify
 import requests
 import os
 
 app = Flask(__name__)
+
 
 @app.route('/generate_loadsheet', methods=['POST'])
 def generate_loadsheet():
@@ -133,8 +135,9 @@ async def process_line_item(session, line_item, fulfillments):
                             city = packet_list[0]['destination_city_name']
                             tracking_details = packet_list[0].get('Tracking Detail', [])
                             if tracking_details:
-                                final_status = (packet_list[0]['Tracking Detail'][-1]['Status'] if packet_list[0].get('Tracking Detail') else packet_list[0].get('booked_packet_status', 'Unknown')) 
-                                
+                                final_status = (packet_list[0]['Tracking Detail'][-1]['Status'] if packet_list[0].get(
+                                    'Tracking Detail') else packet_list[0].get('booked_packet_status', 'Unknown'))
+
                                 keywords = ["Return", "hold", "UNTRACEABLE"]
                                 if not any(
                                         kw.lower() in final_status.lower() for kw in
@@ -220,14 +223,14 @@ async def process_order(session, order):
     }
     order_info = {
         'order_link': "https://admin.shopify.com/store/tick-bags-best-bean-bags-in-pakistan/orders/" + str(order.id),
-        'order_id':order.name,
+        'order_id': order.name,
         'tracking_id': 'N/A',
         'created_at': formatted_datetime,
         'total_price': order.total_price,
         'line_items': [],
         'financial_status': (order.financial_status).title(),
         'fulfillment_status': status,
-        'customer_details' : customer_details,
+        'customer_details': customer_details,
         'tags': order.tags.split(", "),
         'id': order.id
     }
@@ -354,8 +357,8 @@ async def getShopifyOrders():
 
 @app.route("/")
 def tracking():
-    global order_details, pre_loaded,daraz_orders
-    return render_template("track.html", order_details=order_details,darazOrders=daraz_orders)
+    global order_details, pre_loaded, daraz_orders
+    return render_template("track.html", order_details=order_details, darazOrders=daraz_orders)
 
 
 def get_daraz_orders(statuses):
@@ -390,7 +393,6 @@ def get_daraz_orders(statuses):
 
                 item_response = client.execute(item_request)
                 items = item_response.body.get('data', [])
-
 
                 item_details = []
                 for item in items:
@@ -444,14 +446,11 @@ def get_daraz_orders(statuses):
         return []
 
 
-
 @app.route('/daraz')
 def daraz():
     statuses = ['shipped', 'pending', 'ready_to_ship']
     darazOrders = get_daraz_orders(statuses)
     return render_template('daraz.html', darazOrders=darazOrders)
-
-
 
 
 @app.route('/refresh', methods=['POST'])
@@ -463,8 +462,6 @@ def refresh_data():
     except Exception as e:
         print(f"Error refreshing data: {e}")
         return jsonify({'message': 'Failed to refresh data'}), 500
-
-
 
 
 def run_async(func, *args, **kwargs):
@@ -484,9 +481,6 @@ def displayTracking(tracking_num):
     return render_template('trackingdata.html', data=data)
 
 
-
-
-
 from flask import request, jsonify
 from datetime import datetime
 
@@ -495,8 +489,6 @@ async def fetch_order_details():
     # Run the function in the background
     global order_details
     order_details = await getShopifyOrders()
-
-
 
 
 @app.route('/pending')
@@ -535,47 +527,46 @@ def pending_orders():
 
     # Process Shopify orders with the specified statuses
     for shopify_order in order_details:
-    # Skip orders with tags starting with "Dispatched"
-    if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
-        continue  
+        # Skip orders with tags starting with "Dispatched"
+        if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
+            continue
 
-    if shopify_order['status'] in ['Booked', 'Un-Booked']:
-        shopify_items_list = [
-            {
-                'item_image': item['image_src'],
-                'item_title': item['product_title'],
-                'quantity': item['quantity'],
-                'tracking_number': item['tracking_number'],
-                'status': item['status']
-            }
-            for item in shopify_order['line_items']
-        ]
-
-        shopify_order_data = {
-            'order_via': 'Shopify',
-            'order_id': shopify_order['order_id'],
-            'status': shopify_order['status'],
-            'tracking_number': shopify_order['tracking_id'],
-            'date': shopify_order['created_at'],
-            'items_list': shopify_items_list
-        }
-        all_orders.append(shopify_order_data)
-
-        # Count quantities for each item in the Shopify order
-        for item in shopify_items_list:
-            product_title = item['item_title']
-            quantity = item['quantity']
-            item_image = item['item_image']
-
-            if product_title in pending_items_dict:
-                pending_items_dict[product_title]['quantity'] += quantity
-            else:
-                pending_items_dict[product_title] = {
-                    'item_image': item_image,
-                    'item_title': product_title,
-                    'quantity': quantity
+        if shopify_order['status'] in ['Booked', 'Un-Booked']:
+            shopify_items_list = [
+                {
+                    'item_image': item['image_src'],
+                    'item_title': item['product_title'],
+                    'quantity': item['quantity'],
+                    'tracking_number': item['tracking_number'],
+                    'status': item['status']
                 }
+                for item in shopify_order['line_items']
+            ]
 
+            shopify_order_data = {
+                'order_via': 'Shopify',
+                'order_id': shopify_order['order_id'],
+                'status': shopify_order['status'],
+                'tracking_number': shopify_order['tracking_id'],
+                'date': shopify_order['created_at'],
+                'items_list': shopify_items_list
+            }
+            all_orders.append(shopify_order_data)
+
+            # Count quantities for each item in the Shopify order
+            for item in shopify_items_list:
+                product_title = item['item_title']
+                quantity = item['quantity']
+                item_image = item['item_image']
+
+                if product_title in pending_items_dict:
+                    pending_items_dict[product_title]['quantity'] += quantity
+                else:
+                    pending_items_dict[product_title] = {
+                        'item_image': item_image,
+                        'item_title': product_title,
+                        'quantity': quantity
+                    }
 
     pending_items = list(pending_items_dict.values())
     pending_items_sorted = sorted(pending_items, key=lambda x: x['quantity'], reverse=True)
@@ -710,6 +701,7 @@ def dispatch():
         dispatch_orders.append(order)
     return jsonify(dispatch_orders)
 
+
 @app.route('/return', methods=['GET'])
 def return_orders():
     # Fetch orders for return
@@ -719,13 +711,14 @@ def return_orders():
         return_orders.append(order)
     return jsonify(return_orders)
 
+
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
-statuses=['shipped', 'pending', 'ready_to_ship']
+statuses = ['shipped', 'pending', 'ready_to_ship']
 daraz_orders = get_daraz_orders(statuses)
 
 order_details = asyncio.run(getShopifyOrders())

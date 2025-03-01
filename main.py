@@ -133,7 +133,7 @@ async def process_line_item(session, line_item, fulfillments):
                             city = packet_list[0]['destination_city_name']
                             tracking_details = packet_list[0].get('Tracking Detail', [])
                             if tracking_details:
-                                final_status = status = (packet_list[0]['Tracking Detail'][-1]['Status'] if packet_list[0].get('Tracking Detail') else packet_list[0].get('booked_packet_status', 'Unknown')) 
+                                final_status = (packet_list[0]['Tracking Detail'][-1]['Status'] if packet_list[0].get('Tracking Detail') else packet_list[0].get('booked_packet_status', 'Unknown')) 
                                 keywords = ["Return", "hold", "UNTRACEABLE"]
                                 if not any(
                                         kw.lower() in final_status.lower() for kw in

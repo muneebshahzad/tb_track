@@ -12,6 +12,50 @@ import asyncio
 import aiohttp
 from flask import Flask
 import shopify
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
+import threading
+
+order_details_lock = threading.Lock()
+daraz_orders_lock = threading.Lock()
+
+
+def fetch_all_data():
+    """Fetch data from all sources and update global variables"""
+    print("\n--- Scheduled data refresh started ---")
+    start_time = time.time()
+
+    # Fetch Shopify data
+    shopify_data = asyncio.run(getShopifyOrders())
+    with order_details_lock:
+        global order_details
+        order_details = shopify_data
+
+    # Fetch Daraz data
+    daraz_data = get_daraz_orders(['shipped', 'pending', 'ready_to_ship'])
+    with daraz_orders_lock:
+        global daraz_orders
+        daraz_orders = daraz_data
+
+    print(f"--- Data refresh completed in {time.time() - start_time:.2f}s ---")
+
+def schedule_fetch_jobs():
+    """Schedule data fetching jobs"""
+    # Initial fetch on startup
+    fetch_all_data()
+
+    # Schedule daily jobs
+    trigger = CronTrigger(hour='0,10,18', timezone='Asia/Karachi')
+    scheduler.add_job(
+        func=fetch_all_data,
+        trigger=trigger,
+        id='daily_data_refresh'
+    )
+
+
+
+scheduler = BackgroundScheduler(timezone=pytz.timezone('Asia/Karachi'))  # GMT+5 is equivalent to Asia/Karachi timezone
 
 app = Flask(__name__)
 app.debug = True
@@ -231,7 +275,7 @@ async def process_order(session, order):
         'financial_status': (order.financial_status).title(),
         'fulfillment_status': status,
         'customer_details': customer_details,
-        'tags': order.tags.split(", "),
+        'tags' : [tag for tag in order.tags.split(", ") if tag != "Leopards Courier"],
         'id': order.id
     }
     print(order.tags)
@@ -340,23 +384,22 @@ def apply_tag():
 
 
 async def getShopifyOrders():
-    global order_details
-    orders = shopify.Order.find(limit=250, order='created_at DESC')
-    order_details = []
-    total_start_time = time.time()
-
-    async with aiohttp.ClientSession() as session:
-        tasks = [process_order(session, order) for order in orders]
-        order_details = await asyncio.gather(*tasks)
-
-    total_end_time = time.time()
-    print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
-
-    return order_details
+    try:
+        orders = shopify.Order.find(limit=250, order='created_at DESC')  # Increased limit
+        async with aiohttp.ClientSession() as session:
+            return await asyncio.gather(*[process_order(session, order) for order in orders])
+    except Exception as e:
+        print(f"Error fetching Shopify orders: {e}")
+        return []
 
 
 @app.route("/")
 def tracking():
+    global order_details, pre_loaded, daraz_orders
+    return render_template("track.html", order_details=order_details, darazOrders=daraz_orders)
+
+@app.route("/track")
+def tracking_x():
     global order_details, pre_loaded, daraz_orders
     return render_template("track.html", order_details=order_details, darazOrders=daraz_orders)
 
@@ -724,7 +767,15 @@ daraz_orders = get_daraz_orders(statuses)
 order_details = asyncio.run(getShopifyOrders())
 
 if __name__ == "__main__":
-    shop_url = os.getenv('SHOP_URL')
-    api_key = os.getenv('API_KEY')
-    password = os.getenv('PASSWORD')
+    # Initialize scheduler
+    scheduler.start()
+    schedule_fetch_jobs()
+
+    # Initial data population
+    try:
+        fetch_all_data()
+    except Exception as e:
+        print(f"Initial data fetch failed: {e}")
+
+    # Run Flask app
     app.run(host="0.0.0.0", port=5001)

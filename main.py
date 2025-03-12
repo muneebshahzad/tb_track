@@ -120,6 +120,7 @@ async def process_line_item(session, line_item, fulfillments):
     address = 'N/A'
     phone = 'N/A'
     city = 'N/A'
+
     if line_item.fulfillment_status == "fulfilled":
         for fulfillment in fulfillments:
             if fulfillment.status == "cancelled":
@@ -136,34 +137,35 @@ async def process_line_item(session, line_item, fulfillments):
                             phone = packet_list[0]['consignment_phone']
                             city = packet_list[0]['destination_city_name']
                             tracking_details = packet_list[0].get('Tracking Detail', [])
+
                             if tracking_details:
-                                final_status = (packet_list[0]['Tracking Detail'][-1]['Status'] if packet_list[0].get(
-                                    'Tracking Detail') else packet_list[0].get('booked_packet_status', 'Unknown'))
+                                last_tracking = tracking_details[-1]  # Last tracking update
+                                final_status = last_tracking.get('Status', 'Unknown')
+                                reason = last_tracking.get('Reason')
+
+                                # Append reason to final status if available
+                                if reason and reason != 'N/A':
+                                    final_status += f" - {reason}"
 
                                 keywords = ["Return", "hold", "UNTRACEABLE"]
-                                if not any(
-                                        kw.lower() in final_status.lower() for kw in
-                                        ["delivered", "returned to shipper"]):
-                                    for detail in tracking_details:
-                                        status = detail['Status']
-                                        if status == 'Pending':
-                                            reason = detail['Reason']
-                                        else:
-                                            reason = 'N/A'
-                                        if any(kw in status for kw in keywords) or any(kw in reason for kw in keywords):
-                                            final_status = "Being Return"
-                                            break
+                                for detail in tracking_details:
+                                    status = detail['Status']
+                                    reason = detail.get('Reason', 'N/A')
+
+                                    # Check for keywords in both status and reason
+                                    if any(kw in status for kw in keywords) or any(
+                                            kw in (reason or '') for kw in keywords):
+                                        final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
+                                        break  # Exit early to avoid duplicates
+                                    elif reason and reason != "N/A" and reason not in final_status:
+                                        final_status += f" - {reason}"
                             else:
                                 final_status = packet_list[0].get('booked_packet_status', 'Booked')
                                 final_status = "Booked" if "Pickup Request Sent" in final_status or "Pickup Request not Send" in final_status else final_status
-
-                                print("No tracking details available.")
                         else:
                             final_status = "Booked"
-                            print("No packets found.")
                     else:
                         final_status = "N/A"
-                        print("Error fetching data.")
 
                     # Track quantity for each tracking number
                     tracking_info.append({
@@ -177,8 +179,9 @@ async def process_line_item(session, line_item, fulfillments):
                     })
 
     return tracking_info if tracking_info else [
-        {"tracking_number": "N/A", "status": "Un-Booked", name: 'N/A', address: 'N/A', phone: 'N/A', city: 'N/A',
+        {"tracking_number": "N/A", "status": "Un-Booked", "name": 'N/A', "address": 'N/A', "phone": 'N/A', "city": 'N/A',
          "quantity": line_item.quantity}]
+
 
 
 async def process_order(session, order):
@@ -343,7 +346,7 @@ def apply_tag():
 
 async def getShopifyOrders():
     global order_details
-    orders = shopify.Order.find(limit=250, order='created_at ASC')
+    orders = shopify.Order.find(limit=5, order='created_at ASC')
     order_details = []
     total_start_time = time.time()
 

@@ -452,6 +452,7 @@
 
         // Initialize the DataTable with desired settings
         $('#dataTable').DataTable({
+            "order": [[0, "desc"]],
             "columnDefs": [
                 { "searchable": false, "targets": [-1, 4] }  // Make the last column and the 5th column non-searchable
             ]
@@ -468,7 +469,7 @@
                 }
             });
         });
-    </script>
+
  function applyDeliveredToAll() {
     const orders = {{ order_details|tojson }};
 
@@ -478,6 +479,7 @@
         }
     });
 }
+</script>
 
 </body>
 

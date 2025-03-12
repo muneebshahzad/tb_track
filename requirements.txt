@@ -3,8 +3,8 @@ requests~=2.32.3         # HTTP client
 pymssql~=2.3.0           # Microsoft SQL Server connector
 aiohttp~=3.9.5           # Async HTTP client/server
 Flask~=3.0.3             # Web framework
-ShopifyAPI~=13.0.0       # Shopify API client
-gunicorn~=21.2.0         # Production server
+ShopifyAPI       # Shopify API client
+gunicorn        # Production server
 lazop-sdk~=1.0.0         # Daraz API client (required by your code)
 apscheduler~=3.10.1      # Scheduling (from previous answer)
 pytz~=2024.1             # Timezone support (from previous answer)

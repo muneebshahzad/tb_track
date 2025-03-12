@@ -290,6 +290,7 @@
                  <td id="daysPending_{{ order.id }}"></td>
                 <script>
     document.addEventListener("DOMContentLoaded", function () {
+     let orderStatus = "{{ order.status }}".toLowerCase();
         let orderDateStr = "{{ order.created_at }}"; // Example: "Mar 12, 2025"
         let orderDate = new Date(orderDateStr);
         let today = new Date();
@@ -303,14 +304,22 @@
 
         // Set text content
         cell.textContent = daysPending;
+        cell.style.fontSize = "30px";  // Increase text size
+    cell.style.fontWeight = "bold"; // Make text bold
+    cell.style.padding = "10px";  // Add padding for better visibility
+    cell.style.textAlign = "center"; // Center align text
 
         // Apply color based on conditions
-        if (daysPending <= 7) {
-            cell.style.backgroundColor = "lightgreen";
+        if (orderStatus.includes("return")) {
+        cell.style.backgroundColor = "#ff471a"; // Red for any return-related status
+        cell.style.color = "white";
+    }
+        else if (daysPending <= 7) {
+            cell.style.backgroundColor = "#ffebe6";
         } else if (daysPending > 7 && daysPending <= 15) {
-            cell.style.backgroundColor = "lightorange"; // This color doesn't exist, use 'lightcoral' or '#FFD580'
+            cell.style.backgroundColor = "#ffa31a"; // This color doesn't exist, use 'lightcoral' or '#FFD580'
         } else {
-            cell.style.backgroundColor = "red";
+            cell.style.backgroundColor = "#ff471a";
             cell.style.color = "white"; // Improve visibility
         }
     });

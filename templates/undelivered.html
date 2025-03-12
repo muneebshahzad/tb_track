@@ -258,37 +258,63 @@
     <thead>
         <tr>
             <th>Order ID</th>
+            <th style="width: 3%;">Pending Since (Days)</th>
             <th style="width: 15%;">Customer</th>
-            <th>City</th>
             <th>Tags</th>
-            <th>Payment</th>
             <th>Date</th>
             <th>Total Price</th>
             <th>Items</th>
             <th>Status</th>
-            <th>Actions</th>
+            <th style="width: 15%;">Actions</th>
         </tr>
     </thead>
     <tfoot>
         <tr>
             <th>Order ID</th>
+            <th style="width: 3%;">Pending Since (Days)</th>
             <th style="width: 15%;">Customer</th>
-            <th>City</th>
             <th>Tags</th>
-            <th>Payment</th>
             <th>Date</th>
             <th>Total Price</th>
             <th>Items</th>
             <th>Status</th>
-            <th>Actions</th>
+            <th style="width: 15%;">Actions</th>
         </tr>
     </tfoot>
     <tbody>
-        {% for order in order_details %}
-        {% if order.status not in ['Booked', 'Un-Booked'] %}
+{% for order in order_details %}
+    {% if order.status not in ['Booked', 'Un-Booked', 'Delivered'] and not ('Cancelled' in ' '.join(order.tags)) %}
 
             <tr>
                 <td>{{ order.order_id }}</td>
+                 <td id="daysPending_{{ order.id }}"></td>
+                <script>
+    document.addEventListener("DOMContentLoaded", function () {
+        let orderDateStr = "{{ order.created_at }}"; // Example: "Mar 12, 2025"
+        let orderDate = new Date(orderDateStr);
+        let today = new Date();
+
+        // Calculate days difference
+        let timeDiff = today - orderDate;
+        let daysPending = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+
+        // Get the table cell
+        let cell = document.getElementById("daysPending_{{ order.id }}");
+
+        // Set text content
+        cell.textContent = daysPending;
+
+        // Apply color based on conditions
+        if (daysPending <= 7) {
+            cell.style.backgroundColor = "lightgreen";
+        } else if (daysPending > 7 && daysPending <= 15) {
+            cell.style.backgroundColor = "lightorange"; // This color doesn't exist, use 'lightcoral' or '#FFD580'
+        } else {
+            cell.style.backgroundColor = "red";
+            cell.style.color = "white"; // Improve visibility
+        }
+    });
+</script>
                 <td>
                     {{ order.line_items[0].name }}<br>
                     {{ order.line_items[0].address }}<br>
@@ -308,12 +334,10 @@
                         </div>
                     </div>
                 </td>
-                <td>{{ order.line_items[0].city }}</td>
 
                 <td>{% for tag in order.tags %}
                      <span class="badge badge-secondary">{{ tag }}</span><br>
                 {% endfor %}</td>
-                <td>{{ order.financial_status }}</td>
                 <td>{{ order.created_at }}</td>
                 <td>{{ order.total_price }}</td>
                 <td>
@@ -361,12 +385,37 @@
                  <td>
                         <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
                         <div class="status-buttons">
-                             <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
-                            <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
-                            <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
-                        </div>
+    <button class="btn btn-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
+    <button class="btn btn-primary btn-sm" onclick="applyTag('{{ order.id }}', 'Contacted on Whatsapp')">Contacted on Whatsapp</button>
+    <button class="btn btn-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Ticket Created for Delay')">Ticket Created for Delay</button>
+
+    <button class="btn btn-dark btn-sm" onclick="applyTag('{{ order.id }}', 'Customer not on Whatsapp - Call Needed')">Customer not on Whatsapp - Call Needed</button>
+    <button class="btn btn-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Customer not Responding on Whatsapp - Call Needed')">Customer not Responding on Whatsapp - Call Needed</button>
+
+    <button class="btn btn-info btn-sm" onclick="applyTag('{{ order.id }}', 'Customer Wants to Receive Parcel')">Customer Wants to Receive Parcel - Ticket Created</button>
+    <button class="btn btn-primary btn-sm" onclick="applyTag('{{ order.id }}', 'Customer Wants to Receive Parcel - Re-DISPATCH - ReBooked on Shopify')">Customer Wants to Receive Parcel - Re-DISPATCH - ReBooked on Shopify</button>
+
+    <button class="btn btn-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
+    <button class="btn btn-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
+    <button class="btn btn-success btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
+    <button class="btn btn-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
+
+    <!-- Custom Tag Input -->
+    <div class="input-group mt-2">
+        <input type="text" id="customTagInput{{ order.id }}" class="form-control" placeholder="Enter custom tag">
+        <button class="btn btn-outline-primary" onclick="applyCustomTag('{{ order.id }}')">Apply Custom Tag</button>
+    </div>
+</div>
+
+<script>
+    function applyCustomTag(orderId) {
+        let customTag = document.getElementById('customTagInput' + orderId).value;
+        if (customTag.trim() !== "") {
+            applyTag(orderId, customTag);
+        }
+    }
+</script>
+
                     </td>
             </tr>
         {% endif %}

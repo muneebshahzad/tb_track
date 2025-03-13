@@ -185,6 +185,14 @@ async def process_line_item(session, line_item, fulfillments):
 
 
 async def process_order(session, order):
+    global LAST_REQUEST_TIME
+
+    # Ensure we respect the rate limit
+    elapsed_time = time.time() - LAST_REQUEST_TIME
+    if elapsed_time < 1 / RATE_LIMIT:
+        await asyncio.sleep((1 / RATE_LIMIT) - elapsed_time)
+    LAST_REQUEST_TIME = time.time()
+
     order_start_time = time.time()
     input_datetime_str = order.created_at
     parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
@@ -344,9 +352,12 @@ def apply_tag():
         return jsonify({"success": False, "error": str(e)})
 
 
+RATE_LIMIT = 2  # 2 requests per second
+LAST_REQUEST_TIME = 0
+
 async def getShopifyOrders():
     global order_details
-    orders = shopify.Order.find(limit=250, order='created_at ASC')
+    orders = shopify.Order.find(limit=5, order='created_at ASC')
     order_details = []
     total_start_time = time.time()
 

@@ -357,7 +357,7 @@ LAST_REQUEST_TIME = 0
 
 async def getShopifyOrders():
     global order_details
-    orders = shopify.Order.find(limit=5, order='created_at ASC')
+    orders = shopify.Order.find(limit=250, order='created_at ASC')
     order_details = []
     total_start_time = time.time()
 

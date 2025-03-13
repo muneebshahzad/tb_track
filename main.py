@@ -297,6 +297,7 @@ async def process_order(session, order):
     return order_info
 
 
+
 @app.route('/apply_tag', methods=['POST'])
 def apply_tag():
     data = request.json
@@ -357,7 +358,7 @@ LAST_REQUEST_TIME = 0
 
 async def getShopifyOrders():
     global order_details
-    orders = shopify.Order.find(limit=250, order='created_at ASC')
+    orders = shopify.Order.find(limit=5, order='created_at ASC')
     order_details = []
     total_start_time = time.time()
 
@@ -369,6 +370,7 @@ async def getShopifyOrders():
     print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
 
     return order_details
+
 
 
 @app.route("/")

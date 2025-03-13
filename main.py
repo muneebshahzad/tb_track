@@ -21,7 +21,7 @@ app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')  # Use enviro
 pre_loaded = 0
 order_details = []
 daraz_orders = []
-
+semaphore = asyncio.Semaphore(2)
 
 @app.route('/send-email', methods=['POST'])
 def send_email():
@@ -356,20 +356,50 @@ def apply_tag():
 RATE_LIMIT = 2  # 2 requests per second
 LAST_REQUEST_TIME = 0
 
+
+async def limited_request(coroutine):
+    """Ensure requests adhere to rate limits."""
+    async with semaphore:
+        await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits (no more than 2 per second)
+        return await coroutine
+
+
 async def getShopifyOrders():
-    global order_details
-    orders = shopify.Order.find(limit=250, order='created_at ASC')
+    start_date = datetime(2024, 9, 1).isoformat()
     order_details = []
     total_start_time = time.time()
 
+    try:
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+    except Exception as e:
+        print(f"Error fetching orders: {e}")
+        return []
+
     async with aiohttp.ClientSession() as session:
-        tasks = [process_order(session, order) for order in orders]
-        order_details = await asyncio.gather(*tasks)
+        while True:
+            tasks = [limited_request(process_order(session, order)) for order in orders]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    print(f"Error processing an order: {result}")
+                else:
+                    order_details.append(result)
+
+            try:
+                if not orders.has_next_page():
+                    break
+
+                orders = orders.next_page()
+
+            except Exception as e:
+                print(f"Error fetching next page: {e}")
+                break
 
     total_end_time = time.time()
-    print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
-
+    print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
     return order_details
+
 
 
 

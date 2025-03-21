@@ -151,7 +151,7 @@ async def process_line_item(session, line_item, fulfillments):
                                 for detail in tracking_details:
                                     status = detail['Status']
                                     reason = detail.get('Reason', 'N/A')
-                                    if status == "Return To Sender":
+                                    if status == "RETURN TO SENDER":
                                         final_status = "Return To Sender"
                                         break
 

@@ -160,7 +160,7 @@ async def process_line_item(session, line_item, fulfillments):
                                     # Check for keywords in both status and reason
                                     if any(kw in status for kw in keywords) or any(
                                             kw in (reason or '') for kw in keywords):
-                                        final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
+                                                final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
                                                 if main_status == "Return To Sender":
                                                     final_status = "Return To Sender"
                                                     break

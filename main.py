@@ -146,23 +146,20 @@ async def process_line_item(session, line_item, fulfillments):
                                 # Append reason to final status if available
                                 if reason and reason != 'N/A':
                                     final_status += f" - {reason}"
-                                main_status= tracking_details['tracking_details']
 
                                 keywords = ["Return", "hold", "UNTRACEABLE"]
                                 for detail in tracking_details:
-                                    
                                     status = detail['Status']
                                     reason = detail.get('Reason', 'N/A')
-                                    if main_status == "Returned to shipper":
-                                        final_status = "Returned"
+                                    if status == "Return To Sender":
+                                        final_status = "Return To Sender"
                                         break
 
                                     # Check for keywords in both status and reason
                                     if any(kw in status for kw in keywords) or any(
                                             kw in (reason or '') for kw in keywords):
-                                                final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
-                                                break
-                                                    
+                                        final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
+                                        break  # Exit early to avoid duplicates
                                     elif reason and reason != "N/A" and reason not in final_status:
                                         final_status += f" - {reason}"
                             else:

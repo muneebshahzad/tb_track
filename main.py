@@ -151,6 +151,9 @@ async def process_line_item(session, line_item, fulfillments):
                                 for detail in tracking_details:
                                     status = detail['Status']
                                     reason = detail.get('Reason', 'N/A')
+                                    if status == "Return To Sender":
+                                        final_status = "Return To Sender"
+                                        break
 
                                     # Check for keywords in both status and reason
                                     if any(kw in status for kw in keywords) or any(

@@ -253,8 +253,7 @@
                         <div class="card-body">
                             <div class="table-responsive">
 
-                                <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0" style="table-layout: fixed;">
-
+                                <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
 
     <thead>
         <tr>
@@ -584,24 +583,6 @@
                 }
             });
         });
-
-    document.addEventListener("DOMContentLoaded", function () {
-    let table = document.getElementById("dataTable").getElementsByTagName('tbody')[0];
-    let rows = Array.from(table.getElementsByTagName("tr"));
-
-    rows.sort((a, b) => {
-        let daysA = parseInt(a.cells[1].textContent) || 0;
-        let daysB = parseInt(b.cells[1].textContent) || 0;
-        
-        let isRedA = a.cells[1].style.backgroundColor === "rgb(255, 71, 26)"; // #ff471a
-        let isRedB = b.cells[1].style.backgroundColor === "rgb(255, 71, 26)";
-
-        return isRedB - isRedA || daysA - daysB;
-    });
-
-    rows.forEach(row => table.appendChild(row)); // Reattach rows in sorted order
-});
-
     </script>
 
 </body>

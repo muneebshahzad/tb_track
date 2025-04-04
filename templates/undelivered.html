@@ -311,6 +311,7 @@
 
         // Apply color based on conditions
         if (orderStatus.includes("return")) {
+        cell.textContent = `URGENT : ${daysPending}`;
         cell.style.backgroundColor = "#ff471a"; // Red for any return-related status
         cell.style.color = "white";
     }

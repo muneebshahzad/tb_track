@@ -575,6 +575,11 @@
     });
 </script>
 <script>
+    $(document).ready(function() {
+    $('#dataTable').DataTable({
+        "pageLength": 50
+    });
+});
         $(document).ready(function() {
             var currentUrl = window.location.pathname;
             $('.nav-item a').each(function() {

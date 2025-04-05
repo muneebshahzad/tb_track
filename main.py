@@ -164,7 +164,11 @@ async def process_line_item(session, line_item, fulfillments):
                                         final_status += f" - {reason}"
                             else:
                                 final_status = packet_list[0].get('booked_packet_status', 'Booked')
-                                final_status = "Booked" if "Pickup Request Sent" in final_status or "Pickup Request not Send" in final_status else final_status
+                                if "Returned to shipper" in final_status:
+                                    final_status = "RETURNED TO SHIPPER"
+                                elif "Pickup Request Sent" in final_status or "Pickup Request not Send" in final_status
+                                    final_status = "Booked"
+
                         else:
                             final_status = "Booked"
                     else:

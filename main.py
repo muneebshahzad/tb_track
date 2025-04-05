@@ -151,9 +151,6 @@ async def process_line_item(session, line_item, fulfillments):
                                 for detail in tracking_details:
                                     status = detail['Status']
                                     reason = detail.get('Reason', 'N/A')
-                                    if status == "Return To Sender":
-                                        final_status = "Return To Sender"
-                                        break
 
                                     # Check for keywords in both status and reason
                                     if any(kw in status for kw in keywords) or any(
@@ -162,15 +159,14 @@ async def process_line_item(session, line_item, fulfillments):
                                         break  # Exit early to avoid duplicates
                                     elif reason and reason != "N/A" and reason not in final_status:
                                         final_status += f" - {reason}"
+
+                                    check_status = packet_list[0].get('booked_packet_status', 'Booked')
+                                    print(f"Final Status {check_status}")
+
+                                    if "Returned to shipper" in check_status:
+                                        final_status = "RETURNED TO SHIPPER"
                             else:
                                 final_status = packet_list[0].get('booked_packet_status', 'Booked')
-
-                                if "Returned to shipper" in final_status:
-                                    final_status = "RETURNED TO SHIPPER"
-                                elif "Pickup Request Sent" in final_status or "Pickup Request not Send" in final_status:
-                                    final_status = "Booked"
-
-                                final_status = "Booked" if "Pickup Request Sent" in final_status or "Pickup Request not Send" in final_status else final_status
                         else:
                             final_status = "Booked"
                     else:
@@ -379,7 +375,7 @@ async def getShopifyOrders():
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=250, order="created_at ASC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -398,6 +394,7 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
+                
 
                 orders = orders.next_page()
 

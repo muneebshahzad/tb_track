@@ -156,6 +156,11 @@ async def process_line_item(session, line_item, fulfillments):
                                     if any(kw in status for kw in keywords) or any(
                                             kw in (reason or '') for kw in keywords):
                                         final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
+                                        check_status = packet_list[0].get('booked_packet_status', 'Booked')
+                                        print(f"Final Status {check_status}")
+
+                                        if "Returned to shipper" in check_status:
+                                            final_status = "RETURNED TO SHIPPER"
                                         break  # Exit early to avoid duplicates
                                     elif reason and reason != "N/A" and reason not in final_status:
                                         final_status += f" - {reason}"
@@ -165,6 +170,7 @@ async def process_line_item(session, line_item, fulfillments):
 
                                     if "Returned to shipper" in check_status:
                                         final_status = "RETURNED TO SHIPPER"
+
                             else:
                                 final_status = packet_list[0].get('booked_packet_status', 'Booked')
                         else:
@@ -394,7 +400,7 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
-                
+
 
                 orders = orders.next_page()
 

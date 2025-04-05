@@ -173,6 +173,8 @@ async def process_line_item(session, line_item, fulfillments):
 
                             else:
                                 final_status = packet_list[0].get('booked_packet_status', 'Booked')
+                                if "Pickup Request not Send" in final_status:
+                                    final_status = "Booked"
                         else:
                             final_status = "Booked"
                     else:

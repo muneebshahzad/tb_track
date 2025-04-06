@@ -175,52 +175,48 @@
     </div>
 </div>
 
-                        <div class="card-body">
+
+                        <div style="overflow-x:auto;" class="card-body">
                             <div class="table-responsive">
 
                                 <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
-
-      <thead>
+    <thead>
         <tr>
-            <th>Order Via</th>
-            <th>Order ID</th>
-            <th>Date</th>
+            <th>Order#</th>
+            <th>Total</th>
             <th>Total Items</th>
-            <th>Status</th>
-            <th>Actions</th>
+            <th style="display: none;">Hidden</th>
+            <th style="display: none;">Hidden</th>
         </tr>
     </thead>
     <tfoot>
         <tr>
-            <th>Order Via</th>
-            <th>Order ID</th>
-            <th>Date</th>
+            <th>Order#</th>
+            <th>Total</th>
             <th>Total Items</th>
-            <th>Status</th>
-            <th>Actions</th>
+            <th style="display: none;">Hidden</th>
+            <th style="display: none;">Hidden</th>
         </tr>
     </tfoot>
     <tbody>
         {% for order in all_orders %}
             <tr>
-                <td>{{ order.order_via }}</td>
-                <td>{{ order.order_id }}</td>
-                <td>{{ order.date }}</td>
+                <td>{{ order.order_via }} <br> {{ order.order_id }} <br>{{ order.date }}</td>
+                <td>{{ order.total_price }}</td>
                 <td>
-                    <table class="table table-sm">
+                    <table class="table table-sm nested-table">
                         <thead>
                             <tr>
                                 <th>Image</th>
                                 <th style="width: 30%;">Title</th>
-                                <th>Quantity</th>
-                                <th>Tracking Number</th>
-                                <th style="width: 20%;">Status</th>
+                                <th style="width: 5%;">Quantity</th>
+                                <th style="width: 20%;" >Tracking</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for item in order.items_list %}
                                 <tr>
-                                    <td><img src="{{ item.item_image }}" width="50" height="50"></td>
+                                    <td><img src="{{ item.item_image }}" width="100" height="100"></td>
                                     <td>{{ item.item_title }}</td>
                                     <td>{{ item.quantity }}</td>
                                     <td>
@@ -229,25 +225,29 @@
                                         {% else %}
                                             N/A
                                         {% endif %}
+                                        <br>
+                                        {{ item.status }}
                                     </td>
-                                    <td>{{ item.status }}</td>
                                 </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </td>
-                <td>{{ order.status }}</td>
-                <td>
-                    <a href="order/{{ order.order_id }}" class="btn btn-primary btn-sm">View</a>
-                </td>
+                <td></td>
+                <td></td>
             </tr>
         {% endfor %}
     </tbody>
 </table>
+
+
                             </div>
                         </div>
                     </div>
-
+ <div class="totals">
+    <p>Total Items: <span id="totalItems">0.00</span></p>
+    <p>Total Value: <span id="totalValue">0.00</span></p>
+</div>
                 </div>
                 <!-- /.container-fluid -->
 
@@ -339,6 +339,33 @@
                 }
             });
         });
+
+     var table = $('#dataTable').DataTable();
+
+function updateTotals() {
+    var filteredData = table.rows({ filter: 'applied' }).nodes(); // get DOM nodes
+    var totalItems = 0;
+    var totalValue = 0;
+
+    filteredData.each(function (row) {
+        // Get the total column value (e.g. Rs 13498.00)
+        var amount = parseFloat($(row).find('td:eq(1)').text().replace(/,/g, '')) || 0;
+        totalValue += amount;
+
+        // Now count quantities from the nested "Total Items" cell (3rd column, index 2)
+        $(row).find('td:eq(2) table tbody tr').each(function () {
+            var qtyText = $(this).find('td').eq(2).text().trim(); // Quantity is in 3rd column inside nested table
+            var qty = parseInt(qtyText) || 0;
+            totalItems += qty;
+        });
+    });
+
+    $('#totalItems').text(totalItems);
+    $('#totalValue').text(totalValue.toFixed(2));
+}
+
+    // Initial call
+    updateTotals();
     </script>
 
 </body>

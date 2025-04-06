@@ -383,7 +383,7 @@ async def getShopifyOrders():
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=250, order="created_at ASC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -402,6 +402,7 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
+                break
 
 
                 orders = orders.next_page()
@@ -569,7 +570,8 @@ def pending_orders():
                 'status': daraz_order['status'],
                 'tracking_number': daraz_order['items_list'][0]['tracking_number'],
                 'date': daraz_order['date'],
-                'items_list': daraz_order['items_list']
+                'items_list': daraz_order['items_list'],
+                'total_price':daraz_order['total_price']
             }
             all_orders.append(daraz_order_data)
 
@@ -611,7 +613,8 @@ def pending_orders():
                 'status': shopify_order['status'],
                 'tracking_number': shopify_order['tracking_id'],
                 'date': shopify_order['created_at'],
-                'items_list': shopify_items_list
+                'items_list': shopify_items_list,
+                'total_price': shopify_order['total_price']
             }
             all_orders.append(shopify_order_data)
 

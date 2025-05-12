@@ -676,14 +676,20 @@ def verify_shopify_webhook(request):
 
 @app.route('/shopify/webhook/order_updated', methods=['POST'])
 def shopify_order_updated():
-    global order_details  # Ensure we're modifying the global variable
+    global order_details
     try:
         # Verify the webhook request is from Shopify
         if not verify_shopify_webhook(request):
             return jsonify({'error': 'Invalid webhook signature'}), 401
 
         # Parse the JSON payload sent by Shopify
-        order_data = request.get_json()
+        order_data = request.get_json(silent=True)
+
+        # If Shopify sent an empty payload, just acknowledge and ignore it
+        if not order_data:
+            print("Empty payload received. Ignoring.")
+            return jsonify({'message': 'Empty payload received. Ignored.'}), 200
+
         order_id = order_data.get('id')
         if not order_id:
             return jsonify({'error': 'No order id found in payload'}), 400
@@ -703,19 +709,16 @@ def shopify_order_updated():
 
         updated_order_info = asyncio.run(update_order())
 
-        # Update the global order_details list with the new info.
-        # Assuming each order has a unique 'id' field:
+        # Update global order_details
         updated = False
         for idx, existing_order in enumerate(order_details):
             if existing_order.get('id') == updated_order_info.get('id'):
                 order_details[idx] = updated_order_info
                 updated = True
                 break
-        # If the order wasn't in the list, you might want to add it:
         if not updated:
             order_details.append(updated_order_info)
 
-        # Optionally, log the updated global orders
         print("Updated order_details:", order_details)
 
         return jsonify({
@@ -727,6 +730,7 @@ def shopify_order_updated():
     except Exception as e:
         print(f"Webhook processing error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 from flask import request, render_template, redirect, url_for

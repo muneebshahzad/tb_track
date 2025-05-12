@@ -682,10 +682,8 @@ def shopify_order_updated():
         if not verify_shopify_webhook(request):
             return jsonify({'error': 'Invalid webhook signature'}), 401
 
-        # Parse the JSON payload sent by Shopify
         order_data = request.get_json(silent=True)
 
-        # If Shopify sent an empty payload, just acknowledge and ignore it
         if not order_data:
             print("Empty payload received. Ignoring.")
             return jsonify({'message': 'Empty payload received. Ignored.'}), 200
@@ -693,6 +691,15 @@ def shopify_order_updated():
         order_id = order_data.get('id')
         if not order_id:
             return jsonify({'error': 'No order id found in payload'}), 400
+
+        # Handle order cancellation
+        if order_data.get('cancelled_at'):
+            print(f"Order {order_id} is cancelled. Removing from order_details.")
+            order_details = [o for o in order_details if o.get('id') != order_id]
+            return jsonify({
+                'success': True,
+                'message': f'Order {order_id} cancelled and removed from order_details'
+            }), 200
 
         print(f"Received webhook for order ID: {order_id}")
 
@@ -709,7 +716,7 @@ def shopify_order_updated():
 
         updated_order_info = asyncio.run(update_order())
 
-        # Update global order_details
+        # Update or append to global order_details
         updated = False
         for idx, existing_order in enumerate(order_details):
             if existing_order.get('id') == updated_order_info.get('id'):

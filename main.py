@@ -818,13 +818,23 @@ def check_restart_times():
 
 if __name__ == "__main__":
     # Load environment variables
+    # For security and best practices, avoid hardcoding sensitive info.
+    # Ensure these are set in your Render environment variables.
     shop_url = os.getenv('SHOP_URL')
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
+
+    # Get the port from the environment variable 'PORT', default to 5000 if not set.
+    # Render's default PORT is 10000, so using os.getenv('PORT', 10000) would be even more aligned.
+    # Using 5000 as a common Flask development default.
+    port = int(os.getenv('PORT', 5000)) # Convert port to integer
 
     # Start the time checker in a separate thread
     restart_thread = threading.Thread(target=check_restart_times, daemon=True)
     restart_thread.start()
 
     # Start Flask app
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    # Set debug=False for production deployments on Render.
+    # This prevents development-specific behaviors that might interfere with Render's setup.
+    print(f"Attempting to run Flask app on host 0.0.0.0 and port {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)

@@ -1,9 +1,9 @@
 import smtplib
 import sys
-# import threading # This import is no longer needed if only for restart
+import threading
 import time
 from email.mime.text import MIMEText
-from flask import render_template, request, jsonify, Flask, redirect, url_for
+from flask import render_template
 import datetime
 import lazop
 import os
@@ -12,8 +12,8 @@ import hashlib
 import base64
 import asyncio
 import aiohttp
+from flask import Flask
 import shopify
-import requests # Added as it was present in the generate_loadsheet function, but not in the initial imports
 
 app = Flask(__name__)
 app.debug = True
@@ -60,7 +60,7 @@ def send_email():
 
 def format_date(date_str):
     # Parse the date string
-    date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+    date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
     # Format the date object to only show the date
     return date_obj.strftime("%Y-%m-%d")
 
@@ -71,6 +71,13 @@ async def fetch_tracking_data(session, tracking_number):
     url = f"https://merchantapi.leopardscourier.com/api/trackBookedPacket/?api_key={api_key}&api_password={api_password}&track_numbers={tracking_number}"
     async with session.get(url) as response:
         return await response.json()
+
+
+from flask import Flask, request, jsonify
+import requests
+import os
+
+app = Flask(__name__)
 
 
 @app.route('/generate_loadsheet', methods=['POST'])
@@ -189,6 +196,7 @@ async def process_line_item(session, line_item, fulfillments):
          "quantity": line_item.quantity}]
 
 
+
 async def process_order(session, order):
     global LAST_REQUEST_TIME
 
@@ -200,7 +208,7 @@ async def process_order(session, order):
 
     order_start_time = time.time()
     input_datetime_str = order.created_at
-    parsed_datetime = datetime.datetime.fromisoformat(input_datetime_str[:-6])
+    parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
     formatted_datetime = parsed_datetime.strftime("%b %d, %Y")
 
     try:
@@ -302,6 +310,7 @@ async def process_order(session, order):
     return order_info
 
 
+
 @app.route('/apply_tag', methods=['POST'])
 def apply_tag():
     data = request.json
@@ -309,7 +318,7 @@ def apply_tag():
     tag = data.get('tag')
 
     # Get today's date in YYYY-MM-DD format
-    today_date = datetime.datetime.now().strftime('%Y-%m-%d')
+    today_date = datetime.now().strftime('%Y-%m-%d')
     tag_with_date = f"{tag.strip()} ({today_date})"
 
     try:
@@ -325,7 +334,7 @@ def apply_tag():
                 print("Order Cancellation Failed")
         if tag.strip().lower() == "delivered":
             if order.close():
-                print("Order Closed") # Corrected typo: Cloed -> Closed
+                print("Order Cloed")
             else:
                 print("Order Closing Failed")
 
@@ -369,7 +378,7 @@ async def limited_request(coroutine):
 
 
 async def getShopifyOrders():
-    start_date = datetime.datetime(2024, 9, 1).isoformat()
+    start_date = datetime(2024, 9, 1).isoformat()
     order_details = []
     total_start_time = time.time()
 
@@ -393,11 +402,10 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
-                # This 'break' below was the bug. It was stopping after the first page.
-                # It should be removed to allow pagination.
-                # break
+                break
 
-                orders = orders.next_page() # Corrected: This line will now be reached for pagination
+
+                orders = orders.next_page()
 
             except Exception as e:
                 print(f"Error fetching next page: {e}")
@@ -408,6 +416,8 @@ async def getShopifyOrders():
     return order_details
 
 
+
+
 @app.route("/")
 def tracking():
     global order_details, pre_loaded, daraz_orders
@@ -416,9 +426,7 @@ def tracking():
 
 def get_daraz_orders(statuses):
     try:
-        # It's highly recommended to fetch this from environment variables or a secure configuration
-        # instead of hardcoding.
-        access_token = '50000902021Yejq5rSzhGiOp0hRUGDxjt12fb1602qewR3toNX4APiKiju3bxu'
+        access_token = '50000500636pcjqMeU9lju3tq9g4KvcqQetQf7kfu5m0ueFG174f1a78LmM1rv'
         client = lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
 
         all_orders = []
@@ -426,13 +434,12 @@ def get_daraz_orders(statuses):
         for status in statuses:
             request = lazop.LazopRequest('/orders/get', 'GET')
             request.add_api_param('sort_direction', 'DESC')
-            # These dates should be dynamic, e.g., datetime.datetime.now().isoformat() or based on a period
-            request.add_api_param('update_before', '2025-06-27T23:59:59+05:00') # Updated to current date
+            request.add_api_param('update_before', '2025-02-10T16:00:00+08:00')
             request.add_api_param('offset', '0')
-            request.add_api_param('created_before', '2025-06-27T23:59:59+05:00') # Updated to current date
-            request.add_api_param('created_after', '2024-06-01T00:00:00+05:00') # Changed to a more recent start
+            request.add_api_param('created_before', '2025-02-10T16:00:00+08:00')
+            request.add_api_param('created_after', '2017-02-10T09:00:00+08:00')
             request.add_api_param('limit', '50')
-            request.add_api_param('update_after', '2024-06-01T00:00:00+05:00') # Changed to a more recent start
+            request.add_api_param('update_after', '2017-02-10T09:00:00+08:00')
             request.add_api_param('sort_by', 'updated_at')
             request.add_api_param('status', status)
             request.add_api_param('access_token', access_token)
@@ -535,6 +542,10 @@ def displayTracking(tracking_num):
     data = run_async(async_func)
 
     return render_template('trackingdata.html', data=data)
+
+
+from flask import request, jsonify
+from datetime import datetime
 
 
 async def fetch_order_details():
@@ -665,17 +676,30 @@ def verify_shopify_webhook(request):
 
 @app.route('/shopify/webhook/order_updated', methods=['POST'])
 def shopify_order_updated():
-    global order_details  # Ensure we're modifying the global variable
+    global order_details
     try:
         # Verify the webhook request is from Shopify
         if not verify_shopify_webhook(request):
             return jsonify({'error': 'Invalid webhook signature'}), 401
 
-        # Parse the JSON payload sent by Shopify
-        order_data = request.get_json()
+        order_data = request.get_json(silent=True)
+
+        if not order_data:
+            print("Empty payload received. Ignoring.")
+            return jsonify({'message': 'Empty payload received. Ignored.'}), 200
+
         order_id = order_data.get('id')
         if not order_id:
             return jsonify({'error': 'No order id found in payload'}), 400
+
+        # Handle order cancellation
+        if order_data.get('cancelled_at'):
+            print(f"Order {order_id} is cancelled. Removing from order_details.")
+            order_details = [o for o in order_details if o.get('id') != order_id]
+            return jsonify({
+                'success': True,
+                'message': f'Order {order_id} cancelled and removed from order_details'
+            }), 200
 
         print(f"Received webhook for order ID: {order_id}")
 
@@ -692,19 +716,16 @@ def shopify_order_updated():
 
         updated_order_info = asyncio.run(update_order())
 
-        # Update the global order_details list with the new info.
-        # Assuming each order has a unique 'id' field:
+        # Update or append to global order_details
         updated = False
         for idx, existing_order in enumerate(order_details):
             if existing_order.get('id') == updated_order_info.get('id'):
                 order_details[idx] = updated_order_info
                 updated = True
                 break
-        # If the order wasn't in the list, you might want to add it:
         if not updated:
             order_details.append(updated_order_info)
 
-        # Optionally, log the updated global orders
         print("Updated order_details:", order_details)
 
         return jsonify({
@@ -716,6 +737,10 @@ def shopify_order_updated():
     except Exception as e:
         print(f"Webhook processing error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+
+from flask import request, render_template, redirect, url_for
 
 
 @app.route('/scan', methods=['GET', 'POST'])
@@ -763,7 +788,6 @@ def return_orders():
     return jsonify(return_orders)
 
 
-# Initial setup and data loading (moved to be executed only once)
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
@@ -775,16 +799,32 @@ daraz_orders = get_daraz_orders(statuses)
 
 order_details = asyncio.run(getShopifyOrders())
 
+def restart_program():
+    """Restarts the current Python script."""
+    print("Restarting the program...")
+    os.execv(sys.executable, ['python'] + sys.argv)  # Restart script
+
+def check_restart_times():
+    """Checks the time and restarts the script if needed."""
+    target_times = ["10:00", "20:00", "02:00"]  # 10 AM, 8 PM, 2 AM GMT+5
+
+    while True:
+        now = datetime.now().strftime("%H:%M")
+
+        if now in target_times:
+            restart_program()
+
+        time.sleep(30)
 
 if __name__ == "__main__":
-    # Load environment variables (already done globally, but safe to keep here too if needed for other global vars)
-    # shop_url = os.getenv('SHOP_URL') # Already loaded globally
-    # api_key = os.getenv('API_KEY') # Already loaded globally
-    # password = os.getenv('PASSWORD') # Already loaded globally
+    # Load environment variables
+    shop_url = os.getenv('SHOP_URL')
+    api_key = os.getenv('API_KEY')
+    password = os.getenv('PASSWORD')
 
-    # Removed: Start the time checker in a separate thread
-    # restart_thread = threading.Thread(target=check_restart_times, daemon=True)
-    # restart_thread.start()
+    # Start the time checker in a separate thread
+    restart_thread = threading.Thread(target=check_restart_times, daemon=True)
+    restart_thread.start()
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)

@@ -826,5 +826,6 @@ if __name__ == "__main__":
     restart_thread = threading.Thread(target=check_restart_times, daemon=True)
     restart_thread.start()
 
-    # Start Flask app
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+

@@ -112,6 +112,87 @@ def generate_loadsheet():
 
 
 async def process_line_item(session, line_item, fulfillments):
+    if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
+        return []
+
+    tracking_info = []
+    name = 'N/A'
+    address = 'N/A'
+    phone = 'N/A'
+    city = 'N/A'
+
+    if line_item.fulfillment_status == "fulfilled":
+        for fulfillment in fulfillments:
+            if fulfillment.status == "cancelled":
+                continue
+            for item in fulfillment.line_items:
+                if item.id == line_item.id:
+                    tracking_number = fulfillment.tracking_number
+                    data = await fetch_tracking_data(session, tracking_number)
+                    if data['status'] == 1 and not data['error']:
+                        packet_list = data['packet_list']
+                        if packet_list:
+                            name = packet_list[0]['consignment_name_eng']
+                            address = packet_list[0]['consignment_address']
+                            phone = packet_list[0]['consignment_phone']
+                            city = packet_list[0]['destination_city_name']
+                            tracking_details = packet_list[0].get('Tracking Detail', [])
+
+                            if tracking_details:
+                                last_tracking = tracking_details[-1]  # Last tracking update
+                                final_status = last_tracking.get('Status', 'Unknown')
+                                reason = last_tracking.get('Reason')
+
+                                # Append reason to final status if available
+                                if reason and reason != 'N/A':
+                                    final_status += f" - {reason}"
+
+                                keywords = ["Return", "hold", "UNTRACEABLE"]
+                                for detail in tracking_details:
+                                    status = detail['Status']
+                                    reason = detail.get('Reason', 'N/A')
+
+                                    # Check for keywords in both status and reason
+                                    if any(kw in status for kw in keywords) or any(
+                                            kw in (reason or '') for kw in keywords):
+                                        final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
+                                        check_status = packet_list[0].get('booked_packet_status', 'Booked')
+                                        print(f"Final Status {check_status}")
+
+                                        if "Returned to shipper" in check_status:
+                                            final_status = "RETURNED TO SHIPPER"
+                                        break  # Exit early to avoid duplicates
+                                    elif reason and reason != "N/A" and reason not in final_status:
+                                        final_status += f" - {reason}"
+
+                                    check_status = packet_list[0].get('booked_packet_status', 'Booked')
+                                    print(f"Final Status {check_status}")
+
+                                    if "Returned to shipper" in check_status:
+                                        final_status = "RETURNED TO SHIPPER"
+
+                            else:
+                                final_status = packet_list[0].get('booked_packet_status', 'Booked')
+                                if "Pickup Request not Send" in final_status:
+                                    final_status = "Booked"
+                        else:
+                            final_status = "Booked"
+                    else:
+                        final_status = "N/A"
+
+                    # Track quantity for each tracking number
+                    tracking_info.append({
+                        'tracking_number': tracking_number,
+                        'status': final_status,
+                        'quantity': item.quantity,
+                        'name': name,
+                        'address': address,
+                        'city': city,
+                        "phone": phone,
+                    })
+
+    return tracking_info if tracking_info else [
+        {"tracking_number": "N/A", "status": "Un-Booked", "name": 'N/A', "address": 'N/A', "phone": 'N/A', "city": 'N/A',
          "quantity": line_item.quantity}]
 
 

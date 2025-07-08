@@ -594,6 +594,8 @@ def pending_orders():
         # Skip orders with tags starting with "Dispatched"
         if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
             continue
+        if any(tag.startswith("Delivered") for tag in shopify_order.get('tags', [])):
+            continue
 
         if shopify_order['status'] in ['Booked', 'Un-Booked']:
             shopify_items_list = [

@@ -370,40 +370,68 @@ function updateTotals() {
 
     // Initial call
     updateTotals();
-    </script>
-<script>
+    </script><script>
   function parseFlexibleDate(dateStr) {
-    // Try parsing YYYY-MM-DD
+    if (!dateStr) return null;
+
+    // Clean and normalize date string
+    dateStr = dateStr.trim().replace(/\s+/g, ' ');
+
+    // Try direct parse
     let date = new Date(dateStr);
     if (!isNaN(date)) return date;
 
-    // Try parsing MMM DD, YYYY
-    const altFormat = Date.parse(dateStr);
-    if (!isNaN(altFormat)) return new Date(altFormat);
+    // Try "Aug 06, 2025"
+    const match = dateStr.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
+    if (match) {
+      let parsed = Date.parse(match[1]);
+      if (!isNaN(parsed)) return new Date(parsed);
+    }
 
-    // Fallback: return null
+    // Try "2025-08-06"
+    const isoMatch = dateStr.match(/(\d{4}-\d{2}-\d{2})/);
+    if (isoMatch) return new Date(isoMatch[1]);
+
     return null;
   }
 
-  document.addEventListener("DOMContentLoaded", function () {
+  function updatePendingSince() {
     const cells = document.querySelectorAll(".pending-since");
 
     cells.forEach(cell => {
       const dateStr = cell.getAttribute("data-order-date");
       const orderDate = parseFlexibleDate(dateStr);
+
       if (!orderDate) {
-        cell.textContent = "Invalid Date";
+        cell.textContent = "—";
         return;
       }
 
       const now = new Date();
-      const diffTime = Math.abs(now - orderDate);
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      const diffTime = now.setHours(0, 0, 0, 0) - orderDate.setHours(0, 0, 0, 0);
+      const diffDays = Math.max(Math.floor(diffTime / (1000 * 60 * 60 * 24)), 0);
 
       cell.textContent = `${diffDays} day${diffDays !== 1 ? 's' : ''}`;
+      cell.style.fontSize = "18px";
+      cell.style.fontWeight = "bold";
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    // Initialize DataTable if you're using it
+    const table = $('#dataTable').DataTable();
+
+    // Update initially
+    updatePendingSince();
+
+    // Update on every redraw (pagination, sort, etc.)
+    table.on('draw', function () {
+      updatePendingSince();
     });
   });
 </script>
+
+
 
 </body>
 

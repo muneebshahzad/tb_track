@@ -353,11 +353,11 @@ function updateTotals() {
 
     filteredData.each(function (row) {
         // Get the total column value (e.g. Rs 13498.00)
-        var amount = parseFloat($(row).find('td:eq(1)').text().replace(/,/g, '')) || 0;
+        var amount = parseFloat($(row).find('td:eq(2)').text().replace(/,/g, '')) || 0;
         totalValue += amount;
 
         // Now count quantities from the nested "Total Items" cell (3rd column, index 2)
-        $(row).find('td:eq(2) table tbody tr').each(function () {
+        $(row).find('td:eq(3) table tbody tr').each(function () {
             var qtyText = $(this).find('td').eq(2).text().trim(); // Quantity is in 3rd column inside nested table
             var qty = parseInt(qtyText) || 0;
             totalItems += qty;

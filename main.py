@@ -563,7 +563,7 @@ def pending_orders():
 
     # Process Daraz orders with the specified statuses
     for daraz_order in daraz_orders:
-        if daraz_order['status'] in ['Ready To Ship', 'Pending','packed']:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending','packed', 'Packed by seller / warehouse']:
             daraz_order_data = {
                 'order_via': 'Daraz',
                 'order_id': daraz_order['order_id'],
@@ -819,5 +819,6 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
+
 
 

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pending Orders - Mobile</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .order-card {
+            margin-bottom: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        }
+        .order-header {
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .order-items img {
+            max-width: 60px;
+            max-height: 60px;
+            border-radius: 6px;
+        }
+        .order-btns button {
+            margin: 5px 3px;
+            min-width: 100px;
+        }
+        .price {
+            font-weight: bold;
+            color: #28a745;
+        }
+    </style>
+</head>
+<body class="bg-light">
+
+<div class="container py-3">
+    <h4 class="mb-3 text-center">📦 Pending Orders</h4>
+
+    <div class="mb-3 text-center">
+        <select id="sortSelect" class="form-control w-auto d-inline-block">
+            <option value="pending">Sort by Pending Since</option>
+            <option value="order">Sort by Order Number</option>
+            <option value="date">Sort by Date</option>
+        </select>
+    </div>
+
+    <div id="ordersContainer">
+        {% for order in all_orders %}
+        <div class="card order-card"
+             data-order-id="{{ order.order_id }}"
+             data-date="{{ order.date }}">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="order-header">
+                        {{ order.order_via }} — Order #{{ order.order_id }}
+                    </div>
+                    <span class="badge badge-warning" id="pendingBadge-{{ loop.index }}"></span>
+                </div>
+                <small class="text-muted">Date: {{ order.date }}</small>
+                <p class="mt-1 price">Total: {{ order.total_price }}</p>
+
+                <div class="order-items">
+                    {% for item in order.items_list %}
+                    <div class="d-flex align-items-center border-bottom py-2 w-100">
+                        <img src="{{ item.item_image }}" class="mr-2" style="max-width:60px; max-height:60px;">
+                        <div class="flex-grow-1">
+                            <div style="font-size:14px;">{{ item.item_title }}</div>
+                            <small>Qty: {{ item.quantity }}</small>
+                            {% if item.tracking_number != 'N/A' %}
+                                <div><small>Tracking: {{ item.tracking_number }}</small></div>
+                            {% endif %}
+                            {% if item.applied_status %}
+                                <div><span class="badge badge-info">{{ item.applied_status }}</span></div>
+                            {% endif %}
+                            <div class="order-btns mt-2">
+                                <button class="btn btn-success btn-sm"
+                                    onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">
+                                    Packed
+                                </button>
+                                <button class="btn btn-primary btn-sm"
+                                    onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">
+                                    Manufactured
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const orders = document.querySelectorAll('.order-card');
+
+    // Calculate Pending Since days
+    orders.forEach((card, idx) => {
+        const dateStr = card.getAttribute('data-date');
+        const orderDate = new Date(dateStr);
+        const diffDays = Math.floor((new Date() - orderDate) / (1000 * 60 * 60 * 24));
+        card.dataset.pendingDays = diffDays;
+        document.getElementById(`pendingBadge-${idx+1}`).textContent = `Pending ${diffDays} days`;
+    });
+
+    // Sorting
+    function sortOrders(criteria) {
+        const container = document.getElementById('ordersContainer');
+        const sortedCards = Array.from(orders).sort((a, b) => {
+            if (criteria === 'pending') {
+                return b.dataset.pendingDays - a.dataset.pendingDays;
+            } else if (criteria === 'order') {
+                return parseInt(b.dataset.orderId) - parseInt(a.dataset.orderId);
+            } else if (criteria === 'date') {
+                return new Date(b.dataset.date) - new Date(a.dataset.date);
+            }
+        });
+        container.innerHTML = '';
+        sortedCards.forEach(card => container.appendChild(card));
+    }
+
+    document.getElementById('sortSelect').addEventListener('change', function () {
+        sortOrders(this.value);
+    });
+
+    sortOrders('pending');
+});
+
+function updateStatus(orderId, trackingNumber, status) {
+    fetch("/update_status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            order_id: orderId,
+            tracking_number: trackingNumber,
+            status: status
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert(data.message);
+        location.reload(); // Reload so updated status appears
+    })
+    .catch(error => console.error("Error updating status:", error));
+}
+</script>
+
+</body>
+</html>

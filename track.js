@@ -88,3 +88,14 @@
                 alert('Failed to refresh data');
             }
         });
+
+        setInterval(function() {
+    fetch(window.location.href)
+        .then(response => response.text())
+        .then(html => {
+            const parser = new DOMParser();
+            const newDoc = parser.parseFromString(html, 'text/html');
+            document.getElementById('orders-container').innerHTML =
+                newDoc.getElementById('orders-container').innerHTML;
+        });
+}, 300000);  // Refresh every 5 minutes

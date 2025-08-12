@@ -383,7 +383,7 @@ async def getShopifyOrders():
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=10, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -427,7 +427,7 @@ def tracking():
 def get_daraz_orders(statuses):
     print("SEARCHING FOR DARAZ ORDERS")
     try:
-        access_token = '50000900319aybobhQQiRBmIszNRg9z1594d688GyelSCzsf7Djverv1ggyejz'
+        access_token = '50000900915rNmr8okt0Nueh3jU13097fd5EoQaSteaEDx7nSVllEQk3hrDUf0'
         client = lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
 
         all_orders = []
@@ -511,7 +511,7 @@ def get_daraz_orders(statuses):
 
 @app.route('/daraz')
 def daraz():
-    statuses = ['shipped', 'pending', 'ready_to_ship','packed']
+    statuses = ['shipped', 'pending', 'ready_to_ship']
     darazOrders = get_daraz_orders(statuses)
     return render_template('daraz.html', darazOrders=darazOrders)
 
@@ -563,7 +563,7 @@ def pending_orders():
 
     # Process Daraz orders with the specified statuses
     for daraz_order in daraz_orders:
-        if daraz_order['status'] in ['Ready To Ship', 'Pending','packed', 'Packed by seller / warehouse']:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending' ,'packed', 'Packed by seller / warehouse']:
             daraz_order_data = {
                 'order_via': 'Daraz',
                 'order_id': daraz_order['order_id'],
@@ -593,8 +593,6 @@ def pending_orders():
     for shopify_order in order_details:
         # Skip orders with tags starting with "Dispatched"
         if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
-            continue
-        if any(tag.startswith("Delivered") for tag in shopify_order.get('tags', [])):
             continue
 
         if shopify_order['status'] in ['Booked', 'Un-Booked']:
@@ -642,6 +640,92 @@ def pending_orders():
     half = len(pending_items_sorted) // 2
 
     return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
+
+import json
+import os
+
+STATUS_FILE = "order_status.json"
+
+def load_order_status():
+    if os.path.exists(STATUS_FILE):
+        with open(STATUS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_order_status(statuses):
+    with open(STATUS_FILE, "w") as f:
+        json.dump(statuses, f, indent=4)
+
+@app.route("/update_status", methods=["POST"])
+def update_status():
+    data = request.get_json()
+    order_id = str(data.get("order_id"))
+    tracking_number = str(data.get("tracking_number", "N/A"))
+    status = data.get("status")
+
+    statuses = load_order_status()
+    key = f"{order_id}:{tracking_number}"
+    statuses[key] = status
+    save_order_status(statuses)
+
+    return jsonify({"message": f"Status updated to {status} for {order_id} ({tracking_number})"})
+
+
+
+@app.route('/orders')
+def pending_orders_mobile():
+    all_orders = []
+    global daraz_orders, order_details
+
+    statuses = load_order_status()
+
+    # Daraz Orders
+    for daraz_order in daraz_orders:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending', 'packed', 'Packed by seller / warehouse']:
+            items_with_status = []
+            for item in daraz_order['items_list']:
+                track_num = item.get('tracking_number', 'N/A')
+                key = f"{daraz_order['order_id']}:{track_num}"
+                item['applied_status'] = statuses.get(key, "")
+                items_with_status.append(item)
+
+            all_orders.append({
+                'order_via': 'Daraz',
+                'order_id': daraz_order['order_id'],
+                'status': daraz_order['status'],
+                'date': daraz_order['date'],
+                'items_list': items_with_status,
+                'total_price': daraz_order['total_price']
+            })
+
+    # Shopify Orders
+    for shopify_order in order_details:
+        if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
+            continue
+        if shopify_order['status'] in ['Booked', 'Un-Booked']:
+            shopify_items_list = []
+            for item in shopify_order['line_items']:
+                track_num = item.get('tracking_number', 'N/A')
+                key = f"{shopify_order['order_id']}:{track_num}"
+                shopify_items_list.append({
+                    'item_image': item['image_src'],
+                    'item_title': item['product_title'],
+                    'quantity': item['quantity'],
+                    'tracking_number': track_num,
+                    'status': item['status'],
+                    'applied_status': statuses.get(key, "")
+                })
+            all_orders.append({
+                'order_via': 'Shopify',
+                'order_id': shopify_order['order_id'],
+                'status': shopify_order['status'],
+                'date': shopify_order['created_at'],
+                'items_list': shopify_items_list,
+                'total_price': shopify_order['total_price']
+            })
+
+    return render_template('orders.html', all_orders=all_orders)
+
 
 
 @app.route('/undelivered')
@@ -785,7 +869,7 @@ password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
-statuses = ['shipped', 'pending', 'ready_to_ship']
+statuses = ['shipped', 'pending', 'ready_to_ship' ,'packed']
 daraz_orders = get_daraz_orders(statuses)
 
 order_details = asyncio.run(getShopifyOrders())
@@ -819,6 +903,3 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
-
-
-

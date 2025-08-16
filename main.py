@@ -511,7 +511,7 @@ def get_daraz_orders(statuses):
 
 @app.route('/daraz')
 def daraz():
-    statuses = ['shipped', 'pending', 'ready_to_ship', 'packed', 'Packed by seller / warehouse']
+    statuses = ['shipped', 'pending', 'ready_to_ship', 'Packed', 'Packed by seller / warehouse']
     darazOrders = get_daraz_orders(statuses)
     return render_template('daraz.html', darazOrders=darazOrders)
 
@@ -563,7 +563,7 @@ def pending_orders():
 
     # Process Daraz orders with the specified statuses
     for daraz_order in daraz_orders:
-        if daraz_order['status'] in ['Ready To Ship', 'Pending' ,'packed', 'Packed by seller / warehouse']:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending' ,'Packed', 'Packed by seller / warehouse']:
             daraz_order_data = {
                 'order_via': 'Daraz',
                 'order_id': daraz_order['order_id'],
@@ -681,7 +681,7 @@ def pending_orders_mobile():
 
     # Daraz Orders
     for daraz_order in daraz_orders:
-        if daraz_order['status'] in ['Ready To Ship', 'Pending', 'packed', 'Packed by seller / warehouse']:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending', 'Packed', 'Packed by seller / warehouse']:
             items_with_status = []
             for item in daraz_order['items_list']:
                 track_num = item.get('tracking_number', 'N/A')
@@ -869,7 +869,7 @@ password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
-statuses = ['shipped', 'pending', 'ready_to_ship' ,'packed', 'Packed by seller / warehouse']
+statuses = ['shipped', 'pending', 'ready_to_ship' ,'Packed', 'Packed by seller / warehouse']
 daraz_orders = get_daraz_orders(statuses)
 
 order_details = asyncio.run(getShopifyOrders())
@@ -903,6 +903,7 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
+
 
 
 

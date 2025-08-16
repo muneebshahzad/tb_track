@@ -494,6 +494,116 @@ function updateTotals() {
   }
 })();
 </script>
+<script>
+(function () {
+  document.addEventListener('DOMContentLoaded', initTopProductsSearchAndSort);
+
+  function initTopProductsSearchAndSort() {
+    // Find the flex container holding the two small product tables
+    const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
+    if (!flex) { console.warn('Top products flex container not found'); return; }
+
+    const tables = flex.querySelectorAll('table.table');
+    if (tables.length < 2) { console.warn('Expected two top product tables; found:', tables.length); return; }
+
+    const [leftTable, rightTable] = tables;
+    const leftBody  = leftTable.tBodies && leftTable.tBodies[0];
+    const rightBody = rightTable.tBodies && rightTable.tBodies[0];
+    if (!leftBody || !rightBody) { console.warn('One of the top tables has no <tbody>'); return; }
+
+    // --- Build toolbar (search + count) ---
+    const toolbar = document.createElement('div');
+    toolbar.className = 'mb-2';
+    toolbar.innerHTML = `
+      <div class="input-group input-group-sm" style="max-width:420px;">
+        <div class="input-group-prepend">
+          <span class="input-group-text"><i class="fas fa-search"></i></span>
+        </div>
+        <input type="search" id="topProductsSearch" class="form-control" placeholder="Search top products (title or qty)">
+        <div class="input-group-append">
+          <span class="input-group-text" id="topProductsCount"></span>
+        </div>
+      </div>`;
+    // Insert toolbar just above the two tables
+    flex.parentNode.insertBefore(toolbar, flex);
+
+    const $input = toolbar.querySelector('#topProductsSearch');
+    const $count = toolbar.querySelector('#topProductsCount');
+
+    // --- Capture a master list of the actual <tr> nodes (detach from DOM when rendering) ---
+    const masterRows = [...leftBody.rows, ...rightBody.rows];
+
+    // Helper to normalize text (case-insensitive search)
+    const norm = s => (s || '').toString().toLowerCase();
+
+    // Precompute searchable keys to speed up filtering
+    const keys = new Map(masterRows.map(row => {
+      const title = row.cells[1] ? row.cells[1].textContent : '';
+      const qty   = row.cells[2] ? row.cells[2].textContent : '';
+      return [row, norm(`${title} ${qty}`)];
+    }));
+
+    // Remove all rows now; render() will place them back
+    masterRows.forEach(r => r.remove());
+
+    // Sorting comparator: Title (A→Z), tie-break by Qty (desc)
+    function compareRows(a, b) {
+      const A = (a.cells[1]?.textContent || '').trim();
+      const B = (b.cells[1]?.textContent || '').trim();
+      const byTitle = A.localeCompare(B, undefined, { numeric: true, sensitivity: 'base' });
+      if (byTitle !== 0) return byTitle;
+
+      const qa = parseInt((a.cells[2]?.textContent || '').trim(), 10) || 0;
+      const qb = parseInt((b.cells[2]?.textContent || '').trim(), 10) || 0;
+      return qb - qa; // higher qty first when same title
+    }
+
+    // Set false to use round-robin (L,R,L,R,...) instead of split-in-halves
+    const splitHalves = true;
+
+    function render(filterText = '') {
+      const f = norm(filterText);
+
+      // Filter
+      let rows = masterRows.filter(r => !f || keys.get(r).includes(f));
+
+      // Sort
+      rows.sort(compareRows);
+
+      // Detach any existing rows from both bodies
+      // (quickly clear bodies without killing references)
+      while (leftBody.firstChild) leftBody.removeChild(leftBody.firstChild);
+      while (rightBody.firstChild) rightBody.removeChild(rightBody.firstChild);
+
+      // Distribute
+      if (splitHalves) {
+        const mid = Math.ceil(rows.length / 2);
+        const leftFrag  = document.createDocumentFragment();
+        const rightFrag = document.createDocumentFragment();
+        rows.slice(0, mid).forEach(r => leftFrag.appendChild(r));
+        rows.slice(mid).forEach(r => rightFrag.appendChild(r));
+        leftBody.appendChild(leftFrag);
+        rightBody.appendChild(rightFrag);
+      } else {
+        rows.forEach((r, i) => (i % 2 === 0 ? leftBody : rightBody).appendChild(r));
+      }
+
+      // Update counter
+      $count.textContent = `${rows.length}/${masterRows.length}`;
+    }
+
+    // Debounce input to avoid excessive reflows
+    let timer;
+    $input.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => render($input.value), 120);
+    });
+
+    // Initial render (no filter)
+    render('');
+  }
+})();
+</script>
 
 
 </body>

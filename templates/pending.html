@@ -32,6 +32,34 @@
             margin-bottom: 5px;
         }
     </style>
+    <style>
+  /* Let the two tables shrink properly */
+  .top-products .table-responsive { flex: 1 1 0; min-width: 0; }
+
+  /* Keep sensible widths on desktop */
+  .top-products table th:first-child,
+  .top-products table td:first-child { width: 90px; }   /* Image */
+  .top-products table th:nth-child(3),
+  .top-products table td:nth-child(3) { width: 80px; }  /* Qty */
+
+  /* Stack vertically on tablets/phones */
+  @media (max-width: 992px) {
+    .top-products { flex-direction: column; align-items: stretch; }
+  }
+
+  /* Phone fixes: wrap long titles, avoid overflow */
+  @media (max-width: 576px) {
+    .top-products table { table-layout: fixed; }
+    .top-products th, .top-products td { white-space: normal; word-break: break-word; }
+    .top-products th:nth-child(2), .top-products td:nth-child(2) { width: auto !important; }
+    .top-products img { width: 64px; height: 64px; object-fit: cover; }
+  }
+
+  /* Make the search bar fluid on mobile (overrides inline max-width) */
+  #topProductsSearch { width: 100%; min-width: 0; }
+  .input-group.input-group-sm[style*="max-width:420px"] { max-width: 100% !important; }
+</style>
+
 </head>
 
 <body id="page-top">
@@ -131,7 +159,7 @@
                         <div class="card-header py-3">
                             <h6 class="m-0 font-weight-bold text-primary">Pending Orders </h6>
                         </div>
-                      <div style="display: flex; justify-content: center; gap: 20px;">
+<div class="top-products" style="display: flex; justify-content: center; gap: 20px;">
     <div class="table-responsive" style="flex: 1;">
         <table class="table table-bordered" width="100%" cellspacing="0">
             <thead>
@@ -441,7 +469,7 @@ function updateTotals() {
   // If your page re-renders those tables dynamically, you can call this again later
   function combineSortSplitTopTables() {
     // Find the flex container that holds the two small product tables
-    const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
+const flex = document.querySelector('.card .top-products');
     if (!flex) { console.warn('Top products flex container not found'); return; }
 
     const tables = flex.querySelectorAll('table.table');
@@ -605,6 +633,29 @@ function updateTotals() {
 })();
 </script>
 
+<script>
+  // Hide sidebar on load for mobile; keep SB Admin 2's normal toggle behavior
+  document.addEventListener('DOMContentLoaded', function () {
+    function applySidebarDefault() {
+      const sidebars = document.querySelectorAll('.sidebar');
+      if (window.innerWidth < 768) {
+        document.body.classList.add('sidebar-toggled');
+        sidebars.forEach(s => s.classList.add('toggled'));   // hidden on mobile in SB Admin 2
+      } else {
+        document.body.classList.remove('sidebar-toggled');
+        sidebars.forEach(s => s.classList.remove('toggled')); // normal on desktop/tablet
+      }
+    }
+    applySidebarDefault();
+
+    // Re-evaluate on resize/orientation change (debounced)
+    let t;
+    window.addEventListener('resize', () => {
+      clearTimeout(t);
+      t = setTimeout(applySidebarDefault, 150);
+    });
+  });
+</script>
 
 </body>
 

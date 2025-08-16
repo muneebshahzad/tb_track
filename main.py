@@ -511,7 +511,7 @@ def get_daraz_orders(statuses):
 
 @app.route('/daraz')
 def daraz():
-    statuses = ['shipped', 'pending', 'ready_to_ship']
+    statuses = ['shipped', 'pending', 'ready_to_ship', 'packed', 'Packed by seller / warehouse']
     darazOrders = get_daraz_orders(statuses)
     return render_template('daraz.html', darazOrders=darazOrders)
 
@@ -869,7 +869,7 @@ password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
-statuses = ['shipped', 'pending', 'ready_to_ship' ,'packed']
+statuses = ['shipped', 'pending', 'ready_to_ship' ,'packed', 'Packed by seller / warehouse']
 daraz_orders = get_daraz_orders(statuses)
 
 order_details = asyncio.run(getShopifyOrders())
@@ -903,5 +903,6 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
+
 
 

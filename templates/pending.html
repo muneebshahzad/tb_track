@@ -431,6 +431,69 @@ function updateTotals() {
   });
 </script>
 
+<script>
+(function () {
+  // Run after the DOM and DataTables init
+  document.addEventListener('DOMContentLoaded', function () {
+    combineSortSplitTopTables();
+  });
+
+  // If your page re-renders those tables dynamically, you can call this again later
+  function combineSortSplitTopTables() {
+    // Find the flex container that holds the two small product tables
+    const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
+    if (!flex) { console.warn('Top products flex container not found'); return; }
+
+    const tables = flex.querySelectorAll('table.table');
+    if (tables.length < 2) { console.warn('Expected two top product tables, found:', tables.length); return; }
+
+    const [leftTable, rightTable] = tables;
+    const leftBody  = leftTable.tBodies && leftTable.tBodies[0];
+    const rightBody = rightTable.tBodies && rightTable.tBodies[0];
+    if (!leftBody || !rightBody) { console.warn('One of the top tables has no <tbody>'); return; }
+
+    // 1) Collect all rows from both tables
+    const rows = [...leftBody.rows, ...rightBody.rows];
+
+    // Nothing to do?
+    if (rows.length < 2) return;
+
+    // 2) Detach current rows to avoid HierarchyRequestError on re-append
+    rows.forEach(r => r.parentNode && r.parentNode.removeChild(r));
+
+    // 3) Sort by Title (2nd column), then by Quantity (3rd column) DESC as tiebreaker
+    rows.sort((a, b) => {
+      const titleA = (a.cells[1]?.textContent || '').trim();
+      const titleB = (b.cells[1]?.textContent || '').trim();
+      const byTitle = titleA.localeCompare(titleB, undefined, { numeric: true, sensitivity: 'base' });
+      if (byTitle !== 0) return byTitle;
+
+      const qa = parseInt((a.cells[2]?.textContent || '').trim(), 10) || 0;
+      const qb = parseInt((b.cells[2]?.textContent || '').trim(), 10) || 0;
+      return qb - qa; // higher qty first when same title
+    });
+
+    // 4) Distribute back
+    // MODE A (default): split-halves (gives reading order A,A,B,B down the page)
+    const splitHalves = true; // <-- set to false to use round-robin instead
+
+    if (splitHalves) {
+      const mid = Math.ceil(rows.length / 2);
+      const leftFrag  = document.createDocumentFragment();
+      const rightFrag = document.createDocumentFragment();
+      rows.slice(0, mid).forEach(r => leftFrag.appendChild(r));
+      rows.slice(mid).forEach(r => rightFrag.appendChild(r));
+      leftBody.appendChild(leftFrag);
+      rightBody.appendChild(rightFrag);
+    } else {
+      // MODE B: round-robin (keeps columns visually balanced: L,R,L,R,...)
+      rows.forEach((r, i) => (i % 2 === 0 ? leftBody : rightBody).appendChild(r));
+    }
+
+    console.log(`Combined + sorted ${rows.length} product rows across both top tables.`);
+  }
+})();
+</script>
 
 
 </body>

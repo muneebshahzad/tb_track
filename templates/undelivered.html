@@ -9,20 +9,17 @@
     <meta name="description" content="">
     <meta name="author" content="">
 
-    <title>Daily Tasker - Tracking</title>
+    <title>Daily Tasker - Undelivered Orders</title>
 
-    <!-- Custom fonts for this template -->
     <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
     <link
         href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
         rel="stylesheet">
 
-    <!-- Custom styles for this template -->
     <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
 
-    <!-- Custom styles for this page -->
     <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
- <style>
+    <style>
         .status-buttons {
             display: none;
             margin-top: 10px;
@@ -31,560 +28,367 @@
             margin-right: 5px;
             margin-bottom: 5px;
         }
+        .pending-since-cell {
+            font-size: 30px;
+            font-weight: bold;
+            padding: 10px;
+            text-align: center;
+            vertical-align: middle !important;
+        }
     </style>
 </head>
 
 <body id="page-top">
 
-    <!-- Page Wrapper -->
     <div id="wrapper">
 
-        <!-- Sidebar -->
         {% include 'header.html' %}
-        <!-- End of Sidebar -->
-
-        <!-- Content Wrapper -->
         <div id="content-wrapper" class="d-flex flex-column">
 
-            <!-- Main Content -->
             <div id="content">
 
-                <!-- Topbar -->
                 <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
-
-                    <!-- Sidebar Toggle (Topbar) -->
                     <form class="form-inline">
                         <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
                             <i class="fa fa-bars"></i>
                         </button>
                     </form>
-
-                    <!-- Topbar Search -->
-
-
-                    <!-- Topbar Navbar -->
                     <ul class="navbar-nav ml-auto">
-
-                        <!-- Nav Item - Search Dropdown (Visible Only XS) -->
-                        <li class="nav-item dropdown no-arrow d-sm-none">
-                            <a class="nav-link dropdown-toggle" href="#" id="searchDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <i class="fas fa-search fa-fw"></i>
-                            </a>
-                            <!-- Dropdown - Messages -->
-                            <div class="dropdown-menu dropdown-menu-right p-3 shadow animated--grow-in" aria-labelledby="searchDropdown">
-                                <form class="form-inline mr-auto w-100 navbar-search">
-                                    <div class="input-group">
-                                        <input type="text" class="form-control bg-light border-0 small" placeholder="Search for..." aria-label="Search" aria-describedby="basic-addon2">
-                                        <div class="input-group-append">
-                                            <button class="btn btn-primary" type="button">
-                                                <i class="fas fa-search fa-sm"></i>
-                                            </button>
-
-                                        </div>
-                                    </div>
-                                </form>
-                            </div>
-                        </li>
-
-                        <!-- Nav Item - Alerts -->
-<!--                        <li class="nav-item dropdown no-arrow mx-1">-->
-<!--                            <a class="nav-link dropdown-toggle" href="#" id="alertsDropdown" role="button"-->
-<!--                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">-->
-<!--                                <i class="fas fa-bell fa-fw"></i>-->
-<!--                                &lt;!&ndash; Counter - Alerts &ndash;&gt;-->
-<!--                                <span class="badge badge-danger badge-counter">3+</span>-->
-<!--                            </a>-->
-<!--                            &lt;!&ndash; Dropdown - Alerts &ndash;&gt;-->
-<!--                            <div class="dropdown-list dropdown-menu dropdown-menu-right shadow animated&#45;&#45;grow-in"-->
-<!--                                aria-labelledby="alertsDropdown">-->
-<!--                                <h6 class="dropdown-header">-->
-<!--                                    Alerts Center-->
-<!--                                </h6>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="mr-3">-->
-<!--                                        <div class="icon-circle bg-primary">-->
-<!--                                            <i class="fas fa-file-alt text-white"></i>-->
-<!--                                        </div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="small text-gray-500">December 12, 2019</div>-->
-<!--                                        <span class="font-weight-bold">A new monthly report is ready to download!</span>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="mr-3">-->
-<!--                                        <div class="icon-circle bg-success">-->
-<!--                                            <i class="fas fa-donate text-white"></i>-->
-<!--                                        </div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="small text-gray-500">December 7, 2019</div>-->
-<!--                                        $290.29 has been deposited into your account!-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="mr-3">-->
-<!--                                        <div class="icon-circle bg-warning">-->
-<!--                                            <i class="fas fa-exclamation-triangle text-white"></i>-->
-<!--                                        </div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="small text-gray-500">December 2, 2019</div>-->
-<!--                                        Spending Alert: We've noticed unusually high spending for your account.-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item text-center small text-gray-500" href="#">Show All Alerts</a>-->
-<!--                            </div>-->
-<!--                        </li>-->
-
-<!--                        &lt;!&ndash; Nav Item - Messages &ndash;&gt;-->
-<!--                        <li class="nav-item dropdown no-arrow mx-1">-->
-<!--                            <a class="nav-link dropdown-toggle" href="#" id="messagesDropdown" role="button"-->
-<!--                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">-->
-<!--                                <i class="fas fa-envelope fa-fw"></i>-->
-<!--                                &lt;!&ndash; Counter - Messages &ndash;&gt;-->
-<!--                                <span class="badge badge-danger badge-counter">7</span>-->
-<!--                            </a>-->
-<!--                            &lt;!&ndash; Dropdown - Messages &ndash;&gt;-->
-<!--                            <div class="dropdown-list dropdown-menu dropdown-menu-right shadow animated&#45;&#45;grow-in"-->
-<!--                                aria-labelledby="messagesDropdown">-->
-<!--                                <h6 class="dropdown-header">-->
-<!--                                    Message Center-->
-<!--                                </h6>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="dropdown-list-image mr-3">-->
-<!--                                        <img class="rounded-circle" src="img/undraw_profile_1.svg"-->
-<!--                                            alt="...">-->
-<!--                                        <div class="status-indicator bg-success"></div>-->
-<!--                                    </div>-->
-<!--                                    <div class="font-weight-bold">-->
-<!--                                        <div class="text-truncate">Hi there! I am wondering if you can help me with a-->
-<!--                                            problem I've been having.</div>-->
-<!--                                        <div class="small text-gray-500">Emily Fowler · 58m</div>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="dropdown-list-image mr-3">-->
-<!--                                        <img class="rounded-circle" src="img/undraw_profile_2.svg"-->
-<!--                                            alt="...">-->
-<!--                                        <div class="status-indicator"></div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="text-truncate">I have the photos that you ordered last month, how-->
-<!--                                            would you like them sent to you?</div>-->
-<!--                                        <div class="small text-gray-500">Jae Chun · 1d</div>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="dropdown-list-image mr-3">-->
-<!--                                        <img class="rounded-circle" src="img/undraw_profile_3.svg"-->
-<!--                                            alt="...">-->
-<!--                                        <div class="status-indicator bg-warning"></div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="text-truncate">Last month's report looks great, I am very happy with-->
-<!--                                            the progress so far, keep up the good work!</div>-->
-<!--                                        <div class="small text-gray-500">Morgan Alvarez · 2d</div>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="dropdown-list-image mr-3">-->
-<!--                                        <img class="rounded-circle" src="https://source.unsplash.com/Mv9hjnEUHR4/60x60"-->
-<!--                                            alt="...">-->
-<!--                                        <div class="status-indicator bg-success"></div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="text-truncate">Am I a good boy? The reason I ask is because someone-->
-<!--                                            told me that people say this to all dogs, even if they aren't good...</div>-->
-<!--                                        <div class="small text-gray-500">Chicken the Dog · 2w</div>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item text-center small text-gray-500" href="#">Read More Messages</a>-->
-<!--                            </div>-->
-<!--                        </li>-->
-
-                         <div class="topbar-divider d-none d-sm-block"></div>
-
-                        <!-- Nav Item - User Information -->
                         <li class="nav-item dropdown no-arrow">
                             <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                                 <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
                                 <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
                             </a>
-                            <!-- Dropdown - User Information -->
                             <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in" aria-labelledby="userDropdown">
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-user fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Profile
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-cogs fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Settings
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-list fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Activity Log
-                                </a>
-                                <div class="dropdown-divider"></div>
                                 <a class="dropdown-item" href="#" data-toggle="modal" data-target="#logoutModal">
                                     <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i>
                                     Logout
                                 </a>
                             </div>
                         </li>
-
                     </ul>
-
                 </nav>
-                <!-- End of Topbar -->
-
-                <!-- Begin Page Content -->
                 <div class="container-fluid">
+                    <h1 class="h3 mb-2 text-gray-800">Undelivered Order Tracking</h1>
 
-
-                    <!-- Page Heading -->
-                    <h1 class="h3 mb-2 text-gray-800">Order Tracking</h1>
-
-                    <!-- DataTales Example -->
                     <div class="card shadow mb-4">
-                        <div class="card-header py-3">
-                            <h6 class="m-0 font-weight-bold text-primary">Shopify - Pending </h6>
-                        </div>
+                        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+    <h6 class="m-0 font-weight-bold text-primary">Undelivered Orders</h6>
+    <div class="btn-group btn-group-sm" role="group">
+        <button type="button" class="btn btn-danger" id="btn-high-priority">High Priority</button>
+        <button type="button" class="btn btn-warning" id="btn-medium-priority">Medium Priority</button>
+        <button type="button" class="btn btn-info" id="btn-low-priority">Low Priority</button>
+        <button type="button" class="btn btn-secondary" id="btn-show-all">Show All</button>
+    </div>
+</div>
                         <div class="card-body">
                             <div class="table-responsive">
-
                                 <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
-
-    <thead>
-        <tr>
-            <th>Order ID</th>
-            <th style="width: 3%;">Pending Since (Days)</th>
-            <th style="width: 15%;">Customer</th>
-            <th>Tags</th>
-            <th>Date</th>
-            <th>Total Price</th>
-            <th>Items</th>
-            <th>Status</th>
-            <th style="width: 15%;">Actions</th>
-        </tr>
-    </thead>
-    <tfoot>
-        <tr>
-            <th>Order ID</th>
-            <th style="width: 3%;">Pending Since (Days)</th>
-            <th style="width: 15%;">Customer</th>
-            <th>Tags</th>
-            <th>Date</th>
-            <th>Total Price</th>
-            <th>Items</th>
-            <th>Status</th>
-            <th style="width: 15%;">Actions</th>
-        </tr>
-    </tfoot>
-    <tbody>
-{% for order in order_details %}
-    {% if order.status not in ['Booked', 'Un-Booked', 'Delivered'] and not ('Cancelled' in ' '.join(order.tags)) %}
-
-            <tr>
-                <td>{{ order.order_id }}</td>
-                 <td id="daysPending_{{ order.id }}"></td>
-                <script>
-    document.addEventListener("DOMContentLoaded", function () {
-     let orderStatus = "{{ order.status }}".toLowerCase();
-        let orderDateStr = "{{ order.created_at }}"; // Example: "Mar 12, 2025"
-        let orderDate = new Date(orderDateStr);
-        let today = new Date();
-
-        // Calculate days difference
-        let timeDiff = today - orderDate;
-        let daysPending = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-
-        // Get the table cell
-        let cell = document.getElementById("daysPending_{{ order.id }}");
-
-        // Set text content
-        cell.textContent = daysPending;
-        cell.style.fontSize = "30px";  // Increase text size
-    cell.style.fontWeight = "bold"; // Make text bold
-    cell.style.padding = "10px";  // Add padding for better visibility
-    cell.style.textAlign = "center"; // Center align text
-
-        // Apply color based on conditions
-        if (orderStatus.includes("return")) {
-        cell.style.backgroundColor = "#ff471a"; // Red for any return-related status
-        cell.style.color = "white";
-    }
-        else if (daysPending <= 7) {
-            cell.style.backgroundColor = "#ffebe6";
-        } else if (daysPending > 7 && daysPending <= 15) {
-            cell.style.backgroundColor = "#ffa31a"; // This color doesn't exist, use 'lightcoral' or '#FFD580'
-        } else {
-            cell.style.backgroundColor = "#ff471a";
-            cell.style.color = "white"; // Improve visibility
-        }
-    });
-</script>
-                <td>
-                    {{ order.line_items[0].name }}<br>
-                    {{ order.line_items[0].address }}<br>
-                    {{ order.line_items[0].city }}<br>
-                    {{ order.line_items[0].phone }}<br>
-                    <a href="tel:{{ order.line_items[0].phone }}" class="btn btn-primary btn-sm">Call</a>
-                    <div class="btn-group">
-                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                            WhatsApp
-                        </button>
-                        <div class="dropdown-menu">
-                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Dispatch Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20delayed,%20please%20be%20assured%20that%20we%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Delay Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20was%20delivered%20recently.%20Please%20let%20us%20know%20about%20your%20experience%20with%20us.%20Your%20feedback%20will%20surely%20help%20us%20improve.%20Thank%20You!" target="_blank">Send Feedback Message</a>
-                        </div>
-                    </div>
-                </td>
-
-                <td>{% for tag in order.tags %}
-                     <span class="badge badge-secondary">{{ tag }}</span><br>
-                {% endfor %}</td>
-                <td>{{ order.created_at }}</td>
-                <td>{{ order.total_price }}</td>
-                <td>
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Image</th>
-                                <th style="width: 30%;">Title</th>
-                                <th>Pcs</th>
-                                <th>Tracking Number</th>
-                                <th>Email</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in order.line_items %}
-                                <tr>
-                                    <td><img src="{{ item.image_src }}" width="50" height="50"></td>
-                                    <td>{{ item.product_title }}</td>
-                                    <td>{{ item.quantity }}</td>
-                                    <td><a href=track/{{item.tracking_number}} target=”_blank”> {{ item.tracking_number }} </a> </td>
-
-
-                                    <td>
-                                       <div class="btn-group">
-    <button type="button" class="btn btn-info btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-        Email
-    </button>
-    <div class="dropdown-menu">
-        <a class="dropdown-item" href="#" onclick="sendEmail('delay', '{{ item.tracking_number }}')">Send Email for Delay</a>
-        <a class="dropdown-item" href="#" onclick="sendEmail('incomplete', '{{ item.tracking_number }}')">Send Email for Incomplete Address</a>
-        <a class="dropdown-item" href="#" onclick="sendEmail('refusal', '{{ item.tracking_number }}')">Send Email for Fake Refusal</a>
-    </div>
-</div>
-                                    </td>
-
-                                </tr>
-
-                            {% endfor %}
-                        </tbody>
-
-                    </table>
-                </td>
-                 <td> {{ order.status}}</td>
-                 <td>
-                        <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
-                        <div class="status-buttons">
-    <button class="btn btn-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
-    <button class="btn btn-primary btn-sm" onclick="applyTag('{{ order.id }}', 'Contacted on Whatsapp')">Contacted on Whatsapp</button>
-    <button class="btn btn-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Ticket Created for Delay')">Ticket Created for Delay</button>
-    <button class="btn btn-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'No Response - Call Needed')">Customer not Responding on Whatsapp - Call Needed</button>
-
-    <button class="btn btn-info btn-sm" onclick="applyTag('{{ order.id }}', 'Customer Interested-Ticket Created')">Customer Wants to Receive Parcel - Ticket Created</button>
-    <button class="btn btn-primary btn-sm" onclick="applyTag('{{ order.id }}', 'Customer Interested-ReBooked')">Customer Wants to Receive Parcel - ReBooked on Shopify</button>
-
-    <button class="btn btn-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
-    <button class="btn btn-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
-    <button class="btn btn-success btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
-    <button class="btn btn-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
-
-    <!-- Custom Tag Input -->
-    <div class="input-group mt-2">
-        <input type="text" id="customTagInput{{ order.id }}" class="form-control" placeholder="Enter custom tag">
-        <button class="btn btn-outline-primary" onclick="applyCustomTag('{{ order.id }}')">Apply Custom Tag</button>
-    </div>
-</div>
-
-<script>
-    function applyCustomTag(orderId) {
-        let customTag = document.getElementById('customTagInput' + orderId).value;
-        if (customTag.trim() !== "") {
-            applyTag(orderId, customTag);
-        }
-    }
-</script>
-
-                    </td>
-            </tr>
-        {% endif %}
-        {% endfor %}
-        {% for order in darazOrders %}
-        {% if order.status not in ['Ready To Ship', 'Pending'] %}
-
+                                    <thead>
+                                        <tr>
+                                            <th>Order ID</th>
+                                            <th style="width: 3%;">Pending Since (Days)</th>
+                                            <th style="width: 15%;">Customer</th>
+                                            <th>Tags</th>
+                                            <th>Date</th>
+                                            <th>Total Price</th>
+                                            <th>Items</th>
+                                            <th>Status</th>
+                                            <th style="width: 15%;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tfoot>
+                                        <tr>
+                                            <th>Order ID</th>
+                                            <th>Pending Since (Days)</th>
+                                            <th>Customer</th>
+                                            <th>Tags</th>
+                                            <th>Date</th>
+                                            <th>Total Price</th>
+                                            <th>Items</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </tfoot>
+                                    <tbody>
+                                        {# --- Shopify Orders Loop --- #}
+                                        {% for order in order_details %}
+                                            {% if order.status not in ['Booked', 'Un-Booked', 'Delivered'] and not ('Cancelled' in ' '.join(order.tags)) and not ('Returned' in ' '.join(order.tags)) %}
                                             <tr>
-                                                <td>{{ order.order_id }} </td>
+                                                <td><a href="{{ order.order_link }}" target="_blank">{{ order.order_id }}</a></td>
+                                                <td class="pending-since-cell" data-created-at="{{ order.created_at }}" data-status="{{ order.status }}"></td>
                                                 <td>
-                    {{ order.customer.name }}<br>
-                    {{ order.customer.address.address1}}  {{order.customer.address.address5}}<br>
-                    {{ order.customer.address.address4 }}<br>
-                    {{ order.customer.phone }}<br>
-                    <a href="tel:{{ order.customer.phone }}" class="btn btn-primary btn-sm">Call</a>
-                    <div class="btn-group">
-                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                            WhatsApp
-                        </button>
-                         <div class="dropdown-menu">
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Dispatch Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20delayed,%20please%20be%20assured%20that%20we%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Delay Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20was%20delivered%20recently.%20Please%20let%20us%20know%20about%20your%20experience%20with%20us.%20Your%20feedback%20will%20surely%20help%20us%20improve.%20Thank%20You!" target="_blank">Send Feedback Message</a>
-                        </div>
-                    </div>
-                </td>
-                                                <td> </td>
-                                                <td> DARAZ </td>
-                                                <td>   </td>
-                                                <td>{{ order.date }}</td>
+                                                    {{ order.customer_details.name }}<br>
+                                                    {{ order.customer_details.address }}<br>
+                                                    {{ order.customer_details.city }}<br>
+                                                    <a href="tel:{{ order.customer_details.phone }}">{{ order.customer_details.phone }}</a><br>
+                                                    <a href="tel:{{ order.customer_details.phone }}" class="btn btn-primary btn-sm mt-1">Call</a>
+                                                    <div class="btn-group mt-1">
+                                                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                                            WhatsApp
+                                                        </button>
+                                                        <div class="dropdown-menu">
+                                                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone | replace('+', '') }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
+                                                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone | replace('+', '') }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    {% for tag in order.tags %}
+                                                        <span class="badge badge-secondary">{{ tag }}</span><br>
+                                                    {% endfor %}
+                                                </td>
+                                                <td>{{ order.created_at.split('T')[0] }}</td>
                                                 <td>{{ order.total_price }}</td>
-
                                                 <td>
                                                     <table class="table table-sm">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>Image</th>
-                                                                <th style="width: 50%;">Title</th>
-                                                                <th>Tracking Number</th>
-                                                                <th style="width: 20%;">Status</th>
-
-                                                            </tr>
-                                                        </thead>
+                                                        <thead><tr><th>Image</th><th style="width: 30%;">Title</th><th>Pcs</th><th>Tracking Number</th><th>Email</th></tr></thead>
                                                         <tbody>
-
-                                                            {% for item in order.items_list %}
-                                                                <tr>
-                                                                    <td><img src="{{ item.item_image }}" width="50" height="50"></td>
-                                                                    <td>{{ item.item_title }}</td>
-                                                                    <td>{{ item.tracking_number }}</td>
-                                                                    <td>{{ item.status }}</td>
-                                                                </tr>
+                                                            {% for item in order.line_items %}
+                                                            <tr>
+                                                                <td><img src="{{ item.image_src }}" width="50" height="50"></td>
+                                                                <td>{{ item.product_title }}</td>
+                                                                <td>{{ item.quantity }}</td>
+                                                                <td><a href="track/{{item.tracking_number}}" target="_blank">{{ item.tracking_number }}</a></td>
+                                                                <td>
+                                                                    <div class="btn-group">
+                                                                        <button type="button" class="btn btn-info btn-sm dropdown-toggle" data-toggle="dropdown">Email</button>
+                                                                        <div class="dropdown-menu">
+                                                                            <a class="dropdown-item" href="#" onclick="sendEmail('delay', '{{ item.tracking_number }}')">Delay</a>
+                                                                            <a class="dropdown-item" href="#" onclick="sendEmail('incomplete', '{{ item.tracking_number }}')">Incomplete Address</a>
+                                                                            <a class="dropdown-item" href="#" onclick="sendEmail('refusal', '{{ item.tracking_number }}')">Fake Refusal</a>
+                                                                        </div>
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
                                                             {% endfor %}
                                                         </tbody>
                                                     </table>
                                                 </td>
                                                 <td>{{ order.status }}</td>
-                                                <td>   </td>
+                                                <td>
+                                                    <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
+                                                    <div class="status-buttons">
+                                                        <button class="btn btn-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
+                                                        <button class="btn btn-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
+                                                        <button class="btn btn-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
+                                                        <button class="btn btn-info btn-sm" onclick="applyTag('{{ order.id }}', 'Customer Wants to Receive Parcel')">Wants to Receive</button>
+                                                        <div class="input-group mt-2">
+                                                            <input type="text" id="customTagInput{{ order.id }}" class="form-control" placeholder="Custom tag">
+                                                            <button class="btn btn-outline-primary" onclick="applyCustomTag('{{ order.id }}')">Apply</button>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            {% endif %}
+                                        {% endfor %}
 
+                                        {# --- Daraz Orders Loop (Corrected Structure) --- #}
+                                        {% for order in darazOrders %}
+                                            {% if order.status not in ['Ready To Ship', 'Pending', 'Delivered', 'Returned', 'Cancelled'] %}
+                                            <tr>
+                                                <td>{{ order.order_id }}</td>
+                                                <td class="pending-since-cell" data-created-at="{{ order.date }}" data-status="{{ order.status }}"></td>
+                                                <td>
+                                                    {{ order.customer.name }}<br>
+                                                    {{ order.customer.address }}<br>
+                                                    {{ order.customer.phone }}<br>
+                                                    <a href="tel:{{ order.customer.phone }}" class="btn btn-primary btn-sm mt-1">Call</a>
+                                                    <div class="btn-group mt-1">
+                                                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown">WhatsApp</button>
+                                                         <div class="dropdown-menu">
+                                                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone | replace('+', '') }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Address Closed</a>
+                                                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone | replace('+', '') }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Refused Message</a>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td><span class="badge badge-info">DARAZ</span></td>
+                                                <td>{{ order.date.split('T')[0] }}</td>
+                                                <td>{{ order.total_price }}</td>
+                                                <td>
+                                                    <table class="table table-sm">
+                                                        <thead>
+                                                            <tr><th>Image</th><th style="width: 50%;">Title</th><th>Tracking Number</th><th>Status</th></tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {% for item in order.items_list %}
+                                                            <tr>
+                                                                <td><img src="{{ item.item_image }}" width="50" height="50"></td>
+                                                                <td>{{ item.item_title }}</td>
+                                                                <td><a href="https://www.daraz.pk/customer/order/view/?tradeOrderId={{ order.order_id }}" target="_blank">{{ item.tracking_number }}</a></td>
+                                                                <td>{{ item.status }}</td>
+                                                            </tr>
+                                                            {% endfor %}
+                                                        </tbody>
+                                                    </table>
+                                                </td>
+                                                <td>{{ order.status }}</td>
+                                                <td></td>
                                             </tr>
                                         {% endif %}
                                         {% endfor %}
-    </tbody>
-</table>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
-
                 </div>
-                <!-- /.container-fluid -->
-
-            </div>
-            <!-- End of Main Content -->
-
-            <!-- Footer -->
+                </div>
             <footer class="sticky-footer bg-white">
                 <div class="container my-auto">
                     <div class="copyright text-center my-auto">
-                        <span>Copyright &copy; Your Website 2020</span>
+                        <span>Copyright &copy; Your Website 2024</span>
                     </div>
                 </div>
             </footer>
-            <!-- End of Footer -->
-
         </div>
-        <!-- End of Content Wrapper -->
-
     </div>
-    <!-- End of Page Wrapper -->
 
-    <!-- Scroll to Top Button-->
-    <a class="scroll-to-top rounded" href="#page-top">
-        <i class="fas fa-angle-up"></i>
-    </a>
+    <a class="scroll-to-top rounded" href="#page-top"><i class="fas fa-angle-up"></i></a>
 
-    <!-- Logout Modal-->
-    <div class="modal fade" id="logoutModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel"
-        aria-hidden="true">
+    <div class="modal fade" id="logoutModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
         <div class="modal-dialog" role="document">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="exampleModalLabel">Ready to Leave?</h5>
-                    <button class="close" type="button" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">×</span>
-                    </button>
+                    <button class="close" type="button" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">×</span></button>
                 </div>
                 <div class="modal-body">Select "Logout" below if you are ready to end your current session.</div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" type="button" data-dismiss="modal">Cancel</button>
-                    <a class="btn btn-primary" href="login.html">Logout</a>
+                    <a class="btn btn-primary" href="/logout">Logout</a>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Bootstrap core JavaScript-->
     <script src="static/assets/vendor/jquery/jquery.min.js"></script>
     <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-
-    <!-- Core plugin JavaScript-->
     <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-
-    <!-- Custom scripts for all pages-->
     <script src="static/assets/js/sb-admin-2.min.js"></script>
 
-    <!-- Page level plugins -->
     <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
     <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
-
-    <!-- Page level custom scripts -->
     <script src="static/assets/js/demo/datatables-demo.js"></script>
-        <script src="static/assets/js/demo/datatables-demo.js"></script>
+
     <script src="static/assets/js/track.js"></script>
 
 <script>
     $(document).ready(function() {
-        // Check if the table is already a DataTable and destroy it if necessary
-        if ($.fn.DataTable.isDataTable('#dataTable')) {
-            $('#dataTable').DataTable().destroy();
-        }
+        // Initialize the DataTable
+        const table = $('#dataTable').DataTable();
 
-        // Initialize the DataTable with desired settings
-        $('#dataTable').DataTable({
-            "columnDefs": [
-                { "searchable": false, "targets": [-1, 4] }  // Make the last column and the 5th column non-searchable
-            ]
+        // Variable to hold the current filter state
+        let currentPriorityFilter = 'all';
+
+        // --- New Custom Filtering Logic ---
+        $.fn.dataTable.ext.search.push(
+            function(settings, data, dataIndex) {
+                // If the filter is 'all', show every row
+                if (currentPriorityFilter === 'all') {
+                    return true;
+                }
+
+                // Get the row's data needed for calculation
+                const rowNode = settings.aoData[dataIndex].nTr;
+                const pendingCell = $(rowNode).find('.pending-since-cell');
+                if (pendingCell.length === 0) return true;
+
+                const orderDateStr = pendingCell.data('created-at');
+                const orderStatus = (pendingCell.data('status') || '').toLowerCase();
+                if (!orderDateStr) return true;
+
+                // Calculate days pending
+                const today = new Date();
+                const orderDate = new Date(orderDateStr);
+                const daysPending = Math.floor((today - orderDate) / (1000 * 60 * 60 * 24));
+
+                // Apply the filter logic
+                switch (currentPriorityFilter) {
+                    case 'high':
+                        return daysPending > 15 || orderStatus.includes("return");
+                    case 'medium':
+                        return (daysPending > 7 && daysPending <= 15) && !orderStatus.includes("return");
+                    case 'low':
+                        return daysPending <= 7 && !orderStatus.includes("return");
+                    default:
+                        return true;
+                }
+            }
+        );
+
+        // --- Event Listeners for Filter Buttons ---
+        $('#btn-high-priority').on('click', function() {
+            currentPriorityFilter = 'high';
+            table.draw(); // Redraw the table to apply the filter
         });
+
+        $('#btn-medium-priority').on('click', function() {
+            currentPriorityFilter = 'medium';
+            table.draw();
+        });
+
+        $('#btn-low-priority').on('click', function() {
+            currentPriorityFilter = 'low';
+            table.draw();
+        });
+
+        $('#btn-show-all').on('click', function() {
+            currentPriorityFilter = 'all';
+            table.draw();
+        });
+
+        // --- Original script to calculate and color the "Pending Since" cells ---
+        function calculateAndColorCells() {
+    const pendingCells = document.querySelectorAll(".pending-since-cell");
+    const today = new Date();
+
+    pendingCells.forEach(cell => {
+        const orderDateStr = cell.getAttribute("data-created-at");
+        const orderStatus = (cell.getAttribute("data-status") || "").toLowerCase();
+
+        if (!orderDateStr) return;
+
+        const orderDate = new Date(orderDateStr);
+        const timeDiff = today - orderDate;
+        const daysPending = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+
+        // This line displays the number in the cell
+        cell.textContent = daysPending;
+
+        // ✅ ADD THIS LINE to provide a numeric value for sorting
+        cell.setAttribute('data-order', daysPending);
+
+        // Apply color coding
+        if (orderStatus.includes("return") || daysPending > 15) {
+            cell.style.backgroundColor = "#e74a3b"; // Red
+            cell.style.color = "white";
+        } else if (daysPending > 7 && daysPending <= 15) {
+            cell.style.backgroundColor = "#f6c23e"; // Yellow/Orange
+            cell.style.color = "#5a5c69";
+        } else {
+            cell.style.backgroundColor = "#ddf4ff"; // Light blue/info
+            cell.style.color = "#5a5c69";
+        }
+    });
+}
+
+        // Initial calculation on page load
+        calculateAndColorCells();
+
+        // Re-calculate on every table draw (e.g., after filtering or pagination)
+        table.on('draw', function() {
+            calculateAndColorCells();
+        });
+
+        // --- Original script for custom tags ---
+        window.applyCustomTag = function(orderId) {
+            let customTag = document.getElementById('customTagInput' + orderId).value;
+            if (customTag.trim() !== "") {
+                applyTag(orderId, customTag);
+            }
+        }
     });
 </script>
-<script>
-        $(document).ready(function() {
-            var currentUrl = window.location.pathname;
-            $('.nav-item a').each(function() {
-                var linkUrl = $(this).attr('href');
-                if (currentUrl === '/' + linkUrl) {
-                    $(this).parent().addClass('active');
-                }
-            });
-        });
-    </script>
-
 </body>
-
 </html>

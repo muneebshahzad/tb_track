@@ -62,7 +62,7 @@ def format_date(date_str):
     # Parse the date string
     date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
     # Format the date object to only show the date
-    return date_obj.strftime("%Y-%m-%d")
+    return date_obj.isoformat()
 
 
 async def fetch_tracking_data(session, tracking_number):
@@ -209,7 +209,7 @@ async def process_order(session, order):
     order_start_time = time.time()
     input_datetime_str = order.created_at
     parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
-    formatted_datetime = parsed_datetime.strftime("%b %d, %Y")
+    formatted_datetime = parsed_datetime.isoformat()
 
     try:
         status = (order.fulfillment_status).title()
@@ -511,7 +511,7 @@ def get_daraz_orders(statuses):
 
 @app.route('/daraz')
 def daraz():
-    statuses = ['shipped', 'pending', 'ready_to_ship', 'Packed', 'Packed by seller / warehouse']
+    statuses = ['shipped', 'pending', 'ready_to_ship']
     darazOrders = get_daraz_orders(statuses)
     return render_template('daraz.html', darazOrders=darazOrders)
 
@@ -557,13 +557,13 @@ async def fetch_order_details():
 @app.route('/pending')
 def pending_orders():
     all_orders = []
-    pending_items_dict = {}  # Dictionary to track quantities of each unique item
+    pending_items = []  # Use a simple list instead of a dictionary
 
     global daraz_orders, order_details
 
-    # Process Daraz orders with the specified statuses
+    # Process Daraz orders
     for daraz_order in daraz_orders:
-        if daraz_order['status'] in ['Ready To Ship', 'Pending' ,'Packed', 'Packed by seller / warehouse']:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending', 'packed', 'Packed by seller / warehouse']:
             daraz_order_data = {
                 'order_via': 'Daraz',
                 'order_id': daraz_order['order_id'],
@@ -571,27 +571,21 @@ def pending_orders():
                 'tracking_number': daraz_order['items_list'][0]['tracking_number'],
                 'date': daraz_order['date'],
                 'items_list': daraz_order['items_list'],
-                'total_price':daraz_order['total_price']
+                'total_price': daraz_order['total_price']
             }
             all_orders.append(daraz_order_data)
 
+            # Add each item to the pending_items list with its order date
             for item in daraz_order['items_list']:
-                product_title = item['item_title']
-                quantity = item['quantity']
-                item_image = item['item_image']
+                pending_items.append({
+                    'item_image': item['item_image'],
+                    'item_title': item['item_title'],
+                    'quantity': item['quantity'],
+                    'order_date': daraz_order['date']  # Add the date here
+                })
 
-                if product_title in pending_items_dict:
-                    pending_items_dict[product_title]['quantity'] += quantity
-                else:
-                    pending_items_dict[product_title] = {
-                        'item_image': item_image,
-                        'item_title': product_title,
-                        'quantity': quantity
-                    }
-
-    # Process Shopify orders with the specified statuses
+    # Process Shopify orders
     for shopify_order in order_details:
-        # Skip orders with tags starting with "Dispatched"
         if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
             continue
 
@@ -618,28 +612,19 @@ def pending_orders():
             }
             all_orders.append(shopify_order_data)
 
-            # Count quantities for each item in the Shopify order
+            # Add each item to the pending_items list with its order date
             for item in shopify_items_list:
-                product_title = item['item_title']
-                quantity = item['quantity']
-                item_image = item['item_image']
+                pending_items.append({
+                    'item_image': item['item_image'],
+                    'item_title': item['item_title'],
+                    'quantity': item['quantity'],
+                    'order_date': shopify_order['created_at']  # Add the date here
+                })
 
-                if product_title in pending_items_dict:
-                    pending_items_dict[product_title]['quantity'] += quantity
-                else:
-                    pending_items_dict[product_title] = {
-                        'item_image': item_image,
-                        'item_title': product_title,
-                        'quantity': quantity
-                    }
+    # The JavaScript will handle sorting, so we just pass the list
+    half = len(pending_items) // 2
 
-    pending_items = list(pending_items_dict.values())
-    pending_items_sorted = sorted(pending_items, key=lambda x: x['quantity'], reverse=True)
-
-    # Split the list into two halves
-    half = len(pending_items_sorted) // 2
-
-    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
+    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items, half=half)
 
 import json
 import os
@@ -681,7 +666,7 @@ def pending_orders_mobile():
 
     # Daraz Orders
     for daraz_order in daraz_orders:
-        if daraz_order['status'] in ['Ready To Ship', 'Pending', 'Packed', 'Packed by seller / warehouse']:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending', 'packed', 'Packed by seller / warehouse']:
             items_with_status = []
             for item in daraz_order['items_list']:
                 track_num = item.get('tracking_number', 'N/A')
@@ -702,7 +687,7 @@ def pending_orders_mobile():
     for shopify_order in order_details:
         if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
             continue
-        if shopify_order.get('status') in ['Booked', 'Un-Booked']:
+        if shopify_order['status'] in ['Booked', 'Un-Booked']:
             shopify_items_list = []
             for item in shopify_order['line_items']:
                 track_num = item.get('tracking_number', 'N/A')
@@ -818,29 +803,76 @@ def shopify_order_updated():
 from flask import request, render_template, redirect, url_for
 
 
+# In main.py, REPLACE the old @app.route('/scan', ...) function with this one.
+
 @app.route('/scan', methods=['GET', 'POST'])
 def search():
-    search_term = (request.args.get('term') or request.form.get('search_term') or "").split(',')[0].strip()
-    if not search_term:
+    # This block handles the initial page load.
+    # If it's a GET request and there's no 'term' parameter, just show the page.
+    if request.method == 'GET' and 'term' not in request.args:
         return render_template('scan.html')
 
+    # For all other cases (POST requests or GET with a 'term'), we perform a search.
+    search_term = (request.args.get('term') or request.form.get('search_term') or "").split(',')[0].strip()
+
+    if not search_term:
+        return jsonify({"error": "No search term provided"}), 400
+
     order_found = None
+    source = None
 
+    # 1. Search in Shopify orders
     for order in order_details:
-        if order.get('order_id') == search_term or order.get('tracking_id') == search_term:
+        if order.get('order_id') == search_term:
             order_found = order
+            source = 'shopify'
             break
-        for item in order.get('line_items', []):
-            if item.get('tracking_number') == search_term:
+        if any(item.get('tracking_number') == search_term for item in order.get('line_items', [])):
+            order_found = order
+            source = 'shopify'
+            break
+
+    # 2. If not found, search in Daraz orders
+    if not order_found:
+        for order in daraz_orders:
+            if str(order.get('order_id')) == search_term:
                 order_found = order
+                source = 'daraz'
                 break
-        if order_found:
-            break
+            if any(item.get('tracking_number') == search_term for item in order.get('items_list', [])):
+                order_found = order
+                source = 'daraz'
+                break
 
+    # 3. If an order was found, format it into a standardized structure
+    if order_found:
+        if source == 'daraz':
+            formatted_order = {
+                'order_id': str(order_found.get('order_id')),
+                'line_items': [{
+                    'product_title': item.get('item_title'),
+                    'quantity': item.get('quantity'),
+                    'image_src': item.get('item_image'),
+                    'tracking_number': item.get('tracking_number', 'N/A')
+                } for item in order_found.get('items_list', [])],
+                'id': None,
+                'source': 'daraz'
+            }
+        else:
+            formatted_order = order_found.copy()
+            formatted_order['source'] = 'shopify'
+
+        # AJAX requests (GET) get JSON, form submissions (POST) get a re-rendered page
+        if request.method == 'POST':
+            return render_template('scan.html', search_term=search_term, order_found=formatted_order)
+        else:
+            return jsonify(formatted_order)
+
+    # 4. If no order was found
     if request.method == 'POST':
-        return render_template('scan.html', search_term=search_term, order_found=order_found)
-
-    return jsonify(order_found if order_found else {"error": "Order not found"}), 200 if order_found else 404
+        return render_template('scan.html', search_term=search_term, order_found=None)
+    else:
+        return jsonify({"error": "Order not found"}), 404
 
 
 @app.route('/dispatch', methods=['GET'])
@@ -869,7 +901,7 @@ password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
-statuses = ['shipped', 'pending', 'ready_to_ship' ,'Packed', 'Packed by seller / warehouse']
+statuses = ['shipped', 'pending', 'ready_to_ship' ,'packed']
 daraz_orders = get_daraz_orders(statuses)
 
 order_details = asyncio.run(getShopifyOrders())
@@ -903,8 +935,3 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
-
-
-
-
-

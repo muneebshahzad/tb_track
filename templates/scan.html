@@ -2,460 +2,334 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>QR Scanner Application</title>
-  <!-- Bootstrap CSS -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Tick Bags Scanner</title>
   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <!-- Font Awesome for icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css">
+
   <style>
-    .hidden { display: none; }
-    .large-button { width: 100%; height: 100px; font-size: 1.2em; }
-    .line-item-img { width: 50px; height: auto; }
+    body { background-color: #f4f4f4; }
+    .hidden { display: none !important; }
+    .large-button { width: 100%; height: 100px; font-size: 1.5em; font-weight: bold; }
+
+    #scanner-container {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0, 0, 0, 0.8); z-index: 999;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    #reader {
+        width: 90%; max-width: 500px; background-color: white; border: 2px solid #ddd;
+    }
+    #close-scanner-btn {
+        position: absolute; top: 20px; right: 20px; font-size: 2em; color: white; cursor: pointer;
+    }
+
+    #scan-feedback {
+        position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%);
+        width: 90%; max-width: 400px; padding: 15px; border-radius: 8px;
+        text-align: center; font-size: 1.2em; font-weight: bold; color: white;
+        z-index: 1000; transition: bottom 0.3s ease-in-out;
+    }
+    #scan-feedback.show { bottom: 20px; }
+    #scan-feedback.success { background-color: #28a745; }
+    #scan-feedback.error { background-color: #dc3545; }
+
+    .order-item { display: flex; align-items: center; margin-bottom: 10px; }
+    .order-item img { width: 50px; height: 50px; margin-right: 15px; border-radius: 4px; }
+
+    #search-modal-body .order-item img {
+        width: 100px;
+        height: 100px;
+        object-fit: cover;
+    }
+    #search-modal-body .order-item {
+        padding: 10px; border-bottom: 1px solid #eee;
+    }
+    #search-modal-body .order-item:last-child { border-bottom: none; }
+
+    .table-items-col img {
+        width: 40px;
+        height: 40px;
+        margin-right: 10px;
+        border-radius: 4px;
+    }
+    .table-items-col div {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+    }
   </style>
-  <!-- Include the HTML5 QR Code scanner library -->
-  <script src="https://unpkg.com/html5-qrcode/minified/html5-qrcode.min.js"></script>
+  <script src="{{ url_for('static', filename='html5-qrcode.min.js') }}"></script>
 </head>
 <body>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-
-  <div class="container mt-5">
-    <!-- Main Buttons -->
-    <div id="main-buttons" class="row">
-      <div class="col-12 col-md-4 mb-3">
-        <button id="search-btn" class="btn btn-primary large-button">
-          <i class="fas fa-search"></i><br>Search
-        </button>
-      </div>
-      <div class="col-12 col-md-4 mb-3">
-        <button id="dispatch-btn" class="btn btn-success large-button">
-          <i class="fas fa-truck"></i><br>Dispatch
-        </button>
-      </div>
-      <div class="col-12 col-md-4 mb-3">
-        <button id="return-btn" class="btn btn-danger large-button">
-          <i class="fas fa-undo"></i><br>Return
-        </button>
-      </div>
-    </div>
-
-    <!-- Search Panel -->
-    <div id="search-panel" class="hidden mt-5">
-      <h2>Search Order</h2>
-      <form id="scan-form" method="post" action="/scan">
-        <div class="form-group">
-          <label for="tracking-input">Tracking Number / Order Number</label>
-          <input type="text" class="form-control" id="tracking-input" name="search_term" placeholder="Enter or Scan Code" value="{{ search_term }}">
+  <div class="container-fluid mt-4">
+    <div id="main-view">
+      <h2 id="view-title" class="text-center mb-4">Scan Orders</h2>
+      <div id="main-buttons" class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="col-12 mb-3"><button id="search-btn" class="btn btn-primary large-button"><i class="fas fa-search"></i><br>Search Order</button></div>
+            <div class="col-12 mb-3"><button id="dispatch-btn" class="btn btn-success large-button"><i class="fas fa-truck"></i><br>Scan for Dispatch</button></div>
+            <div class="col-12 mb-3"><button id="return-btn" class="btn btn-danger large-button"><i class="fas fa-undo"></i><br>Scan for Return</button></div>
         </div>
-        <button type="submit" class="btn btn-secondary btn-lg">
-          <i class="fas fa-qrcode"></i> Search
-        </button>
-      </form>
-      <button id="scan-camera-btn" class="btn btn-warning btn-lg mt-3">
-        <i class="fas fa-camera"></i> Scan with Camera
-      </button>
-      <button type="button" id="back-btn" class="btn btn-link btn-lg mt-3">Back</button>
-
-      {% if request.method == 'POST' %}
-      <div class="mt-4">
-        {% if order_found %}
-          <div class="alert alert-success">Order found for "{{ search_term }}".</div>
-          <table id="searchTable" class="table table-bordered">
-            <thead>
-              <tr>
-                <th>TITLE</th>
-                <th>QUANTITY</th>
-                <th>IMAGE</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for item in order_found.line_items %}
-              <tr>
-                <td>{{ item.product_title }}</td>
-                <td>{{ item.quantity }}</td>
-                <td>
-                  {% if item.image_src %}
-<img src="{{ item.image_src }}" alt="{{ item.product_title }}" class="line-item-img" style="width:300px; height:auto;">
-
-                  {% else %}
-                    No image available
-                  {% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        {% else %}
-          <div class="alert alert-danger">No order found for "{{ search_term }}".</div>
-        {% endif %}
       </div>
-      {% endif %}
-    </div>
 
-    <!-- Dispatch Panel -->
-    <div id="dispatch-panel" class="hidden mt-5">
-      <h2>Dispatch Orders</h2>
-      <div class="form-group">
-        <label for="dispatch-tracking-input">Tracking Number / Order Number</label>
-        <input type="text" class="form-control" id="dispatch-tracking-input" placeholder="Enter or Scan Code">
+      <div id="list-view" class="hidden">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <button id="back-btn" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back</button>
+          <h3 id="list-title"></h3>
+          <button id="generate-report-btn" class="btn btn-primary">Generate Report</button>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-bordered table-striped bg-white">
+                <thead class="thead-dark">
+                    <tr>
+                        <th>Order #</th>
+                        <th>Items</th>
+                        <th class="text-center">Total Pieces</th>
+                        <th class="text-center">Source</th>
+                    </tr>
+                </thead>
+                <tbody id="order-list-body">
+                </tbody>
+            </table>
+        </div>
       </div>
-      <button id="dispatch-scan-btn" class="btn btn-warning btn-lg">
-        <i class="fas fa-camera"></i> Scan with Camera
-      </button>
-      <button id="dispatch-add-btn" class="btn btn-primary btn-lg">Add to Table</button>
-
-      <table id="dispatchTable" class="table table-bordered mt-3">
-        <thead>
-          <tr>
-            <th>Sr#</th>
-            <th>Order#</th>
-            <th>Items</th>
-          </tr>
-        </thead>
-        <tbody>
-          <!-- Rows populated dynamically -->
-        </tbody>
-      </table>
-      <button id="generate-dispatch-report" class="btn btn-primary btn-lg mt-3">
-        Generate Dispatch Report
-      </button>
-      <button type="button" id="dispatch-back-btn" class="btn btn-link btn-lg mt-3">Back</button>
     </div>
-
-    <!-- Return Panel -->
-    <div id="return-panel" class="hidden mt-5">
-      <h2>Return Orders</h2>
-      <div class="form-group">
-        <label for="return-tracking-input">Tracking Number / Order Number</label>
-        <input type="text" class="form-control" id="return-tracking-input" placeholder="Enter or Scan Code">
-      </div>
-      <button id="return-scan-btn" class="btn btn-warning btn-lg">
-        <i class="fas fa-camera"></i> Scan with Camera
-      </button>
-      <button id="return-add-btn" class="btn btn-primary btn-lg">Add to Table</button>
-
-      <table id="returnTable" class="table table-bordered mt-3">
-        <thead>
-          <tr>
-            <th>Sr#</th>
-            <th>Order#</th>
-            <th>Tracking#</th>
-            <th>Items</th>
-          </tr>
-        </thead>
-        <tbody>
-          <!-- Rows populated dynamically -->
-        </tbody>
-      </table>
-      <button id="generate-return-report" class="btn btn-danger btn-lg mt-3">
-        Generate Return Report
-      </button>
-      <button type="button" id="return-back-btn" class="btn btn-link btn-lg mt-3">Back</button>
-    </div>
-
-    <!-- Global Reader for QR Scanner (Placed outside any panel) -->
-    <div id="reader" class="hidden"></div>
   </div>
 
-<!-- Dispatch & Return Functionality -->
+  <div id="scanner-container" class="hidden">
+    <div id="reader"></div>
+    <span id="close-scanner-btn">&times;</span>
+  </div>
+
+  <div id="scan-feedback"></div>
+
+  <div class="modal fade" id="search-result-modal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="search-modal-title">Order Details</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+            </div>
+            <div class="modal-body" id="search-modal-body"></div>
+        </div>
+    </div>
+  </div>
+
+<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+
 <script>
-  document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', function() {
+    let activeList = [];
+    let currentMode = '';
+    let html5QrCode = null;
+
+    const successSound = new Audio("{{ url_for('static', filename='success.mp3') }}");
+    const errorSound = new Audio("{{ url_for('static', filename='error.mp3') }}");
+
     const mainButtons = document.getElementById('main-buttons');
+    const listView = document.getElementById('list-view');
+    const listTitle = document.getElementById('list-title');
+    const orderListBody = document.getElementById('order-list-body');
+    const scannerContainer = document.getElementById('scanner-container');
+    const feedbackPanel = document.getElementById('scan-feedback');
+    const generateReportBtn = document.getElementById('generate-report-btn');
 
-    let dispatchOrders = [];
-    let returnOrders = [];
-    // Global variable to track any active scanner for dispatch/return
-    window.currentQrScanner = null;
-
-    // ---------- Dispatch Panel Event Listeners ----------
-    document.getElementById('dispatch-btn').addEventListener('click', function () {
-      mainButtons.classList.add('hidden');
-      document.getElementById('dispatch-panel').classList.remove('hidden');
-    });
-
-    document.getElementById('dispatch-back-btn').addEventListener('click', function () {
-      document.getElementById('dispatch-panel').classList.add('hidden');
-      mainButtons.classList.remove('hidden');
-      if (window.currentQrScanner) {
-        window.currentQrScanner.clear().catch(console.error);
-        window.currentQrScanner = null;
-        document.getElementById('reader').classList.add('hidden');
-      }
-    });
-
-    document.getElementById('dispatch-add-btn').addEventListener('click', function () {
-      handleOrderAddition('dispatch-tracking-input', 'dispatchTable', dispatchOrders);
-    });
-
-    document.getElementById('dispatch-scan-btn').addEventListener('click', function () {
-      scanCode('dispatch-tracking-input', 'dispatchTable', dispatchOrders);
-    });
-
-    document.getElementById('generate-dispatch-report').addEventListener('click', function () {
-      generateReport(dispatchOrders, 'Dispatch Report');
-    });
-
-    // ---------- Return Panel Event Listeners ----------
-    document.getElementById('return-btn').addEventListener('click', function () {
-      mainButtons.classList.add('hidden');
-      document.getElementById('return-panel').classList.remove('hidden');
-    });
-
-    document.getElementById('return-back-btn').addEventListener('click', function () {
-      document.getElementById('return-panel').classList.add('hidden');
-      mainButtons.classList.remove('hidden');
-      if (window.currentQrScanner) {
-        window.currentQrScanner.clear().catch(console.error);
-        window.currentQrScanner = null;
-        document.getElementById('reader').classList.add('hidden');
-      }
-    });
-
-    document.getElementById('return-add-btn').addEventListener('click', function () {
-      handleOrderAddition('return-tracking-input', 'returnTable', returnOrders);
-    });
-
-    document.getElementById('return-scan-btn').addEventListener('click', function () {
-      scanCode('return-tracking-input', 'returnTable', returnOrders);
-    });
-
-    document.getElementById('generate-return-report').addEventListener('click', function () {
-      generateReport(returnOrders, 'Return Report');
-    });
-
-    // ---------- Helper Functions ----------
-    function handleOrderAddition(inputId, tableId, ordersList) {
-      const inputField = document.getElementById(inputId);
-      const searchTerm = inputField.value.trim();
-      inputField.value = ''; // Clear input
-
-      if (!searchTerm) {
-        alert('Please enter or scan a code.');
-        return;
-      }
-
-      fetch(`/scan?term=${searchTerm}`)
-        .then(response => response.json())
-        .then(order => {
-          if (order.error) {
-            alert(order.error);
-            return;
-          }
-          // Prevent duplicate orders (you can use order.id or order.order_id based on your data)
-          if (ordersList.some(o => o.order_id === order.order_id)) {
-            alert('Order already added.');
-            return;
-          }
-          ordersList.push(order);
-          populateTable(tableId, ordersList);
-        })
-        .catch(() => alert('Order not found.'));
-    }
-
-    function scanCode(inputId, tableId, ordersList) {
-      const reader = document.getElementById('reader');
-
-      // Clear any existing scanner instance
-      if (window.currentQrScanner) {
-        window.currentQrScanner.clear().catch(error => {
-          console.error('Error clearing previous scanner:', error);
-        });
-        window.currentQrScanner = null;
-      }
-
-      // Initialize the QR scanner for this panel
-      const qrScanner = new Html5QrcodeScanner('reader', { fps: 10, qrbox: 250 });
-      window.currentQrScanner = qrScanner;
-
-      qrScanner.render(decodedText => {
-        // Set the scanned code to the appropriate input field
-        document.getElementById(inputId).value = decodedText;
-        // Stop the scanner and hide the reader
-        qrScanner.clear().then(() => {
-          reader.classList.add('hidden');
-          window.currentQrScanner = null;
-        }).catch(error => {
-          console.error('Failed to clear scanner:', error);
-        });
-        // Automatically process the scanned order
-        handleOrderAddition(inputId, tableId, ordersList);
-      });
-
-      // Show the scanner
-      reader.classList.remove('hidden');
-    }
-
-    function populateTable(tableId, orders) {
-      const tableBody = document.querySelector(`#${tableId} tbody`);
-      tableBody.innerHTML = ''; // Clear existing rows
-      orders.forEach((order, index) => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-          <td>${index + 1}</td>
-          <td>${order.order_id}</td>
-          <td>
-            ${order.line_items
-              .map(item => `
-                <div>
-                  <img src="${item.image_src || ''}" alt="${item.product_title}" class="line-item-img">
-                  ${item.product_title} x ${item.quantity}<br>
-                  ${item.tracking_number}
-                </div>
-              `)
-              .join('')}
-          </td>
-        `;
-        tableBody.appendChild(row);
-      });
-    }
-
-    // Updated generateReport function to apply Shopify tags and, for Dispatch Report, generate the loadsheet
-    function generateReport(orders, reportType) {
-      if (orders.length === 0) {
-        alert(`No orders added for ${reportType}.`);
-        return;
-      }
-      // Choose the correct tag based on report type
-      let tag;
-      if (reportType === "Dispatch Report") {
-        tag = "Dispatched";
-      } else if (reportType === "Return Report") {
-        tag = "Return Received";
-      } else {
-        alert("Unknown report type.");
-        return;
-      }
-      // For each order, call the /apply_tag endpoint
-      let tagPromises = orders.map(order => {
-        return fetch("/apply_tag", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            order_id: order.id,  // adjust if needed (e.g. order.order_id)
-            tag: tag
-          })
-        }).then(response => response.json());
-      });
-
-      Promise.all(tagPromises)
-        .then(results => {
-          console.log(`${reportType} tags applied:`, orders, results);
-          // If Dispatch Report, generate the loadsheet
-          if (reportType === "Dispatch Report") {
-            // Extract cn_numbers from all dispatch orders. We assume each line item has a 'tracking_number'
-            let cnNumbers = [];
-            orders.forEach(order => {
-              order.line_items.forEach(item => {
-                if (item.tracking_number) {
-                  cnNumbers.push(item.tracking_number);
-                }
-              });
-            });
-            // Remove duplicate tracking numbers
-            cnNumbers = [...new Set(cnNumbers)];
-
-            fetch("/generate_loadsheet", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                cn_numbers: cnNumbers
-              })
-            })
-            .then(response => response.json())
-            .then(loadsheetResponse => {
-              console.log("Loadsheet generated: ", loadsheetResponse);
-              alert(`${reportType} generated successfully, tags applied and loadsheet created.`);
-            })
-            .catch(error => {
-              console.error("Error generating loadsheet:", error);
-              alert("Error generating loadsheet.");
-            });
-          } else {
-            // For Return Report just show a success message.
-            alert(`${reportType} generated successfully and tags applied.`);
-          }
-        })
-        .catch(error => {
-          console.error("Error applying tags:", error);
-          alert("Error applying tags. Check console for details.");
-        });
-    }
-  });
-</script>
-
-
-  <!-- Search Panel Functionality -->
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const mainButtons = document.getElementById('main-buttons');
-      const actionPanel = document.getElementById('search-panel');
-      const backBtn = document.getElementById('back-btn');
-      const scanCameraBtn = document.getElementById('scan-camera-btn');
-      const reader = document.getElementById('reader');
-      const trackingInput = document.getElementById('tracking-input');
-      let searchQrScanner = null;
-
-      function showActionPanel() {
-        mainButtons.classList.add('hidden');
-        actionPanel.classList.remove('hidden');
-      }
-
-      document.getElementById('search-btn').addEventListener('click', function(){
-        showActionPanel();
-      });
-
-      backBtn.addEventListener('click', function(){
-        actionPanel.classList.add('hidden');
+    function showMainView() {
+        listView.classList.add('hidden');
         mainButtons.classList.remove('hidden');
-        stopSearchScanner();
-      });
+        document.getElementById('view-title').classList.remove('hidden');
+    }
 
-      scanCameraBtn.addEventListener('click', function() {
-        // Clear any existing table data if needed.
-        const tableBody = document.querySelector('#searchTable tbody');
-        if (tableBody) {
-          tableBody.innerHTML = '';
-        }
-
-        // Clear any previous scanner instance
-        if (searchQrScanner) {
-          searchQrScanner.clear().catch(console.error);
-          searchQrScanner = null;
-        }
-
-        searchQrScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-        searchQrScanner.render(onSearchScanSuccess);
-        reader.classList.remove('hidden');
-      });
-
-      function onSearchScanSuccess(decodedText) {
-        trackingInput.value = decodedText;
-        stopSearchScanner();
-        document.getElementById('scan-form').submit();
-      }
-
-      function stopSearchScanner() {
-        if (searchQrScanner) {
-          searchQrScanner.clear().catch(error => console.error(error));
-          searchQrScanner = null;
-        }
-        reader.classList.add('hidden');
-      }
-
-      // Maintain panel state on postback if necessary.
-      {% if request.method == 'POST' %}
-        actionPanel.classList.remove('hidden');
+    function showListView(mode) {
+        currentMode = mode;
+        activeList = [];
         mainButtons.classList.add('hidden');
-      {% endif %}
-    });
-  </script>
+        document.getElementById('view-title').classList.add('hidden');
+        listView.classList.remove('hidden');
+        listTitle.textContent = `${mode} List (0)`;
+        orderListBody.innerHTML = '<tr><td colspan="4" class="text-center">Scan your first order.</td></tr>';
+        generateReportBtn.className = `btn ${mode === 'Dispatch' ? 'btn-success' : 'btn-danger'}`;
+        generateReportBtn.textContent = `Generate ${mode} Report`;
+        startScanner(); // <<< THE FIX IS HERE
+    }
 
-  <!-- jQuery and Bootstrap JS -->
-  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    function showFeedback(message, type) {
+        feedbackPanel.textContent = message;
+        feedbackPanel.className = ``;
+        feedbackPanel.classList.add(type, 'show');
+
+        const soundToPlay = (type === 'success') ? successSound : errorSound;
+        soundToPlay.play().catch(error => {
+            console.error(`Audio playback failed for ${type}.mp3:`, error);
+        });
+
+        setTimeout(() => { feedbackPanel.classList.remove('show'); }, 2000);
+    }
+
+    function onScanSuccess(decodedText) {
+        if (currentMode === 'Search') {
+            closeScanner();
+            handleSingleSearch(decodedText);
+        } else {
+            handleOrderAddition(decodedText);
+        }
+    }
+
+    function startScanner() {
+        if (!html5QrCode) {
+            html5QrCode = new Html5Qrcode('reader');
+        }
+        scannerContainer.classList.remove('hidden');
+        html5QrCode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            onScanSuccess
+        ).catch(err => {
+            alert('Could not start camera. Please grant permission and try again.');
+            closeScanner();
+        });
+    }
+
+    function closeScanner() {
+        if (html5QrCode && html5QrCode.isScanning) {
+            html5QrCode.stop().catch(err => console.error("Error stopping scanner:", err));
+        }
+        scannerContainer.classList.add('hidden');
+    }
+
+    async function handleSingleSearch(searchTerm) {
+        const order = await findOrder(searchTerm);
+        if (order) {
+            const modalTitle = document.getElementById('search-modal-title');
+            const modalBody = document.getElementById('search-modal-body');
+
+            modalTitle.textContent = `Order #${order.order_id}`;
+            modalBody.innerHTML = order.line_items.map(item => `
+                <div class="order-item">
+                    <img src="${item.image_src || ''}" alt="Product Image">
+                    <div class="flex-grow-1">
+                        <strong>${item.product_title}</strong>
+                        <p class="mb-0">Quantity: ${item.quantity}</p>
+                    </div>
+                </div>
+            `).join('');
+
+            $('#search-result-modal').modal('show');
+        } else {
+            alert('Order not found!');
+        }
+    }
+
+    async function handleOrderAddition(searchTerm) {
+        if (!searchTerm) return;
+
+        const order = await findOrder(searchTerm);
+
+        if (!order) {
+            showFeedback('Order not found!', 'error');
+            return;
+        }
+
+        if (activeList.some(existingOrder => existingOrder.order_id === order.order_id)) {
+            showFeedback('Duplicate order!', 'error');
+            return;
+        }
+
+        activeList.unshift(order);
+        populateOrderList();
+        showFeedback(`Added: ${order.order_id}`, 'success');
+    }
+
+    async function findOrder(searchTerm) {
+        try {
+            const response = await fetch(`/scan?term=${encodeURIComponent(searchTerm)}`);
+            if (!response.ok) return null;
+            return await response.json();
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function populateOrderList() {
+        listTitle.textContent = `${currentMode} List (${activeList.length})`;
+        if (activeList.length === 0) {
+            orderListBody.innerHTML = '<tr><td colspan="4" class="text-center">Scan your first order.</td></tr>';
+            return;
+        }
+
+        orderListBody.innerHTML = activeList.map(order => {
+            const totalPieces = order.line_items.reduce((sum, item) => sum + item.quantity, 0);
+            const itemsHtml = order.line_items.map(item => `
+                <div>
+                    <img src="${item.image_src || ''}" alt="Item Image">
+                    <span>${item.product_title} (x${item.quantity})</span>
+                </div>
+            `).join('');
+
+            return `
+                <tr>
+                    <td><strong>#${order.order_id}</strong></td>
+                    <td class="table-items-col">${itemsHtml}</td>
+                    <td class="text-center align-middle"><strong>${totalPieces}</strong></td>
+                    <td class="text-center align-middle"><span class="badge badge-info p-2">${order.source.toUpperCase()}</span></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    async function generateReport() {
+        if (activeList.length === 0) return alert(`No orders to generate ${currentMode} report.`);
+
+        const shopifyOrders = activeList.filter(o => o.source === 'shopify' && o.id);
+        const tag = currentMode;
+
+        if (shopifyOrders.length > 0) {
+            try {
+                await Promise.all(shopifyOrders.map(order => fetch("/apply_tag", {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ order_id: order.id, tag: tag })
+                })));
+            } catch (error) { return alert("Error applying tags."); }
+        }
+
+        if (currentMode === "Dispatch") {
+            const cnNumbers = [...new Set(activeList.flatMap(o => o.line_items.map(item => item.tracking_number)).filter(Boolean))];
+            if (cnNumbers.length > 0) {
+                 try {
+                    const response = await fetch("/generate_loadsheet", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ cn_numbers: cnNumbers })
+                    });
+                    const data = await response.json();
+                    if (!response.ok || data.status !== 1) throw new Error(data.error_message || 'Failed to generate loadsheet.');
+                } catch (error) { return alert(`Error generating loadsheet: ${error.message}`); }
+            }
+        }
+
+        alert(`${currentMode} report generated successfully for ${activeList.length} orders!`);
+        activeList = [];
+        populateOrderList();
+        showMainView();
+    }
+
+    function initializeScanMode(mode, action) {
+        successSound.play().catch(()=>{});
+        successSound.pause();
+        errorSound.play().catch(()=>{});
+        errorSound.pause();
+        action(mode);
+    }
+
+    document.getElementById('search-btn').addEventListener('click', () => initializeScanMode('Search', (m) => { currentMode = m; startScanner(); }));
+    document.getElementById('dispatch-btn').addEventListener('click', () => initializeScanMode('Dispatch', showListView));
+    document.getElementById('return-btn').addEventListener('click', () => initializeScanMode('Return', showListView));
+    document.getElementById('close-scanner-btn').addEventListener('click', closeScanner);
+    document.getElementById('back-btn').addEventListener('click', () => { closeScanner(); showMainView(); });
+    generateReportBtn.addEventListener('click', generateReport);
+});
+</script>
 </body>
 </html>

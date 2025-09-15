@@ -133,8 +133,14 @@
 
 
                     <div class="card shadow mb-4">
-                        <div class="card-header py-3">
+                        <div class="card-header py-3 d-flex justify-content-between align-items-center">
                             <h6 class="m-0 font-weight-bold text-primary">Pending Orders </h6>
+                            <div class="input-group" style="width: auto;">
+                                <div class="input-group-prepend">
+                                    <label class="input-group-text" for="datetime-filter">From:</label>
+                                </div>
+                                <input type="datetime-local" id="datetime-filter" class="form-control form-control-sm">
+                            </div>
                         </div>
 <div class="top-products" style="display: flex; justify-content: center; gap: 20px;">
     <div class="table-responsive" style="flex: 1;">
@@ -149,7 +155,7 @@
             </thead>
             <tbody>
                 {% for item in pending_items[:half] %}
-                <tr>
+                <tr data-order-date="{{ item.order_date }}">
                     <td><img src="{{ item.item_image }}" width="75" height="75"></td>
                     <td><span contenteditable="true">{{ item.item_title }}</span></td>
                     <td><span contenteditable="true">{{ item.quantity }}</span></td>
@@ -172,7 +178,7 @@
             </thead>
             <tbody>
                 {% for item in pending_items[half:] %}
-                <tr>
+                <tr data-order-date="{{ item.order_date }}">
                     <td><img src="{{ item.item_image }}" width="75" height="75"></td>
                     <td><span contenteditable="true">{{ item.item_title }}</span></td>
                     <td><span contenteditable="true">{{ item.quantity }}</span></td>
@@ -361,7 +367,8 @@ function updateTotals() {
 
     // Initial call
     updateTotals();
-    </script><script>
+    </script>
+<script>
   function parseFlexibleDate(dateStr) {
     if (!dateStr) return null;
 
@@ -370,7 +377,7 @@ function updateTotals() {
 
     // Try direct parse
     let date = new Date(dateStr);
-    if (!isNaN(date)) return date;
+    if (!isNaN(date.getTime())) return date;
 
     // Try "Aug 06, 2025"
     const match = dateStr.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
@@ -424,72 +431,9 @@ function updateTotals() {
 
 <script>
 (function () {
-  // Run after the DOM and DataTables init
-  document.addEventListener('DOMContentLoaded', function () {
-    combineSortSplitTopTables();
-  });
+  document.addEventListener('DOMContentLoaded', initTopProductsLogic);
 
-  // If your page re-renders those tables dynamically, you can call this again later
-  function combineSortSplitTopTables() {
-    // Find the flex container that holds the two small product tables
-const flex = document.querySelector('.card .top-products');
-    if (!flex) { console.warn('Top products flex container not found'); return; }
-
-    const tables = flex.querySelectorAll('table.table');
-    if (tables.length < 2) { console.warn('Expected two top product tables, found:', tables.length); return; }
-
-    const [leftTable, rightTable] = tables;
-    const leftBody  = leftTable.tBodies && leftTable.tBodies[0];
-    const rightBody = rightTable.tBodies && rightTable.tBodies[0];
-    if (!leftBody || !rightBody) { console.warn('One of the top tables has no <tbody>'); return; }
-
-    // 1) Collect all rows from both tables
-    const rows = [...leftBody.rows, ...rightBody.rows];
-
-    // Nothing to do?
-    if (rows.length < 2) return;
-
-    // 2) Detach current rows to avoid HierarchyRequestError on re-append
-    rows.forEach(r => r.parentNode && r.parentNode.removeChild(r));
-
-    // 3) Sort by Title (2nd column), then by Quantity (3rd column) DESC as tiebreaker
-    rows.sort((a, b) => {
-      const titleA = (a.cells[1]?.textContent || '').trim();
-      const titleB = (b.cells[1]?.textContent || '').trim();
-      const byTitle = titleA.localeCompare(titleB, undefined, { numeric: true, sensitivity: 'base' });
-      if (byTitle !== 0) return byTitle;
-
-      const qa = parseInt((a.cells[2]?.textContent || '').trim(), 10) || 0;
-      const qb = parseInt((b.cells[2]?.textContent || '').trim(), 10) || 0;
-      return qb - qa; // higher qty first when same title
-    });
-
-    // 4) Distribute back
-    // MODE A (default): split-halves (gives reading order A,A,B,B down the page)
-    const splitHalves = true; // <-- set to false to use round-robin instead
-
-    if (splitHalves) {
-      const mid = Math.ceil(rows.length / 2);
-      const leftFrag  = document.createDocumentFragment();
-      const rightFrag = document.createDocumentFragment();
-      rows.slice(0, mid).forEach(r => leftFrag.appendChild(r));
-      rows.slice(mid).forEach(r => rightFrag.appendChild(r));
-      leftBody.appendChild(leftFrag);
-      rightBody.appendChild(rightFrag);
-    } else {
-      // MODE B: round-robin (keeps columns visually balanced: L,R,L,R,...)
-      rows.forEach((r, i) => (i % 2 === 0 ? leftBody : rightBody).appendChild(r));
-    }
-
-    console.log(`Combined + sorted ${rows.length} product rows across both top tables.`);
-  }
-})();
-</script>
-<script>
-(function () {
-  document.addEventListener('DOMContentLoaded', initTopProductsSearchAndSort);
-
-  function initTopProductsSearchAndSort() {
+  function initTopProductsLogic() {
     // Find the flex container holding the two small product tables
     const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
     if (!flex) { console.warn('Top products flex container not found'); return; }
@@ -553,16 +497,30 @@ const flex = document.querySelector('.card .top-products');
     const splitHalves = true;
 
     function render(filterText = '') {
-      const f = norm(filterText);
+        const f = norm(filterText);
 
-      // Filter
-      let rows = masterRows.filter(r => !f || keys.get(r).includes(f));
+        // Get the current date filter value
+        const datetimeInput = document.getElementById('datetime-filter');
+        const filterValue = datetimeInput.value;
 
-      // Sort
-      rows.sort(compareRows);
+        // Filter by both search text and date
+        let rows = masterRows.filter(r => {
+            const rowSearchableText = keys.get(r);
+            const searchMatch = !f || rowSearchableText.includes(f);
+
+            // This is the corrected logic:
+            // The date matches if EITHER no filter is set, OR the item's date passes the filter.
+            const orderDateStr = r.getAttribute('data-order-date');
+            const orderDate = orderDateStr ? parseFlexibleDate(orderDateStr) : null;
+            const dateMatch = !filterValue || (orderDate && orderDate >= new Date(filterValue));
+
+            return searchMatch && dateMatch;
+        });
+
+        // Sort
+        rows.sort(compareRows);
 
       // Detach any existing rows from both bodies
-      // (quickly clear bodies without killing references)
       while (leftBody.firstChild) leftBody.removeChild(leftBody.firstChild);
       while (rightBody.firstChild) rightBody.removeChild(rightBody.firstChild);
 
@@ -588,6 +546,11 @@ const flex = document.querySelector('.card .top-products');
     $input.addEventListener('input', () => {
       clearTimeout(timer);
       timer = setTimeout(() => render($input.value), 120);
+    });
+
+    // We now render when the date filter changes as well
+    document.getElementById('datetime-filter').addEventListener('change', () => {
+        render($input.value);
     });
 
     // Initial render (no filter)
@@ -630,6 +593,112 @@ const flex = document.querySelector('.card .top-products');
             });
         });
     });
+</script>
+
+<script>
+(function () {
+  document.addEventListener('DOMContentLoaded', initFilteringLogic);
+
+  function initFilteringLogic() {
+    // --- Setup for Top Product Tables ---
+    const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
+    if (!flex) return;
+    const [leftTable, rightTable] = flex.querySelectorAll('table.table');
+    const leftBody  = leftTable.tBodies[0];
+    const rightBody = rightTable.tBodies[0];
+    if (!leftBody || !rightBody) return;
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'mb-2';
+    toolbar.innerHTML = `
+      <div class="input-group input-group-sm" style="max-width:420px;">
+        <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div>
+        <input type="search" id="topProductsSearch" class="form-control" placeholder="Search top products...">
+        <div class="input-group-append"><span class="input-group-text" id="topProductsCount"></span></div>
+      </div>`;
+    flex.parentNode.insertBefore(toolbar, flex);
+
+    const $input = toolbar.querySelector('#topProductsSearch');
+    const $count = toolbar.querySelector('#topProductsCount');
+    const masterRows = [...leftBody.rows, ...rightBody.rows];
+    masterRows.forEach(r => r.remove());
+
+    const norm = s => (s || '').toString().toLowerCase();
+    const keys = new Map(masterRows.map(row => {
+      const title = row.cells[1]?.textContent || '';
+      const qty   = row.cells[2]?.textContent || '';
+      return [row, norm(`${title} ${qty}`)];
+    }));
+
+    function compareRows(a, b) {
+      const byTitle = (a.cells[1]?.textContent || '').localeCompare(b.cells[1]?.textContent || '', undefined, { numeric: true, sensitivity: 'base' });
+      if (byTitle !== 0) return byTitle;
+      return (parseInt(b.cells[2]?.textContent || 0, 10)) - (parseInt(a.cells[2]?.textContent || 0, 10));
+    }
+
+    function renderTopTables(searchText = '') {
+      const f = norm(searchText);
+      const filterValue = document.getElementById('datetime-filter').value;
+
+      let rows = masterRows.filter(r => {
+        const searchMatch = !f || keys.get(r).includes(f);
+        const orderDateStr = r.getAttribute('data-order-date');
+        const orderDate = orderDateStr ? parseFlexibleDate(orderDateStr) : null;
+        const dateMatch = !filterValue || (orderDate && orderDate >= new Date(filterValue));
+        return searchMatch && dateMatch;
+      });
+
+      rows.sort(compareRows);
+
+      while (leftBody.firstChild) leftBody.removeChild(leftBody.firstChild);
+      while (rightBody.firstChild) rightBody.removeChild(rightBody.firstChild);
+
+      const mid = Math.ceil(rows.length / 2);
+      rows.slice(0, mid).forEach(r => leftBody.appendChild(r));
+      rows.slice(mid).forEach(r => rightBody.appendChild(r));
+
+      $count.textContent = `${rows.length}/${masterRows.length}`;
+    }
+
+    // --- Setup for Main DataTable ---
+    const mainDataTable = $('#dataTable').DataTable();
+
+    // Add a persistent custom filter that reads the date input value
+    $.fn.dataTable.ext.search.push(
+        function(settings, data, dataIndex) {
+            if (settings.nTable.id !== 'dataTable') return true;
+
+            const filterValue = document.getElementById('datetime-filter').value;
+            if (!filterValue) return true;
+
+            const filterDate = new Date(filterValue);
+            if (isNaN(filterDate.getTime())) return true;
+
+            const rowNode = settings.aoData[dataIndex].nTr;
+            const orderDateStr = $(rowNode).find('.pending-since').attr('data-order-date');
+            const orderDate = parseFlexibleDate(orderDateStr);
+            if (!orderDate) return true;
+
+            return orderDate >= filterDate;
+        }
+    );
+
+    // --- Unified Event Listeners ---
+    let timer;
+    $input.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => renderTopTables($input.value), 120);
+    });
+
+    document.getElementById('datetime-filter').addEventListener('change', () => {
+        renderTopTables($input.value); // Redraw top tables
+        mainDataTable.draw();        // Redraw main table
+    });
+
+    // Initial render
+    renderTopTables('');
+  }
+})();
 </script>
 
 </body>

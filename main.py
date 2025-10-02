@@ -4,7 +4,9 @@ import threading
 import time
 from email.mime.text import MIMEText
 from flask import render_template, request, jsonify
-import datetime
+import datetime as dt
+from datetime import datetime
+
 import lazop
 import os
 import hmac
@@ -27,7 +29,6 @@ app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
 # Global data stores (remains the same)
 order_details = []
 daraz_orders = []
-semaphore = asyncio.Semaphore(2)
 
 
 @app.route('/send-email', methods=['POST'])
@@ -377,11 +378,12 @@ RATE_LIMIT = 2  # 2 requests per second
 LAST_REQUEST_TIME = 0
 
 
-async def limited_request(coroutine):
+async def limited_request(coroutine, semaphore):
     """Ensure requests adhere to rate limits."""
     async with semaphore:
-        await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits (no more than 2 per second)
+        await asyncio.sleep(0.5)  # Shopify rate limit: max 2 per second
         return await coroutine
+
 
 
 async def getShopifyOrders():
@@ -395,9 +397,12 @@ async def getShopifyOrders():
         print(f"Error fetching orders: {e}")
         return []
 
+    # Create a new semaphore tied to THIS event loop
+    semaphore = asyncio.Semaphore(2)
+
     async with aiohttp.ClientSession() as session:
         while True:
-            tasks = [limited_request(process_order(session, order)) for order in orders]
+            tasks = [limited_request(process_order(session, order), semaphore) for order in orders]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
@@ -409,11 +414,8 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
-                break
-
-
+                # Fetch next page
                 orders = orders.next_page()
-
             except Exception as e:
                 print(f"Error fetching next page: {e}")
                 break
@@ -421,6 +423,7 @@ async def getShopifyOrders():
     total_end_time = time.time()
     print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
     return order_details
+
 
 
 
@@ -552,7 +555,6 @@ def displayTracking(tracking_num):
 
 
 from flask import request, jsonify
-from datetime import datetime
 
 
 async def fetch_order_details():
@@ -564,11 +566,19 @@ async def fetch_order_details():
 @app.route('/pending')
 def pending_orders():
     all_orders = []
-    pending_items = []  # Use a simple list instead of a dictionary
+    pending_items = []  # final merged list
 
     global daraz_orders, order_details
 
-    # Process Daraz orders
+    # Helper: add or update an item in pending_items
+    def add_or_update_item(pending_items, new_item):
+        for item in pending_items:
+            if item['item_title'] == new_item['item_title']:
+                item['quantity'] += new_item['quantity']
+                return
+        pending_items.append(new_item)
+
+    # ---- Process Daraz orders ----
     for daraz_order in daraz_orders:
         if daraz_order['status'] in ['Ready To Ship', 'Pending', 'packed', 'Packed by seller / warehouse']:
             daraz_order_data = {
@@ -582,16 +592,16 @@ def pending_orders():
             }
             all_orders.append(daraz_order_data)
 
-            # Add each item to the pending_items list with its order date
+            # Merge each item into pending_items
             for item in daraz_order['items_list']:
-                pending_items.append({
+                add_or_update_item(pending_items, {
                     'item_image': item['item_image'],
-                    'item_title': item['item_title'],
+                    'item_title': item['item_title'],   # ✅ Daraz uses 'item_title'
                     'quantity': item['quantity'],
-                    'order_date': daraz_order['date']  # Add the date here
+                    'order_date': daraz_order['date']
                 })
 
-    # Process Shopify orders
+    # ---- Process Shopify orders ----
     for shopify_order in order_details:
         if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
             continue
@@ -600,7 +610,7 @@ def pending_orders():
             shopify_items_list = [
                 {
                     'item_image': item['image_src'],
-                    'item_title': item['product_title'],
+                    'item_title': item['product_title'],   # ✅ now consistent with Daraz
                     'quantity': item['quantity'],
                     'tracking_number': item['tracking_number'],
                     'status': item['status']
@@ -619,19 +629,20 @@ def pending_orders():
             }
             all_orders.append(shopify_order_data)
 
-            # Add each item to the pending_items list with its order date
+            # Merge each item into pending_items
             for item in shopify_items_list:
-                pending_items.append({
+                add_or_update_item(pending_items, {
                     'item_image': item['item_image'],
-                    'item_title': item['item_title'],
+                    'item_title': item['item_title'],   # ✅ use 'item_title' not 'product_title'
                     'quantity': item['quantity'],
-                    'order_date': shopify_order['created_at']  # Add the date here
+                    'order_date': shopify_order['created_at']
                 })
 
-    # The JavaScript will handle sorting, so we just pass the list
+    # Split half for two-column table view
     half = len(pending_items) // 2
 
     return render_template('pending.html', all_orders=all_orders, pending_items=pending_items, half=half)
+
 
 import json
 import os
@@ -918,7 +929,7 @@ async def refresh_background_data():
     and update Leopard tracking statuses for Shopify orders.
     """
     global daraz_orders, order_details
-    print(f"BACKGROUND REFRESH: Starting job at {datetime.datetime.now()}")
+    print(f"BACKGROUND REFRESH: Starting job at {dt.datetime.now()}")
 
     # 1. Refresh Daraz orders
     try:

@@ -118,18 +118,18 @@
                                                 <td><a href="{{ order.order_link }}" target="_blank">{{ order.order_id }}</a></td>
                                                 <td class="pending-since-cell" data-created-at="{{ order.created_at }}" data-status="{{ order.status }}"></td>
                                                 <td>
-                                                    {{ order.customer_details.name }}<br>
-                                                    {{ order.customer_details.address }}<br>
-                                                    {{ order.customer_details.city }}<br>
-                                                    <a href="tel:{{ order.customer_details.phone }}">{{ order.customer_details.phone }}</a><br>
-                                                    <a href="tel:{{ order.customer_details.phone }}" class="btn btn-primary btn-sm mt-1">Call</a>
+                                                    {{ order.line_items[0].name }}<br>
+                                                    {{ order.line_items[0].address }}<br>
+                                                    {{ order.line_items[0].city }}<br>
+                                                    <a href="tel:{{ order.line_items[0].phone }}">{{ order.line_items[0].phone }}</a><br>
+                                                    <a href="tel:{{ order.line_items[0].phone }}" class="btn btn-primary btn-sm mt-1">Call</a>
                                                     <div class="btn-group mt-1">
                                                         <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                                                             WhatsApp
                                                         </button>
                                                         <div class="dropdown-menu">
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone | replace('+', '') }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone | replace('+', '') }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
+                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone | replace('+', '') }}?text=Hello%20{{ order.line_items[0].name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
+                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone | replace('+', '') }}?text=Hello%20{{ order.line_items[0].name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
                                                         </div>
                                                     </div>
                                                 </td>

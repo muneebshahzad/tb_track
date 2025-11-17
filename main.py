@@ -437,7 +437,7 @@ def tracking():
 def get_daraz_orders(statuses):
     print("SEARCHING FOR DARAZ ORDERS")
     try:
-        access_token = '50000901028pyvqbfZlyDmuiwsD8iBqeptxFIlNj1aeb97abWFzykj0Gspverz'
+        access_token = '50000900102byh1bc656cfwUuAguvivFmDOXtQa93hxFKxduPEfhBw7svux0gN'
         client = lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
 
         all_orders = []
@@ -1000,4 +1000,5 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
+
 

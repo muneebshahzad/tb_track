@@ -606,7 +606,7 @@ def pending_orders():
         if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
             continue
 
-        if shopify_order['status'] in ['Booked', 'Un-Booked']:
+        if shopify_order['status'] in ['Booked', 'Un-Booked','Drop Off at Express Center']:
             shopify_items_list = [
                 {
                     'item_image': item['image_src'],
@@ -705,7 +705,7 @@ def pending_orders_mobile():
     for shopify_order in order_details:
         if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
             continue
-        if shopify_order['status'] in ['Booked', 'Un-Booked']:
+        if shopify_order['status'] in ['Booked', 'Un-Booked','Drop Off at Express Center']:
             shopify_items_list = []
             for item in shopify_order['line_items']:
                 track_num = item.get('tracking_number', 'N/A')
@@ -1000,5 +1000,6 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
+
 
 

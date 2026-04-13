@@ -936,6 +936,148 @@ def dispatch():
         dispatch_orders.append(order)
     return jsonify(dispatch_orders)
 
+@app.route('/webhook/leopards', methods=['POST'])
+def leopards_webhook():
+    """
+    Leopards Push API webhook - receives real-time status updates
+    for consignments from Leopards Courier.
+    Expected payload:
+    {
+        "data": [
+            {
+                "cn_number": "string",
+                "status": "string",
+                "receiver_name": "string",
+                "reason": "string",
+                "activity_date": "yyyy-mm-dd H:i:s"
+            }
+        ]
+    }
+    """
+    global order_details
+
+    try:
+        # Optional: Validate API credentials from headers if Leopards sends them
+        # api_key = request.headers.get('api_key')
+        # api_secret = request.headers.get('api_secret')
+        # if api_key != os.getenv('LEOPARD_API_KEY') or api_secret != os.getenv('LEOPARD_PASSWORD'):
+        #     return jsonify([{"status": 0, "errors": ["Unauthorized"]}]), 401
+
+        payload = request.get_json()
+
+        if not payload or 'data' not in payload:
+            return jsonify([{"status": 0, "errors": ["Invalid payload - 'data' key missing"]}]), 400
+
+        updates = payload['data']
+
+        if not isinstance(updates, list) or len(updates) == 0:
+            return jsonify([{"status": 0, "errors": ["Empty or invalid data array"]}]), 400
+
+        # Map Leopards short status codes to human-readable statuses
+        STATUS_MAP = {
+            'RC': 'Consignment Booked',
+            'AC': 'Out For Delivery',
+            'DV': 'Delivered',
+            'PN1': 'First Attempt Failed',
+            'PN2': 'Second Attempt Failed',
+            'RO': 'Being Return',
+            'RN1': 'First Return Attempt',
+            'RN2': 'Second Return Attempt',
+            'RW': 'Returned to Warehouse',
+            'DW': 'Delivered to Warehouse',
+            'RS': 'RETURNED TO SHIPPER',
+            'DR': 'Delivered to Vendor',
+            'AR': 'Arrived At Station',
+            'DP': 'Dispatched',
+            'NR': 'Ready for Return',
+            'SP': 'Shipment Picked',
+        }
+
+        # Terminal statuses - orders in these states won't need further tracking
+        TERMINAL_STATUSES = {'DV', 'RW', 'DW', 'RS', 'DR'}
+
+        updated_count = 0
+
+        for update in updates:
+            cn_number = update.get('cn_number', '').strip()
+            status_code = update.get('status', '').strip()
+            receiver_name = update.get('receiver_name', '')
+            reason = update.get('reason', '')
+            activity_date = update.get('activity_date', '')
+
+            if not cn_number or not status_code:
+                print(f"Skipping update with missing cn_number or status: {update}")
+                continue
+
+            # Build a human-readable final status string (mirrors existing logic)
+            human_status = STATUS_MAP.get(status_code, status_code)
+            if reason and reason != 'N/A' and reason.strip():
+                human_status = f"{human_status} - {reason.strip()}"
+
+            # Special handling for return/terminal states to match existing app logic
+            if status_code == 'RS':
+                human_status = 'RETURNED TO SHIPPER'
+            elif status_code in ('RO', 'RN1', 'RN2', 'RW'):
+                human_status = f"Being Return {reason}".strip() if reason and reason != 'N/A' else 'Being Return'
+
+            print(f"Leopards webhook update: CN={cn_number}, Status={status_code} -> {human_status}")
+
+            # Find and update matching line items across all orders
+            for order in order_details:
+                order_updated = False
+                for item in order.get('line_items', []):
+                    if item.get('tracking_number') == cn_number:
+                        item['status'] = human_status
+                        order_updated = True
+                        updated_count += 1
+
+                # Update the top-level order status if this CN matches the order's primary tracking
+                if order_updated:
+                    # Recalculate order-level status from line items
+                    # Use the most recent/relevant status across all line items
+                    all_statuses = [li.get('status', '') for li in order.get('line_items', [])]
+                    if all_statuses:
+                        # Prioritize terminal/important statuses
+                        if 'RETURNED TO SHIPPER' in all_statuses:
+                            order['status'] = 'RETURNED TO SHIPPER'
+                        elif any('Delivered' in s for s in all_statuses):
+                            order['status'] = 'Delivered'
+                        elif any('Being Return' in s for s in all_statuses):
+                            order['status'] = next(s for s in all_statuses if 'Being Return' in s)
+                        else:
+                            order['status'] = human_status
+
+                    # Auto-apply Shopify tag for terminal statuses
+                    if status_code in TERMINAL_STATUSES and order.get('id'):
+                        try:
+                            tag_map = {
+                                'DV': 'Delivered',
+                                'RS': 'Returned',
+                                'RW': 'Returned',
+                            }
+                            tag = tag_map.get(status_code)
+                            if tag:
+                                shopify_order = shopify.Order.find(order['id'])
+                                today_date = datetime.now().strftime('%Y-%m-%d')
+                                tag_with_date = f"{tag} ({today_date})"
+                                existing_tags = [t.strip() for t in shopify_order.tags.split(',')] if shopify_order.tags else []
+                                if tag_with_date not in existing_tags:
+                                    existing_tags.append(tag_with_date)
+                                    shopify_order.tags = ', '.join(existing_tags)
+                                    shopify_order.save()
+                                    print(f"Auto-tagged order {order['order_id']} as '{tag_with_date}'")
+                        except Exception as tag_err:
+                            print(f"Failed to auto-tag order {order.get('order_id')}: {tag_err}")
+
+        print(f"Leopards webhook processed {len(updates)} updates, matched {updated_count} line items.")
+
+        # Leopards expects HTTP 202 with this exact response format on success
+        return jsonify([{"status": 1, "errors": []}]), 202
+
+    except Exception as e:
+        print(f"Leopards webhook error: {e}")
+        return jsonify([{"status": 0, "errors": [str(e)]}]), 400
+
 
 @app.route('/return', methods=['GET'])
 def return_orders():
@@ -1047,7 +1189,6 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
-
 
 
 

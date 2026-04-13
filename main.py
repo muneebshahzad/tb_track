@@ -393,7 +393,7 @@ async def getShopifyOrders():
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=1, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -546,7 +546,7 @@ def daraz_callback():
 
 
 @app.route('/daraz/orders')
-def daraz_orders():
+def daraz_orders_page():
     statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
     darazOrders = get_daraz_orders(statuses)
     return render_template('daraz.html', darazOrders=darazOrders)

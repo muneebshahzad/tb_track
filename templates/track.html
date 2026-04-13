@@ -39,6 +39,7 @@
 
             <div id="content">
 
+
                 <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
                     <form class="form-inline">
                         <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
@@ -226,6 +227,27 @@
 
                     ---
 
+                     <!-- Daraz Token Banner -->
+    <div id="token-banner" style="
+        display:none;
+        padding: 10px 20px;
+        text-align: center;
+        font-weight: 500;
+        font-size: 14px;
+        position: sticky;
+        top: 0;
+        z-index: 999;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <span id="token-message"></span>
+        <a id="reauth-btn"
+           href="https://api.daraz.pk/oauth/authorize?response_type=code&redirect_uri=https://admin.tickbags.com/daraz&client_id=501554"
+           style="margin-left:12px; padding:4px 14px; background:#e63946; color:white;
+                  border-radius:4px; text-decoration:none; font-size:13px; display:none;">
+            🔑 Re-authenticate Daraz
+        </a>
+    </div>
+
+
                     <div class="card shadow mb-4">
                         <div class="card-header py-3">
                             <h6 class="m-0 font-weight-bold text-primary">Daraz Orders</h6>
@@ -302,6 +324,7 @@
                     </div>
                 </div>
                 </div>
+
             <footer class="sticky-footer bg-white">
                 <div class="container my-auto">
                     <div class="copyright text-center my-auto">
@@ -394,6 +417,40 @@
         }
     });
 }
+</script>
+<script>
+fetch('/daraz/token-status')
+    .then(r => r.json())
+    .then(data => {
+        console.log('Token status:', data);  // Check browser console first
+
+        const banner = document.getElementById('token-banner');
+        const msg = document.getElementById('token-message');
+        const btn = document.getElementById('reauth-btn');
+
+        // Force show regardless of status for debugging
+        banner.style.display = 'block';
+
+        if (data.status === 'missing') {
+            banner.style.background = '#ffcccc';
+            msg.textContent = '❌ Daraz not authenticated.';
+            btn.style.display = 'inline-block';
+        } else if (data.days_left <= 3) {
+            banner.style.background = '#fff3cd';
+            msg.textContent = `⚠️ Daraz token expires in ${data.days_left} day(s).`;
+            btn.style.display = 'inline-block';
+        } else {
+            banner.style.background = '#d4edda';
+            msg.textContent = `✅ Daraz token valid for ${data.days_left} more days.`;
+        }
+    })
+    .catch(err => {
+        console.error('Token fetch failed:', err);
+        const banner = document.getElementById('token-banner');
+        banner.style.display = 'block';
+        banner.style.background = '#ffcccc';
+        document.getElementById('token-message').textContent = '❌ Could not reach /daraz/token-status';
+    });
 </script>
 
 </body>

@@ -21,6 +21,11 @@ import json
 
 # NEW: Import the background scheduler
 from apscheduler.schedulers.background import BackgroundScheduler
+from token_manager import get_access_token
+import ssl
+import certifi
+os.environ['SSL_CERT_FILE'] = certifi.where()
+os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
 
 app = Flask(__name__)
 app.debug = True
@@ -77,15 +82,11 @@ async def fetch_tracking_data(session, tracking_number):
     api_key = os.getenv('LEOPARD_API_KEY')
     api_password = os.getenv('LEOPARD_PASSWORD')
     url = f"https://merchantapi.leopardscourier.com/api/trackBookedPacket/?api_key={api_key}&api_password={api_password}&track_numbers={tracking_number}"
-    async with session.get(url) as response:
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    async with session.get(url, ssl=ssl_context) as response:
         return await response.json()
-
-
-from flask import Flask, request, jsonify
-import requests
-import os
-
-app = Flask(__name__)
 
 
 @app.route('/generate_loadsheet', methods=['POST'])
@@ -437,7 +438,7 @@ def tracking():
 def get_daraz_orders(statuses):
     print("SEARCHING FOR DARAZ ORDERS")
     try:
-        access_token = '50000901335rchzh0DnuAwtlbfBRALsUhhhwJ3htTll2jvs1330023ciNpGAoq'
+        access_token = get_access_token()
         client = lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
 
         all_orders = []
@@ -520,10 +521,46 @@ def get_daraz_orders(statuses):
 
 
 @app.route('/daraz')
-def daraz():
-    statuses = ['shipped', 'pending', 'ready_to_ship']
+def daraz_callback():
+    code = request.args.get('code')
+
+    if code:
+        client = lazop.LazopClient("https://api.daraz.pk/rest", "501554", "nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD")
+        req = lazop.LazopRequest('/auth/token/create')
+        req.add_api_param('code', code)
+        response = client.execute(req)
+        body = response.body  # already a dict, no json.loads needed
+
+        if "access_token" in body:
+            save_tokens(body["access_token"], body["refresh_token"])
+            print("✅ Daraz tokens auto-saved via callback.")
+            # Redirect to daraz orders page after saving
+            return redirect(url_for('daraz_orders'))
+        else:
+            return f"❌ Auth failed: {body}", 400
+
+    # Normal daraz orders page
+    statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
     darazOrders = get_daraz_orders(statuses)
     return render_template('daraz.html', darazOrders=darazOrders)
+
+
+@app.route('/daraz/orders')
+def daraz_orders():
+    statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
+    darazOrders = get_daraz_orders(statuses)
+    return render_template('daraz.html', darazOrders=darazOrders)
+
+@app.route('/daraz/token-status')
+def daraz_token_status():
+    from token_manager import load_tokens
+    tokens = load_tokens()
+    if not tokens:
+        return jsonify({"status": "missing"})
+    expires_at = datetime.fromisoformat(tokens["expires_at"])
+    days_left = (expires_at - datetime.now()).days
+    return jsonify({"status": "ok", "expires_at": tokens["expires_at"], "days_left": days_left})
+
 
 
 @app.route('/refresh', methods=['POST'])
@@ -916,11 +953,6 @@ password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
-statuses = ['shipped', 'pending', 'ready_to_ship' ,'packed']
-daraz_orders = get_daraz_orders(statuses)
-
-order_details = asyncio.run(getShopifyOrders())
-
 
 
 async def refresh_background_data():

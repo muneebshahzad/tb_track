@@ -1000,6 +1000,21 @@ async def refresh_background_data():
 
     print("BACKGROUND REFRESH: Job finished.")
 
+order_details = []
+daraz_orders = []
+
+# Add this function to load on startup:
+def load_initial_data():
+    global order_details, daraz_orders
+    print("Loading initial data...")
+    statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
+    daraz_orders = get_daraz_orders(statuses)
+    order_details = asyncio.run(getShopifyOrders())
+    print("Initial data loaded.")
+
+# Call it at module level (runs when Gunicorn imports):
+with app.app_context():
+    load_initial_data()
 
 if __name__ == "__main__":
     # Load environment variables

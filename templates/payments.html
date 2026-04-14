@@ -782,27 +782,17 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
     const headerRow = document.getElementById('tableHeaderRow');
     if (hasProductData) {
         headerRow.innerHTML = `
-            <th>Order ID</th>
-            <th>CN #</th>
-            <th>Products</th>
-            <th>Order Total</th>
-            <th>Status</th>
-            <th>Ship. Charges</th>
-            <th>Ship. Paid</th>
-            <th>COD Paid</th>
-            <th>Invoice Date</th>
-        `;
+    <th>Order ID</th><th>CN #</th><th>Products</th>
+    <th>Order Total</th><th>Status</th>
+    <th>Ship. Charges</th><th>Ship. Paid</th>
+    <th>COD Paid</th><th>Net Amount</th><th>Invoice Date</th>`;
+
     } else {
         headerRow.innerHTML = `
-            <th>Order ID</th>
-            <th>CN #</th>
-            <th>Order Total</th>
-            <th>Status</th>
-            <th>Ship. Charges</th>
-            <th>Ship. Paid</th>
-            <th>COD Paid</th>
-            <th>Invoice Date</th>
-        `;
+    <th>Order ID</th><th>CN #</th>
+    <th>Order Total</th><th>Status</th>
+    <th>Ship. Charges</th><th>Ship. Paid</th>
+    <th>COD Paid</th><th>Net Amount</th><th>Invoice Date</th>`;
     }
 
     /* ---- Accumulators ---- */
@@ -812,109 +802,88 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
     let unpaidDeliveredCOD   = 0;  // CHANGE 2: total COD amount (not count)
 
     packets.forEach(p => {
-        const cn          = p.tracking_number || p.cn || '';
-        const oid         = p.booked_packet_order_id || p.order_id || '—';
-        const products    = p.products || p.product_title || '—';
-        const cod         = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
-        totalCOD         += cod;
+    const cn       = p.tracking_number || p.cn || '';
+    const oid      = p.booked_packet_order_id || p.order_id || '—';
+    const products = p.products || p.product_title || '—';
+    const cod      = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
+    totalCOD      += cod;
 
-        const pay         = payMap[cn]     || {};
-        const charges     = chargesMap[cn] || {};
+    const pay     = payMap[cn]     || {};
+    const charges = chargesMap[cn] || {};
 
-        /* ---- Shipping charge calculation ---- */
-        const totalCharged = parseFloat(charges.billed_charges);
-        const billChg = !isNaN(totalCharged)
-            ? Math.round(totalCharged * 1.25 * 1.16)
-            : Math.round(charges.gross_charges || 0);
+    /* Shipping charge */
+    const totalCharged = parseFloat(charges.billed_charges_amount);   // amount field
+    const billChg = !isNaN(totalCharged)
+        ? Math.round(totalCharged * 1.25 * 1.16)
+        : Math.round(charges.gross_charges || 0);
+    if (billChg) totalCharges += billChg;
 
-        if (billChg) totalCharges += billChg;
+    /* ✅ FIX 1: Shipping PAID = billed_charges present in charges API */
+    const billedChargesVal = charges.billed_charges || '';
+    const shipPaid         = shippingPaidBadge(billedChargesVal);
+    if (!shipPaid.isPaid && billChg) unpaidShippingTotal += billChg;
 
-        /*
-         * CHANGE 1: Determine shipping paid status via old_invoice_no.
-         * old_invoice_no comes from the charges API response.
-         */
-        const oldInvoiceNo   = pay.billed_charges || '';
-        const shipPaid       = shippingPaidBadge(oldInvoiceNo);
-        if (!shipPaid.isPaid && billChg) {
-            unpaidShippingTotal += billChg;
-        }
+    /* ✅ FIX 2: COD PAID = invoice_cheque_date present in charges API */
+    const invChequeDate = charges.invoice_cheque_date || '';
+    const isCODPaid     = invChequeDate.trim() !== ''
+                       && invChequeDate.trim() !== 'null';
+    const codPayBadge   = isCODPaid
+        ? `<span class="badge-pay paid"><i class="fas fa-check-circle"></i> Paid</span>`
+        : `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> Unpaid</span>`;
 
-        /* ---- Order/COD payment status ---- */
-        const payStatus   = pay.status || '';
-        const orderStatus = p.booked_packet_status || '—';
-        const invDate     = pay.invoice_cheque_date || charges.invoice_cheque_date || '—';
+    const invDate     = invChequeDate || pay.invoice_cheque_date || '—';
+    const orderStatus = p.booked_packet_status || '—';
+    const isDelivered = orderStatus.toLowerCase().includes('delivered');
 
-        const isDelivered = orderStatus && orderStatus.toLowerCase().includes('delivered');
-        const isCODUnpaid = !payStatus || payStatus === '' || payStatus === 'null'
-                          || payStatus.toLowerCase().includes('unpaid');
+    /* ✅ FIX 2 continued: accumulate using charges-based COD paid flag */
+    if (isDelivered && !isCODPaid) unpaidDeliveredCOD += cod;
 
-        /*
-         * CHANGE 2: Accumulate total COD amount for unpaid delivered orders
-         * (previously was just a count).
-         */
-        if (isDelivered && isCODUnpaid) {
-            unpaidDeliveredCOD += cod;
-        }
+    /* ✅ FIX 3: Net amount column */
+    const netAmount = isDelivered ? (cod * 0.96) - billChg : -billChg;
+    const netColor  = netAmount >= 0 ? 'var(--lp-green)' : 'var(--lp-red)';
+    const netCell   = `<span style="font-family:'IBM Plex Mono',monospace;color:${netColor}">${fmtPKR(netAmount)}</span>`;
 
-        /* ---- Save row for CSV ---- */
-        const row = {
-            order_id:     oid,
-            cn_number:    cn,
-            products:     products,
-            order_total:  cod,
-            order_status: orderStatus,
-            ship_charges: billChg,
-            ship_paid:    shipPaid.isPaid ? 'Paid' : 'Unpaid',
-            pay_status:   payStatus,
-            inv_date:     invDate
-        };
-        allRows.push(row);
+    /* Save for CSV */
+    const row = {
+        order_id: oid, cn_number: cn, products, order_total: cod,
+        order_status: orderStatus, ship_charges: billChg,
+        ship_paid: shipPaid.isPaid ? 'Paid' : 'Unpaid',
+        cod_pay_status: isCODPaid ? 'Paid' : 'Unpaid',
+        net_amount: netAmount, inv_date: invDate
+    };
+    allRows.push(row);
 
-        /* ---- Build product cell (only used in orders mode) ---- */
-        let productCell = '';
-        if (hasProductData) {
-            if (p.item_image) {
-                productCell = `<div class="product-cell">
-                    <img src="${p.item_image}" alt="Product" class="product-img"
-                         onerror="this.src='https://via.placeholder.com/36?text=No+Image'">
-                    <div class="product-info"><p class="product-title">${products}</p></div>
-                </div>`;
-            } else {
-                productCell = `<div class="product-cell">
-                    <img src="https://via.placeholder.com/36?text=No+Image" alt="Product" class="product-img">
-                    <div class="product-info"><p class="product-title">${products}</p></div>
-                </div>`;
-            }
-        }
+    /* Build product cell */
+    let productCell = '';
+    if (hasProductData) {
+        const imgSrc = p.item_image || 'https://via.placeholder.com/36?text=No+Image';
+        productCell  = `<div class="product-cell">
+            <img src="${imgSrc}" alt="Product" class="product-img"
+                 onerror="this.src='https://via.placeholder.com/36?text=No+Image'">
+            <div class="product-info"><p class="product-title">${products}</p></div>
+        </div>`;
+    }
 
-        /* ---- Build table row ---- */
-        const tr = document.createElement('tr');
-        if (hasProductData) {
-            tr.innerHTML = `
-                <td class="mono" style="color:var(--lp-yellow)">${oid}</td>
-                <td class="mono">${cn || '—'}</td>
-                <td>${productCell}</td>
-                <td class="mono">${cod ? fmtPKR(cod) : '—'}</td>
-                <td>${statusBadgeOrder(orderStatus)}</td>
-                <td class="mono">${billChg ? fmtPKR(billChg) : '—'}</td>
-                <td>${shipPaid.badge}</td>
-                <td>${statusBadgePayment(payStatus)}</td>
-                <td class="mono">${invDate}</td>
-            `;
-        } else {
-            tr.innerHTML = `
-                <td class="mono" style="color:var(--lp-yellow)">${oid}</td>
-                <td class="mono">${cn || '—'}</td>
-                <td class="mono">${cod ? fmtPKR(cod) : '—'}</td>
-                <td>${statusBadgeOrder(orderStatus)}</td>
-                <td class="mono">${billChg ? fmtPKR(billChg) : '—'}</td>
-                <td>${shipPaid.badge}</td>
-                <td>${statusBadgePayment(payStatus)}</td>
-                <td class="mono">${invDate}</td>
-            `;
-        }
-        tbody.appendChild(tr);
-    });
+    /* Build <tr> */
+    const tr = document.createElement('tr');
+    const commonCells = `
+        <td class="mono">${cod ? fmtPKR(cod) : '—'}</td>
+        <td>${statusBadgeOrder(orderStatus)}</td>
+        <td class="mono">${billChg ? fmtPKR(billChg) : '—'}</td>
+        <td>${shipPaid.badge}</td>
+        <td>${codPayBadge}</td>
+        <td>${netCell}</td>
+        <td class="mono">${invDate}</td>
+    `;
+    tr.innerHTML = hasProductData
+        ? `<td class="mono" style="color:var(--lp-yellow)">${oid}</td>
+           <td class="mono">${cn || '—'}</td>
+           <td>${productCell}</td>${commonCells}`
+        : `<td class="mono" style="color:var(--lp-yellow)">${oid}</td>
+           <td class="mono">${cn || '—'}</td>${commonCells}`;
+
+    tbody.appendChild(tr);
+});
 
     /* ---- Init DataTable ---- */
     dtInstance = $('#payTable').DataTable({

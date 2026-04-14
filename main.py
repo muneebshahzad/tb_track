@@ -1089,6 +1089,133 @@ def return_orders():
     return jsonify(return_orders)
 
 
+import requests as _req  # alias so it doesn't clash with flask's `request`
+
+
+# ── Render the payments page ──────────────────────────────────
+@app.route('/payments')
+def payments_page():
+    return render_template('payments.html')
+
+
+# ── Proxy: getBookedPacketLastStatus (date range) ─────────────
+@app.route('/api/leopards/last-status')
+def leopards_last_status():
+    from_date = request.args.get('from_date', '')
+    to_date = request.args.get('to_date', '')
+
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+
+    url = (
+        f"https://merchantapi.leopardscourier.com/api/getBookedPacketLastStatus/format/json/"
+        f"?api_key={api_key}&api_password={api_password}"
+        f"&from_date={from_date}&to_date={to_date}"
+    )
+
+    try:
+        r = _req.get(url, verify=False, timeout=30)
+        data = r.json()
+
+        packets = data.get('packet_list', [])
+
+        # ✅ Filter unwanted statuses
+        filtered_packets = []
+        for p in packets:
+            status = (p.get('booked_packet_status') or '').strip().lower()
+
+            if status in ['pickup request not send', 'pickup request sent']:
+                continue
+
+            filtered_packets.append(p)
+
+        data['packet_list'] = filtered_packets
+
+        return jsonify(data)
+
+    except Exception as e:
+        return jsonify({"status": 0, "error": str(e)}), 500
+
+
+# ── Proxy: getPaymentDetails (by CN numbers) ──────────────────
+@app.route('/api/leopards/payment-details')
+def leopards_payment_details():
+    cn_numbers = request.args.get('cn_numbers', '')
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+
+    url = (
+        f"https://merchantapi.leopardscourier.com/api/getPaymentDetails/format/json/"
+        f"?api_key={api_key}&api_password={api_password}&cn_numbers={cn_numbers}"
+    )
+    try:
+        r = _req.get(url, verify=False, timeout=30)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"status": 0, "error": str(e)}), 500
+
+
+# ── Proxy: getShippingCharges (by CN numbers) ─────────────────
+@app.route('/api/leopards/shipping-charges')
+def leopards_shipping_charges():
+    cn_numbers = request.args.get('cn_numbers', '')
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+
+    url = (
+        f"https://merchantapi.leopardscourier.com/api/getShippingCharges/format/json/"
+        f"?api_key={api_key}&api_password={api_password}&cn_numbers={cn_numbers}"
+    )
+    try:
+        r = _req.get(url, verify=False, timeout=30)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"status": 0, "error": str(e)}), 500
+
+
+# ── Helper: pull CN numbers from already-loaded order_details ──
+# FIXED: This endpoint now includes product images and order status
+@app.route('/api/leopards/active-cns')
+def leopards_active_cns():
+    """
+    Returns all Leopards CN numbers that are currently tracked
+    in the in-memory order_details list, along with order_map
+    containing full details including images, statuses, and product info.
+    """
+    global order_details
+
+    cn_numbers = []
+    order_map = []
+
+    for order in order_details:
+        for item in order.get('line_items', []):
+            cn = item.get('tracking_number', '')
+            if cn and cn != 'N/A':
+                cn_numbers.append(cn)
+                order_map.append({
+                    'tracking_number': cn,
+                    'order_id': order.get('order_id', ''),
+                    'booked_packet_order_id': order.get('order_id', ''),
+                    'product_title': item.get('product_title', ''),
+                    'products': item.get('product_title', ''),
+                    'item_image': item.get('image_src', ''),  # ✅ FIX #1: Include product image
+                    'booked_packet_collect_amount': order.get('total_price', 0),
+                    'booked_packet_weight': '',
+                    'booked_packet_status': item.get('status', ''),  # ✅ FIX #2: Include order status
+                })
+
+    # Deduplicate by CN
+    seen = set()
+    unique_cns = []
+    unique_map = []
+    for cn, row in zip(cn_numbers, order_map):
+        if cn not in seen:
+            seen.add(cn)
+            unique_cns.append(cn)
+            unique_map.append(row)
+
+    return jsonify({"cn_numbers": unique_cns, "order_map": unique_map})
+
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
@@ -1179,7 +1306,7 @@ if __name__ == "__main__":
     # NEW: Setup and start the background scheduler
     scheduler = BackgroundScheduler(daemon=True)
     # This job will run the `refresh_background_data` function every 30 minutes
-    scheduler.add_job(lambda: asyncio.run(refresh_background_data()), 'interval', minutes=30)
+    scheduler.add_job(lambda: asyncio.run(refresh_background_data()), 'interval', minutes=120)
     scheduler.start()
     print("Background scheduler started. Data will refresh every 30 minutes.")
 
@@ -1189,7 +1316,3 @@ if __name__ == "__main__":
 
     # Start Flask app
     app.run(host="0.0.0.0", port=5001, debug=True)
-
-
-
-

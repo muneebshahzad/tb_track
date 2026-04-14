@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Payment Details - Leopards</title>
+
+    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
+    <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
+
+    <style>
+        :root {
+            --lp-yellow:    #F5C400;
+            --lp-dark:      #1A1A1A;
+            --lp-mid:       #2D2D2D;
+            --lp-border:    #3A3A3A;
+            --lp-text:      #E8E8E8;
+            --lp-muted:     #888888;
+            --lp-green:     #2ECC71;
+            --lp-red:       #E74C3C;
+            --lp-orange:    #F39C12;
+            --lp-blue:      #3498DB;
+            --lp-purple:    #9B59B6;
+        }
+
+        body {
+            background: var(--lp-dark);
+            color: var(--lp-text);
+            font-family: 'IBM Plex Sans', sans-serif;
+        }
+
+        .accent-bar {
+            height: 4px;
+            background: linear-gradient(90deg, var(--lp-yellow) 0%, #FFD700 50%, var(--lp-yellow) 100%);
+            background-size: 200% 100%;
+            animation: shimmer 3s infinite linear;
+        }
+        @keyframes shimmer {
+            0%   { background-position: -200% 0; }
+            100% { background-position:  200% 0; }
+        }
+
+        .page-header {
+            background: var(--lp-mid);
+            border-bottom: 1px solid var(--lp-border);
+            padding: 24px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .page-header h1 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: var(--lp-yellow);
+            margin: 0;
+            letter-spacing: 0.05em;
+        }
+        .page-header p {
+            margin: 4px 0 0;
+            color: var(--lp-muted);
+            font-size: .85rem;
+        }
+
+        .filter-bar {
+            background: var(--lp-mid);
+            border: 1px solid var(--lp-border);
+            border-radius: 8px;
+            padding: 20px 24px;
+            margin: 24px 32px;
+            display: flex;
+            align-items: flex-end;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .filter-group label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .72rem;
+            color: var(--lp-muted);
+            text-transform: uppercase;
+            letter-spacing: .08em;
+        }
+        .filter-group input[type="date"] {
+            background: var(--lp-dark);
+            border: 1px solid var(--lp-border);
+            color: var(--lp-text);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .85rem;
+            outline: none;
+            transition: border-color .2s;
+        }
+        .filter-group input[type="date"]:focus {
+            border-color: var(--lp-yellow);
+        }
+
+        .btn-fetch {
+            background: var(--lp-yellow);
+            color: var(--lp-dark);
+            border: none;
+            border-radius: 6px;
+            padding: 9px 22px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-weight: 600;
+            font-size: .85rem;
+            cursor: pointer;
+            transition: opacity .2s, transform .1s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-fetch:hover  { opacity: .88; }
+        .btn-fetch:active { transform: scale(.97); }
+        .btn-fetch:disabled { opacity: .45; cursor: not-allowed; }
+
+        .btn-export {
+            background: transparent;
+            color: var(--lp-yellow);
+            border: 1px solid var(--lp-yellow);
+            border-radius: 6px;
+            padding: 9px 18px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .82rem;
+            cursor: pointer;
+            transition: background .2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-export:hover { background: rgba(245,196,0,.1); }
+
+        .kpi-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+            gap: 16px;
+            margin: 0 32px 24px;
+        }
+        .kpi-card {
+            background: var(--lp-mid);
+            border: 1px solid var(--lp-border);
+            border-radius: 8px;
+            padding: 18px 20px;
+            position: relative;
+            overflow: hidden;
+        }
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: var(--accent, var(--lp-yellow));
+        }
+        .kpi-card .kpi-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .68rem;
+            text-transform: uppercase;
+            letter-spacing: .1em;
+            color: var(--lp-muted);
+            margin-bottom: 8px;
+        }
+        .kpi-card .kpi-val {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 1.55rem;
+            font-weight: 600;
+            color: var(--lp-text);
+            line-height: 1;
+        }
+        .kpi-card .kpi-sub {
+            font-size: .75rem;
+            color: var(--lp-muted);
+            margin-top: 6px;
+        }
+
+        .table-wrapper {
+            margin: 0 32px 40px;
+            background: var(--lp-mid);
+            border: 1px solid var(--lp-border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .table-wrapper-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--lp-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .table-wrapper-header h6 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .82rem;
+            color: var(--lp-yellow);
+            margin: 0;
+            letter-spacing: .05em;
+        }
+
+        #payTable_wrapper .dataTables_filter input,
+        #payTable_wrapper .dataTables_length select {
+            background: var(--lp-dark);
+            border: 1px solid var(--lp-border);
+            color: var(--lp-text);
+            border-radius: 5px;
+            padding: 5px 10px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .8rem;
+            outline: none;
+        }
+        #payTable_wrapper .dataTables_filter input:focus {
+            border-color: var(--lp-yellow);
+        }
+        #payTable_wrapper .dataTables_filter label,
+        #payTable_wrapper .dataTables_length label,
+        #payTable_wrapper .dataTables_info {
+            color: var(--lp-muted);
+            font-size: .8rem;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        #payTable_wrapper .dataTables_paginate .paginate_button {
+            color: var(--lp-muted) !important;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .8rem;
+            border-radius: 5px !important;
+        }
+        #payTable_wrapper .dataTables_paginate .paginate_button.current,
+        #payTable_wrapper .dataTables_paginate .paginate_button.current:hover {
+            background: var(--lp-yellow) !important;
+            color: var(--lp-dark) !important;
+            border: none !important;
+        }
+        #payTable_wrapper .dataTables_paginate .paginate_button:hover {
+            background: var(--lp-border) !important;
+            color: var(--lp-text) !important;
+            border: none !important;
+        }
+
+        table#payTable {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        table#payTable thead th {
+            background: var(--lp-dark);
+            color: var(--lp-yellow);
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .72rem;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            border-bottom: 1px solid var(--lp-border);
+            padding: 12px 14px;
+            white-space: nowrap;
+        }
+        table#payTable thead th::after,
+        table#payTable thead th::before { color: var(--lp-yellow) !important; }
+
+        table#payTable tbody tr {
+            border-bottom: 1px solid rgba(58,58,58,.5);
+            transition: background .15s;
+        }
+        table#payTable tbody tr:hover { background: rgba(255,255,255,.03); }
+
+        table#payTable tbody td {
+            padding: 11px 14px;
+            font-size: .82rem;
+            color: var(--lp-text);
+            vertical-align: middle;
+        }
+        table#payTable tbody td.mono {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .8rem;
+        }
+
+        .product-cell {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            max-width: 280px;
+            white-space: normal;
+        }
+        .product-img {
+            width: 36px;
+            height: 36px;
+            border-radius: 4px;
+            background: var(--lp-dark);
+            border: 1px solid var(--lp-border);
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        .product-info { flex: 1; }
+        .product-title { font-size: .8rem; color: var(--lp-text); margin: 0; }
+
+        .badge-pay {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .72rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .badge-pay.paid    { background: rgba(46,204,113,.15); color: var(--lp-green); border: 1px solid rgba(46,204,113,.3); }
+        .badge-pay.pending { background: rgba(243,156,18,.15);  color: var(--lp-orange); border: 1px solid rgba(243,156,18,.3); }
+        .badge-pay.unpaid  { background: rgba(231,76,60,.15);   color: var(--lp-red);    border: 1px solid rgba(231,76,60,.3); }
+
+        .badge-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .68rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .badge-status.booked    { background: rgba(52,152,219,.15); color: var(--lp-blue); border: 1px solid rgba(52,152,219,.3); }
+        .badge-status.unbooked  { background: rgba(245,196,0,.15);  color: var(--lp-yellow); border: 1px solid rgba(245,196,0,.3); }
+        .badge-status.delivered { background: rgba(46,204,113,.15); color: var(--lp-green); border: 1px solid rgba(46,204,113,.3); }
+        .badge-status.returned  { background: rgba(231,76,60,.15);  color: var(--lp-red);   border: 1px solid rgba(231,76,60,.3); }
+
+        #loadingOverlay {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(26,26,26,.85);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 16px;
+        }
+        #loadingOverlay.active { display: flex; }
+        .spinner {
+            width: 44px; height: 44px;
+            border: 3px solid var(--lp-border);
+            border-top-color: var(--lp-yellow);
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { font-family: 'IBM Plex Mono', monospace; color: var(--lp-muted); font-size: .85rem; }
+
+        #emptyState {
+            display: none;
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--lp-muted);
+        }
+        #emptyState i { font-size: 2.5rem; margin-bottom: 16px; color: var(--lp-border); }
+        #emptyState p { font-family: 'IBM Plex Mono', monospace; font-size: .85rem; }
+
+        #errorToast {
+            position: fixed;
+            bottom: 28px; right: 28px;
+            background: var(--lp-mid);
+            border: 1px solid var(--lp-red);
+            border-left: 4px solid var(--lp-red);
+            border-radius: 8px;
+            padding: 14px 20px;
+            color: var(--lp-text);
+            font-size: .85rem;
+            max-width: 360px;
+            display: none;
+            z-index: 9999;
+            animation: slideUp .3s ease;
+        }
+        @keyframes slideUp { from { transform: translateY(20px); opacity:0; } }
+        #errorToast.show { display: block; }
+        #errorToast strong { color: var(--lp-red); font-family: 'IBM Plex Mono', monospace; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--lp-dark); }
+        ::-webkit-scrollbar-thumb { background: var(--lp-border); border-radius: 3px; }
+    </style>
+</head>
+<body id="page-top">
+
+<div id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">Fetching payment data...</div>
+</div>
+
+<div id="errorToast">
+    <strong>Error</strong>
+    <div id="errorMsg" style="margin-top:4px; color: var(--lp-muted); font-size:.82rem;"></div>
+</div>
+
+<div id="wrapper">
+    {% include 'header.html' %}
+
+    <div id="content-wrapper" class="d-flex flex-column">
+        <div id="content">
+
+            <nav class="navbar navbar-expand navbar-light bg-white topbar mb-0 static-top shadow">
+                <form class="form-inline">
+                    <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
+                        <i class="fa fa-bars"></i>
+                    </button>
+                </form>
+                <ul class="navbar-nav ml-auto">
+                    <li class="nav-item dropdown no-arrow">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button"
+                           data-toggle="dropdown">
+                            <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
+                            <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in"
+                             aria-labelledby="userDropdown">
+                            <div class="dropdown-divider"></div>
+                            <a class="dropdown-item" href="#" data-toggle="modal" data-target="#logoutModal">
+                                <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i>Logout
+                            </a>
+                        </div>
+                    </li>
+                </ul>
+            </nav>
+
+            <div class="accent-bar"></div>
+
+            <div class="page-header">
+                <div>
+                    <h1><i class="fas fa-file-invoice-dollar mr-2" style="color:var(--lp-yellow)"></i>Payment Details</h1>
+                    <p>Leopards Courier — Account Settlement Overview</p>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <span id="lastUpdated" style="font-family:'IBM Plex Mono',monospace;font-size:.75rem;color:var(--lp-muted);"></span>
+                    <button class="btn-export" id="btnExport" onclick="exportCSV()" style="display:none;">
+                        <i class="fas fa-download"></i> Export CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filter bar -->
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <label>From Date</label>
+                    <input type="date" id="fromDate">
+                </div>
+                <div class="filter-group">
+                    <label>To Date</label>
+                    <input type="date" id="toDate">
+                </div>
+                <button class="btn-fetch" id="btnFetch" onclick="fetchPayments()">
+                    <i class="fas fa-search"></i> Fetch Payments
+                </button>
+                <button class="btn-fetch" id="btnFetchAll" onclick="fetchAllActive()"
+                        style="background:transparent;color:var(--lp-yellow);border:1px solid var(--lp-yellow);">
+                    <i class="fas fa-bolt"></i> Load From Orders
+                </button>
+            </div>
+
+            <!-- KPI cards -->
+            <div class="kpi-row" id="kpiRow" style="display:none;">
+                <div class="kpi-card" style="--accent:var(--lp-yellow);">
+                    <div class="kpi-label">Total Orders</div>
+                    <div class="kpi-val" id="kpiTotal">—</div>
+                    <div class="kpi-sub">in selected range</div>
+                </div>
+                <div class="kpi-card" style="--accent:var(--lp-green);">
+                    <div class="kpi-label">Total COD</div>
+                    <div class="kpi-val" id="kpiCOD">—</div>
+                    <div class="kpi-sub">collection amount</div>
+                </div>
+                <div class="kpi-card" style="--accent:var(--lp-blue);">
+                    <div class="kpi-label">Shipping Charges</div>
+                    <div class="kpi-val" id="kpiCharges">—</div>
+                    <div class="kpi-sub">total billed</div>
+                </div>
+                <!-- CHANGE 1: "Unpaid Delivered" now shows total COD amount, not count -->
+                <div class="kpi-card" style="--accent:var(--lp-red);">
+                    <div class="kpi-label">Unpaid Delivered</div>
+                    <div class="kpi-val" id="kpiUnpaidDelivered">—</div>
+                    <div class="kpi-sub">COD amount unsettled</div>
+                </div>
+                <!-- CHANGE 1: Unpaid shipping card uses old_invoice_no to determine payment -->
+                <div class="kpi-card" style="--accent:var(--lp-orange);">
+                    <div class="kpi-label">Unpaid Shipping</div>
+                    <div class="kpi-val" id="kpiUnpaidCharges">—</div>
+                    <div class="kpi-sub">charges pending</div>
+                </div>
+                <!-- CHANGE 3: New Receivable card -->
+                <div class="kpi-card" style="--accent:var(--lp-purple);">
+                    <div class="kpi-label">Net Receivable</div>
+                    <div class="kpi-val" id="kpiReceivable">—</div>
+                    <div class="kpi-sub">(Unpaid COD × 96%) − Ship. Charges</div>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="table-wrapper">
+                <div class="table-wrapper-header">
+                    <h6><i class="fas fa-table mr-2"></i>Payment Records</h6>
+                    <span id="recordCount" style="font-family:'IBM Plex Mono',monospace;font-size:.75rem;color:var(--lp-muted);"></span>
+                </div>
+
+                <div id="emptyState">
+                    <i class="fas fa-receipt"></i>
+                    <p>Select a date range and click <strong>Fetch Payments</strong>,<br>or click <strong>Load From Orders</strong> to pull CN numbers from active orders.</p>
+                </div>
+
+                <div style="padding:0 16px 16px;" id="tableContainer" style="display:none;">
+                    <!--
+                        CHANGE 4: Two table headers — one with Products col (orders mode),
+                        one without (Leopards date-range mode). JS shows the right one.
+                    -->
+                    <table id="payTable" class="table" style="width:100%;display:none;">
+                        <thead>
+                            <tr id="tableHeaderRow">
+                                <!-- Headers injected by JS based on fetch mode -->
+                            </tr>
+                        </thead>
+                        <tbody id="payTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <footer class="sticky-footer bg-white" style="background:var(--lp-mid)!important;border-top:1px solid var(--lp-border);">
+            <div class="container my-auto">
+                <div class="copyright text-center my-auto">
+                    <span style="color:var(--lp-muted);font-family:'IBM Plex Mono',monospace;font-size:.75rem;">
+                        Leopards Payment Dashboard &mdash; TickBags
+                    </span>
+                </div>
+            </div>
+        </footer>
+    </div>
+</div>
+
+<div class="modal fade" id="logoutModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Ready to Leave?</h5>
+                <button class="close" type="button" data-dismiss="modal"><span>&times;</span></button>
+            </div>
+            <div class="modal-body">Select "Logout" below to end your current session.</div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <a class="btn btn-primary" href="login.html">Logout</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="static/assets/vendor/jquery/jquery.min.js"></script>
+<script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
+<script src="static/assets/js/sb-admin-2.min.js"></script>
+<script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
+<script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
+
+<script>
+/* =========================================================
+   Globals
+   ========================================================= */
+let dtInstance   = null;
+let allRows      = [];
+/*
+ * CHANGE 4: Track whether we came from Leopards date-range API (no product data)
+ * or from the orders list (has product data).
+ * true  = "Load From Orders"  → show Products column
+ * false = "Fetch Payments"    → hide Products column
+ */
+let hasProductData = false;
+
+/* =========================================================
+   Helpers
+   ========================================================= */
+function showLoading(msg) {
+    document.getElementById('loadingText').textContent = msg || 'Fetching data…';
+    document.getElementById('loadingOverlay').classList.add('active');
+}
+function hideLoading() {
+    document.getElementById('loadingOverlay').classList.remove('active');
+}
+function showError(msg) {
+    document.getElementById('errorMsg').textContent = msg;
+    const t = document.getElementById('errorToast');
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 5000);
+}
+function fmtPKR(val) {
+    const n = parseFloat(val) || 0;
+    return 'Rs ' + n.toLocaleString('en-PK');
+}
+
+function statusBadgeOrder(status) {
+    if (!status) return `<span class="badge-status unbooked"><i class="fas fa-box"></i> Un-Booked</span>`;
+    const s = status.toLowerCase();
+    if (s.includes('delivered')) return `<span class="badge-status delivered"><i class="fas fa-check-circle"></i> Delivered</span>`;
+    if (s.includes('booked'))    return `<span class="badge-status booked"><i class="fas fa-cube"></i> Booked</span>`;
+    if (s.includes('return'))    return `<span class="badge-status returned"><i class="fas fa-undo"></i> Returned</span>`;
+    return `<span class="badge-status unbooked">${status}</span>`;
+}
+
+function statusBadgePayment(status) {
+    if (!status || status === 'null' || status === '') {
+        return `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> Unpaid</span>`;
+    }
+    const s = status.toLowerCase();
+    if (s.includes('paid') || s.includes('settled') || s.includes('cleared')) {
+        return `<span class="badge-pay paid"><i class="fas fa-check-circle"></i> Paid</span>`;
+    }
+    if (s.includes('pending') || s.includes('process')) {
+        return `<span class="badge-pay pending"><i class="fas fa-clock"></i> Pending</span>`;
+    }
+    return `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> ${status}</span>`;
+}
+
+/*
+ * CHANGE 1: Shipping charges are paid when old_invoice_no has a non-empty value.
+ * Returns a badge HTML string and a boolean isPaid.
+ */
+function shippingPaidBadge(oldInvoiceNo) {
+    const hasPaid = oldInvoiceNo && String(oldInvoiceNo).trim() !== '' && String(oldInvoiceNo).trim() !== 'null';
+    if (hasPaid) {
+        return {
+            badge: `<span class="badge-pay paid"><i class="fas fa-check-circle"></i> Paid</span>`,
+            isPaid: true
+        };
+    }
+    return {
+        badge: `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> Unpaid</span>`,
+        isPaid: false
+    };
+}
+
+/* =========================================================
+   Default dates (last 30 days)
+   ========================================================= */
+(function initDates() {
+    const today = new Date();
+    const prior = new Date();
+    prior.setDate(today.getDate() - 30);
+    const fmt = d => d.toISOString().split('T')[0];
+    document.getElementById('toDate').value   = fmt(today);
+    document.getElementById('fromDate').value = fmt(prior);
+})();
+
+/* =========================================================
+   STRATEGY 1 — Fetch by date range (Leopards API)
+   CHANGE 4: Sets hasProductData = false → Products column hidden
+   ========================================================= */
+async function fetchPayments() {
+    const from = document.getElementById('fromDate').value;
+    const to   = document.getElementById('toDate').value;
+    if (!from || !to) { showError('Please select both From and To dates.'); return; }
+
+    hasProductData = false; // No product info from Leopards date-range API
+
+    showLoading('Fetching packets by date range…');
+    document.getElementById('btnFetch').disabled = true;
+
+    try {
+        const resp = await fetch(`/api/leopards/last-status?from_date=${from}&to_date=${to}`);
+        const data = await resp.json();
+
+        if (!data.status || data.status == 0) throw new Error(data.error || 'API returned an error');
+
+        const packets = data.packet_list || [];
+        if (!packets.length) {
+            showError('No packets found for this date range.');
+            renderTable([]);
+            return;
+        }
+
+        showLoading(`Found ${packets.length} packets — fetching payment details…`);
+        const cnNums = packets.map(p => p.tracking_number).filter(Boolean);
+        await enrichAndRender(packets, cnNums);
+
+    } catch (e) {
+        showError(e.message);
+    } finally {
+        hideLoading();
+        document.getElementById('btnFetch').disabled = false;
+    }
+}
+
+/* =========================================================
+   STRATEGY 2 — Load from active Shopify orders
+   CHANGE 4: Sets hasProductData = true → Products column shown
+   ========================================================= */
+async function fetchAllActive() {
+    hasProductData = true; // Orders have product info
+
+    showLoading('Loading CN numbers from active orders…');
+    document.getElementById('btnFetchAll').disabled = true;
+
+    try {
+        const resp = await fetch('/api/leopards/active-cns');
+        const data = await resp.json();
+
+        if (!data.cn_numbers || !data.cn_numbers.length) {
+            showError('No active CN numbers found in current orders.');
+            return;
+        }
+
+        showLoading(`Found ${data.cn_numbers.length} active CN numbers — fetching payment info…`);
+        await enrichAndRender(data.order_map || [], data.cn_numbers);
+
+    } catch(e) {
+        showError(e.message);
+    } finally {
+        hideLoading();
+        document.getElementById('btnFetchAll').disabled = false;
+    }
+}
+
+/* =========================================================
+   Enrich with payment + shipping charges, then render
+   ========================================================= */
+async function enrichAndRender(packetList, cnNums) {
+    const chunks = [];
+    for (let i = 0; i < cnNums.length; i += 50) chunks.push(cnNums.slice(i, i + 50));
+
+    let payMap = {};
+    for (const chunk of chunks) {
+        try {
+            const r = await fetch('/api/leopards/payment-details?cn_numbers=' + chunk.join(','));
+            const d = await r.json();
+            if (d.payment_list) {
+                d.payment_list.forEach(p => { payMap[String(p.booked_packet_cn)] = p; });
+            }
+        } catch(_) {}
+    }
+
+    let chargesMap = {};
+    for (const chunk of chunks) {
+        try {
+            const r = await fetch('/api/leopards/shipping-charges?cn_numbers=' + chunk.join(','));
+            const d = await r.json();
+            if (d.data) {
+                d.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
+            }
+        } catch(_) {}
+    }
+
+    renderTable(packetList, payMap, chargesMap);
+}
+
+/* =========================================================
+   Render DataTable
+   ========================================================= */
+function renderTable(packets, payMap = {}, chargesMap = {}) {
+    if (dtInstance) { dtInstance.destroy(); dtInstance = null; }
+
+    const tbody = document.getElementById('payTableBody');
+    tbody.innerHTML = '';
+    allRows = [];
+
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('tableContainer').style.display = '';
+    document.getElementById('payTable').style.display = '';
+    document.getElementById('btnExport').style.display = '';
+
+    if (!packets || !packets.length) {
+        document.getElementById('emptyState').style.display = 'block';
+        document.getElementById('tableContainer').style.display = 'none';
+        document.getElementById('payTable').style.display = 'none';
+        document.getElementById('kpiRow').style.display = 'none';
+        return;
+    }
+
+    /*
+     * CHANGE 4: Build the correct table header based on fetch mode.
+     * "Load From Orders" → include Products column (index 2).
+     * "Fetch Payments"   → omit Products column.
+     */
+    const headerRow = document.getElementById('tableHeaderRow');
+    if (hasProductData) {
+        headerRow.innerHTML = `
+            <th>Order ID</th>
+            <th>CN #</th>
+            <th>Products</th>
+            <th>Order Total</th>
+            <th>Status</th>
+            <th>Ship. Charges</th>
+            <th>Ship. Paid</th>
+            <th>COD Paid</th>
+            <th>Invoice Date</th>
+        `;
+    } else {
+        headerRow.innerHTML = `
+            <th>Order ID</th>
+            <th>CN #</th>
+            <th>Order Total</th>
+            <th>Status</th>
+            <th>Ship. Charges</th>
+            <th>Ship. Paid</th>
+            <th>COD Paid</th>
+            <th>Invoice Date</th>
+        `;
+    }
+
+    /* ---- Accumulators ---- */
+    let totalCOD             = 0;
+    let totalCharges         = 0;
+    let unpaidShippingTotal  = 0;  // CHANGE 1: based on old_invoice_no
+    let unpaidDeliveredCOD   = 0;  // CHANGE 2: total COD amount (not count)
+
+    packets.forEach(p => {
+        const cn          = p.tracking_number || p.cn || '';
+        const oid         = p.booked_packet_order_id || p.order_id || '—';
+        const products    = p.products || p.product_title || '—';
+        const cod         = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
+        totalCOD         += cod;
+
+        const pay         = payMap[cn]     || {};
+        const charges     = chargesMap[cn] || {};
+
+        /* ---- Shipping charge calculation ---- */
+        const totalCharged = parseFloat(charges.billed_charges);
+        const billChg = !isNaN(totalCharged)
+            ? Math.round(totalCharged * 1.25 * 1.16)
+            : Math.round(charges.gross_charges || 0);
+
+        if (billChg) totalCharges += billChg;
+
+        /*
+         * CHANGE 1: Determine shipping paid status via old_invoice_no.
+         * old_invoice_no comes from the charges API response.
+         */
+        const oldInvoiceNo   = charges.old_invoice_no || pay.old_invoice_no || '';
+        const shipPaid       = shippingPaidBadge(oldInvoiceNo);
+        if (!shipPaid.isPaid && billChg) {
+            unpaidShippingTotal += billChg;
+        }
+
+        /* ---- Order/COD payment status ---- */
+        const payStatus   = pay.status || '';
+        const orderStatus = p.booked_packet_status || '—';
+        const invDate     = pay.invoice_cheque_date || charges.invoice_cheque_date || '—';
+
+        const isDelivered = orderStatus && orderStatus.toLowerCase().includes('delivered');
+        const isCODUnpaid = !payStatus || payStatus === '' || payStatus === 'null'
+                          || payStatus.toLowerCase().includes('unpaid');
+
+        /*
+         * CHANGE 2: Accumulate total COD amount for unpaid delivered orders
+         * (previously was just a count).
+         */
+        if (isDelivered && isCODUnpaid) {
+            unpaidDeliveredCOD += cod;
+        }
+
+        /* ---- Save row for CSV ---- */
+        const row = {
+            order_id:     oid,
+            cn_number:    cn,
+            products:     products,
+            order_total:  cod,
+            order_status: orderStatus,
+            ship_charges: billChg,
+            ship_paid:    shipPaid.isPaid ? 'Paid' : 'Unpaid',
+            pay_status:   payStatus,
+            inv_date:     invDate
+        };
+        allRows.push(row);
+
+        /* ---- Build product cell (only used in orders mode) ---- */
+        let productCell = '';
+        if (hasProductData) {
+            if (p.item_image) {
+                productCell = `<div class="product-cell">
+                    <img src="${p.item_image}" alt="Product" class="product-img"
+                         onerror="this.src='https://via.placeholder.com/36?text=No+Image'">
+                    <div class="product-info"><p class="product-title">${products}</p></div>
+                </div>`;
+            } else {
+                productCell = `<div class="product-cell">
+                    <img src="https://via.placeholder.com/36?text=No+Image" alt="Product" class="product-img">
+                    <div class="product-info"><p class="product-title">${products}</p></div>
+                </div>`;
+            }
+        }
+
+        /* ---- Build table row ---- */
+        const tr = document.createElement('tr');
+        if (hasProductData) {
+            tr.innerHTML = `
+                <td class="mono" style="color:var(--lp-yellow)">${oid}</td>
+                <td class="mono">${cn || '—'}</td>
+                <td>${productCell}</td>
+                <td class="mono">${cod ? fmtPKR(cod) : '—'}</td>
+                <td>${statusBadgeOrder(orderStatus)}</td>
+                <td class="mono">${billChg ? fmtPKR(billChg) : '—'}</td>
+                <td>${shipPaid.badge}</td>
+                <td>${statusBadgePayment(payStatus)}</td>
+                <td class="mono">${invDate}</td>
+            `;
+        } else {
+            tr.innerHTML = `
+                <td class="mono" style="color:var(--lp-yellow)">${oid}</td>
+                <td class="mono">${cn || '—'}</td>
+                <td class="mono">${cod ? fmtPKR(cod) : '—'}</td>
+                <td>${statusBadgeOrder(orderStatus)}</td>
+                <td class="mono">${billChg ? fmtPKR(billChg) : '—'}</td>
+                <td>${shipPaid.badge}</td>
+                <td>${statusBadgePayment(payStatus)}</td>
+                <td class="mono">${invDate}</td>
+            `;
+        }
+        tbody.appendChild(tr);
+    });
+
+    /* ---- Init DataTable ---- */
+    dtInstance = $('#payTable').DataTable({
+        order: [[0, 'desc']],
+        pageLength: 25,
+        dom: '<"d-flex justify-content-between align-items-center px-1 py-2"lf>t<"d-flex justify-content-between align-items-center px-1 py-2"ip>',
+        language: {
+            search: '',
+            searchPlaceholder: 'Search…',
+            lengthMenu: 'Show _MENU_'
+        }
+    });
+
+    /*
+     * CHANGE 3: Net Receivable = (Unpaid Delivered COD × 0.96) − Unpaid Shipping Charges
+     */
+    const netReceivable = (unpaidDeliveredCOD * 0.96) - unpaidShippingTotal;
+
+    /* ---- Update KPI cards ---- */
+    document.getElementById('kpiRow').style.display = '';
+    document.getElementById('kpiTotal').textContent           = packets.length;
+    document.getElementById('kpiCOD').textContent             = fmtPKR(totalCOD);
+    document.getElementById('kpiCharges').textContent         = totalCharges ? fmtPKR(totalCharges) : '—';
+    document.getElementById('kpiUnpaidDelivered').textContent = unpaidDeliveredCOD ? fmtPKR(unpaidDeliveredCOD) : '—';  // CHANGE 2
+    document.getElementById('kpiUnpaidCharges').textContent   = unpaidShippingTotal ? fmtPKR(unpaidShippingTotal) : '—'; // CHANGE 1
+    document.getElementById('kpiReceivable').textContent      = fmtPKR(netReceivable);                                   // CHANGE 3
+
+    document.getElementById('recordCount').textContent  = `${packets.length} records`;
+    document.getElementById('lastUpdated').textContent  = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+/* =========================================================
+   CSV Export
+   ========================================================= */
+function exportCSV() {
+    if (!allRows.length) return;
+
+    let headers, lines;
+    if (hasProductData) {
+        headers = ['Order ID','CN #','Products','Order Total','Order Status','Ship Charges','Ship Paid','COD Payment Status','Invoice Date'];
+        lines = [headers.join(',')];
+        allRows.forEach(r => {
+            lines.push([
+                `"${r.order_id}"`,
+                `"${r.cn_number}"`,
+                `"${String(r.products).replace(/"/g,'""')}"`,
+                r.order_total,
+                `"${r.order_status}"`,
+                r.ship_charges,
+                `"${r.ship_paid}"`,
+                `"${r.pay_status || 'Unpaid'}"`,
+                `"${r.inv_date}"`
+            ].join(','));
+        });
+    } else {
+        headers = ['Order ID','CN #','Order Total','Order Status','Ship Charges','Ship Paid','COD Payment Status','Invoice Date'];
+        lines = [headers.join(',')];
+        allRows.forEach(r => {
+            lines.push([
+                `"${r.order_id}"`,
+                `"${r.cn_number}"`,
+                r.order_total,
+                `"${r.order_status}"`,
+                r.ship_charges,
+                `"${r.ship_paid}"`,
+                `"${r.pay_status || 'Unpaid'}"`,
+                `"${r.inv_date}"`
+            ].join(','));
+        });
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = `payments_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+}
+
+document.getElementById('emptyState').style.display = 'block';
+</script>
+
+</body>
+</html>

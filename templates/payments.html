@@ -833,7 +833,7 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
          * CHANGE 1: Determine shipping paid status via old_invoice_no.
          * old_invoice_no comes from the charges API response.
          */
-        const oldInvoiceNo   = charges.old_invoice_no || pay.old_invoice_no || '';
+        const oldInvoiceNo   = pay.billed_charges || '';
         const shipPaid       = shippingPaidBadge(oldInvoiceNo);
         if (!shipPaid.isPaid && billChg) {
             unpaidShippingTotal += billChg;

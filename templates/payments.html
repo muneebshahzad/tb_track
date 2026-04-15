@@ -812,7 +812,7 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
     const charges = chargesMap[cn] || {};
 
     /* Shipping charge */
-    const totalCharged = parseFloat(charges.billed_charges_amount);   // amount field
+    const totalCharged = parseFloat(charges.billed_charges);   // amount field
     const billChg = !isNaN(totalCharged)
         ? Math.round(totalCharged * 1.25 * 1.16)
         : Math.round(charges.gross_charges || 0);

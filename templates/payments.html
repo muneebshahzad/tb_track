@@ -470,16 +470,11 @@
             <!-- KPI cards -->
             <div class="kpi-row" id="kpiRow" style="display:none;">
 
-                <!-- ── Existing cards ── -->
+                <!-- ── Merged: Total Orders + Total COD ── -->
                 <div class="kpi-card" style="--accent:var(--lp-yellow);">
-                    <div class="kpi-label">Total Orders</div>
-                    <div class="kpi-val" id="kpiTotal">—</div>
-                    <div class="kpi-sub">in selected range</div>
-                </div>
-                <div class="kpi-card" style="--accent:var(--lp-green);">
                     <div class="kpi-label">Total COD</div>
                     <div class="kpi-val" id="kpiCOD">—</div>
-                    <div class="kpi-sub">collection amount</div>
+                    <div class="kpi-sub"><span id="kpiTotal">—</span> orders in selected range</div>
                 </div>
                 <div class="kpi-card" style="--accent:var(--lp-blue);">
                     <div class="kpi-label">Shipping Charges</div>
@@ -505,25 +500,22 @@
                 <!-- ── NEW: Delivered Orders ── -->
                 <div class="kpi-card" style="--accent:var(--lp-green);">
                     <div class="kpi-label">Delivered Orders</div>
-                    <div class="kpi-val" id="kpiDeliveredCount">—</div>
-                    <div class="kpi-amt" id="kpiDeliveredAmt" style="color:var(--lp-green);">—</div>
-                    <div class="kpi-sub">qty &amp; COD amount</div>
+                    <div class="kpi-val" id="kpiDeliveredAmt">—</div>
+                    <div class="kpi-sub"><span id="kpiDeliveredCount">—</span> orders</div>
                 </div>
 
                 <!-- ── NEW: Returned Orders ── -->
                 <div class="kpi-card" style="--accent:var(--lp-red);">
                     <div class="kpi-label">Returned Orders</div>
-                    <div class="kpi-val" id="kpiReturnedCount">—</div>
-                    <div class="kpi-amt" id="kpiReturnedAmt" style="color:var(--lp-red);">—</div>
-                    <div class="kpi-sub">qty &amp; COD amount</div>
+                    <div class="kpi-val" id="kpiReturnedAmt">—</div>
+                    <div class="kpi-sub"><span id="kpiReturnedCount">—</span> orders</div>
                 </div>
 
                 <!-- ── NEW: Pending Orders (neither delivered nor returned) ── -->
                 <div class="kpi-card" style="--accent:var(--lp-blue);">
                     <div class="kpi-label">Pending Orders</div>
-                    <div class="kpi-val" id="kpiPendingCount">—</div>
-                    <div class="kpi-amt" id="kpiPendingAmt" style="color:var(--lp-blue);">—</div>
-                    <div class="kpi-sub">qty &amp; COD amount</div>
+                    <div class="kpi-val" id="kpiPendingAmt">—</div>
+                    <div class="kpi-sub"><span id="kpiPendingCount">—</span> orders</div>
                 </div>
 
             </div>
@@ -925,21 +917,21 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
     /* ---- Update existing KPI cards ---- */
     document.getElementById('kpiRow').style.display = '';
     document.getElementById('kpiTotal').textContent           = packets.length;
-    document.getElementById('kpiCOD').textContent             = fmtPKR(totalCOD);
+    document.getElementById('kpiCOD').textContent             = fmtPKR(Math.round(totalCOD));
     document.getElementById('kpiCharges').textContent         = totalCharges ? fmtPKR(totalCharges) : '—';
     document.getElementById('kpiUnpaidDelivered').textContent = unpaidDeliveredCOD ? fmtPKR(unpaidDeliveredCOD) : '—';
     document.getElementById('kpiUnpaidCharges').textContent   = unpaidShippingTotal ? fmtPKR(unpaidShippingTotal) : '—';
     document.getElementById('kpiReceivable').textContent      = fmtPKR(netReceivable);
 
-    /* ---- NEW: Delivered / Returned / Pending KPI cards ---- */
+    /* ---- NEW: Delivered / Returned / Pending — amount in main, count in sub ---- */
+    document.getElementById('kpiDeliveredAmt').textContent   = fmtPKR(Math.round(deliveredCOD));
     document.getElementById('kpiDeliveredCount').textContent = deliveredCount;
-    document.getElementById('kpiDeliveredAmt').textContent   = fmtPKR(deliveredCOD);
 
+    document.getElementById('kpiReturnedAmt').textContent    = fmtPKR(Math.round(returnedCOD));
     document.getElementById('kpiReturnedCount').textContent  = returnedCount;
-    document.getElementById('kpiReturnedAmt').textContent    = fmtPKR(returnedCOD);
 
+    document.getElementById('kpiPendingAmt').textContent     = fmtPKR(Math.round(pendingCOD));
     document.getElementById('kpiPendingCount').textContent   = pendingCount;
-    document.getElementById('kpiPendingAmt').textContent     = fmtPKR(pendingCOD);
 
     document.getElementById('recordCount').textContent  = `${packets.length} records`;
     document.getElementById('lastUpdated').textContent  = 'Updated ' + new Date().toLocaleTimeString();

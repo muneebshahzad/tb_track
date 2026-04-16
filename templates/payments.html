@@ -181,6 +181,13 @@
             color: var(--lp-muted);
             margin-top: 6px;
         }
+        /* Amount sub-line inside the new cards */
+        .kpi-card .kpi-amt {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: .85rem;
+            font-weight: 500;
+            margin-top: 6px;
+        }
 
         .table-wrapper {
             margin: 0 32px 40px;
@@ -462,6 +469,8 @@
 
             <!-- KPI cards -->
             <div class="kpi-row" id="kpiRow" style="display:none;">
+
+                <!-- ── Existing cards ── -->
                 <div class="kpi-card" style="--accent:var(--lp-yellow);">
                     <div class="kpi-label">Total Orders</div>
                     <div class="kpi-val" id="kpiTotal">—</div>
@@ -477,24 +486,46 @@
                     <div class="kpi-val" id="kpiCharges">—</div>
                     <div class="kpi-sub">total billed</div>
                 </div>
-                <!-- CHANGE 1: "Unpaid Delivered" now shows total COD amount, not count -->
                 <div class="kpi-card" style="--accent:var(--lp-red);">
                     <div class="kpi-label">Unpaid Delivered</div>
                     <div class="kpi-val" id="kpiUnpaidDelivered">—</div>
                     <div class="kpi-sub">COD amount unsettled</div>
                 </div>
-                <!-- CHANGE 1: Unpaid shipping card uses old_invoice_no to determine payment -->
                 <div class="kpi-card" style="--accent:var(--lp-orange);">
                     <div class="kpi-label">Unpaid Shipping</div>
                     <div class="kpi-val" id="kpiUnpaidCharges">—</div>
                     <div class="kpi-sub">charges pending</div>
                 </div>
-                <!-- CHANGE 3: New Receivable card -->
                 <div class="kpi-card" style="--accent:var(--lp-purple);">
                     <div class="kpi-label">Net Receivable</div>
                     <div class="kpi-val" id="kpiReceivable">—</div>
                     <div class="kpi-sub">(Unpaid COD × 96%) − Ship. Charges</div>
                 </div>
+
+                <!-- ── NEW: Delivered Orders ── -->
+                <div class="kpi-card" style="--accent:var(--lp-green);">
+                    <div class="kpi-label">Delivered Orders</div>
+                    <div class="kpi-val" id="kpiDeliveredCount">—</div>
+                    <div class="kpi-amt" id="kpiDeliveredAmt" style="color:var(--lp-green);">—</div>
+                    <div class="kpi-sub">qty &amp; COD amount</div>
+                </div>
+
+                <!-- ── NEW: Returned Orders ── -->
+                <div class="kpi-card" style="--accent:var(--lp-red);">
+                    <div class="kpi-label">Returned Orders</div>
+                    <div class="kpi-val" id="kpiReturnedCount">—</div>
+                    <div class="kpi-amt" id="kpiReturnedAmt" style="color:var(--lp-red);">—</div>
+                    <div class="kpi-sub">qty &amp; COD amount</div>
+                </div>
+
+                <!-- ── NEW: Pending Orders (neither delivered nor returned) ── -->
+                <div class="kpi-card" style="--accent:var(--lp-blue);">
+                    <div class="kpi-label">Pending Orders</div>
+                    <div class="kpi-val" id="kpiPendingCount">—</div>
+                    <div class="kpi-amt" id="kpiPendingAmt" style="color:var(--lp-blue);">—</div>
+                    <div class="kpi-sub">qty &amp; COD amount</div>
+                </div>
+
             </div>
 
             <!-- Table -->
@@ -510,10 +541,6 @@
                 </div>
 
                 <div style="padding:0 16px 16px;" id="tableContainer" style="display:none;">
-                    <!--
-                        CHANGE 4: Two table headers — one with Products col (orders mode),
-                        one without (Leopards date-range mode). JS shows the right one.
-                    -->
                     <table id="payTable" class="table" style="width:100%;display:none;">
                         <thead>
                             <tr id="tableHeaderRow">
@@ -568,12 +595,6 @@
    ========================================================= */
 let dtInstance   = null;
 let allRows      = [];
-/*
- * CHANGE 4: Track whether we came from Leopards date-range API (no product data)
- * or from the orders list (has product data).
- * true  = "Load From Orders"  → show Products column
- * false = "Fetch Payments"    → hide Products column
- */
 let hasProductData = false;
 
 /* =========================================================
@@ -620,10 +641,6 @@ function statusBadgePayment(status) {
     return `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> ${status}</span>`;
 }
 
-/*
- * CHANGE 1: Shipping charges are paid when old_invoice_no has a non-empty value.
- * Returns a badge HTML string and a boolean isPaid.
- */
 function shippingPaidBadge(oldInvoiceNo) {
     const hasPaid = oldInvoiceNo && String(oldInvoiceNo).trim() !== '' && String(oldInvoiceNo).trim() !== 'null';
     if (hasPaid) {
@@ -652,14 +669,13 @@ function shippingPaidBadge(oldInvoiceNo) {
 
 /* =========================================================
    STRATEGY 1 — Fetch by date range (Leopards API)
-   CHANGE 4: Sets hasProductData = false → Products column hidden
    ========================================================= */
 async function fetchPayments() {
     const from = document.getElementById('fromDate').value;
     const to   = document.getElementById('toDate').value;
     if (!from || !to) { showError('Please select both From and To dates.'); return; }
 
-    hasProductData = false; // No product info from Leopards date-range API
+    hasProductData = false;
 
     showLoading('Fetching packets by date range…');
     document.getElementById('btnFetch').disabled = true;
@@ -691,10 +707,9 @@ async function fetchPayments() {
 
 /* =========================================================
    STRATEGY 2 — Load from active Shopify orders
-   CHANGE 4: Sets hasProductData = true → Products column shown
    ========================================================= */
 async function fetchAllActive() {
-    hasProductData = true; // Orders have product info
+    hasProductData = true;
 
     showLoading('Loading CN numbers from active orders…');
     document.getElementById('btnFetchAll').disabled = true;
@@ -774,11 +789,7 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
         return;
     }
 
-    /*
-     * CHANGE 4: Build the correct table header based on fetch mode.
-     * "Load From Orders" → include Products column (index 2).
-     * "Fetch Payments"   → omit Products column.
-     */
+    /* Build table header */
     const headerRow = document.getElementById('tableHeaderRow');
     if (hasProductData) {
         headerRow.innerHTML = `
@@ -786,7 +797,6 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
     <th>Order Total</th><th>Status</th>
     <th>Ship. Charges</th><th>Ship. Paid</th>
     <th>COD Paid</th><th>Net Amount</th><th>Invoice Date</th>`;
-
     } else {
         headerRow.innerHTML = `
     <th>Order ID</th><th>CN #</th>
@@ -796,94 +806,106 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
     }
 
     /* ---- Accumulators ---- */
-    let totalCOD             = 0;
-    let totalCharges         = 0;
-    let unpaidShippingTotal  = 0;  // CHANGE 1: based on old_invoice_no
-    let unpaidDeliveredCOD   = 0;  // CHANGE 2: total COD amount (not count)
+    let totalCOD            = 0;
+    let totalCharges        = 0;
+    let unpaidShippingTotal = 0;
+    let unpaidDeliveredCOD  = 0;
+
+    /* ---- NEW accumulators ---- */
+    let deliveredCount = 0, deliveredCOD = 0;
+    let returnedCount  = 0, returnedCOD  = 0;
+    let pendingCount   = 0, pendingCOD   = 0;
 
     packets.forEach(p => {
-    const cn       = p.tracking_number || p.cn || '';
-    const oid      = p.booked_packet_order_id || p.order_id || '—';
-    const products = p.products || p.product_title || '—';
-    const cod      = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
-    totalCOD      += cod;
+        const cn       = p.tracking_number || p.cn || '';
+        const oid      = p.booked_packet_order_id || p.order_id || '—';
+        const products = p.products || p.product_title || '—';
+        const cod      = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
+        totalCOD      += cod;
 
-    const pay     = payMap[cn]     || {};
-    const charges = chargesMap[cn] || {};
+        const pay     = payMap[cn]     || {};
+        const charges = chargesMap[cn] || {};
 
-    /* Shipping charge */
-    const totalCharged = parseFloat(charges.billed_charges);   // amount field
-    const billChg = !isNaN(totalCharged)
-        ? Math.round(totalCharged * 1.25 * 1.16)
-        : Math.round(charges.gross_charges || 0);
-    if (billChg) totalCharges += billChg;
+        /* Shipping charge */
+        const totalCharged = parseFloat(charges.billed_charges);
+        const billChg = !isNaN(totalCharged)
+            ? Math.round(totalCharged * 1.25 * 1.16)
+            : Math.round(charges.gross_charges || 0);
+        if (billChg) totalCharges += billChg;
 
-    /* ✅ FIX 1: Shipping PAID = billed_charges present in charges API */
-    const billedChargesVal = charges.billed_charges || '';
-    const shipPaid         = shippingPaidBadge(billedChargesVal);
-    if (!shipPaid.isPaid && billChg) unpaidShippingTotal += billChg;
+        /* Shipping PAID = billed_charges present */
+        const billedChargesVal = charges.billed_charges || '';
+        const shipPaid         = shippingPaidBadge(billedChargesVal);
+        if (!shipPaid.isPaid && billChg) unpaidShippingTotal += billChg;
 
-    /* ✅ FIX 2: COD PAID = invoice_cheque_date present in charges API */
-    const invChequeDate = charges.invoice_cheque_date || '';
-    const isCODPaid     = invChequeDate.trim() !== ''
-                       && invChequeDate.trim() !== 'null';
-    const codPayBadge   = isCODPaid
-        ? `<span class="badge-pay paid"><i class="fas fa-check-circle"></i> Paid</span>`
-        : `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> Unpaid</span>`;
+        /* COD PAID = invoice_cheque_date present */
+        const invChequeDate = charges.invoice_cheque_date || '';
+        const isCODPaid     = invChequeDate.trim() !== ''
+                           && invChequeDate.trim() !== 'null';
+        const codPayBadge   = isCODPaid
+            ? `<span class="badge-pay paid"><i class="fas fa-check-circle"></i> Paid</span>`
+            : `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> Unpaid</span>`;
 
-    const invDate     = invChequeDate || pay.invoice_cheque_date || '—';
-    const orderStatus = p.booked_packet_status || '—';
-    const isDelivered = orderStatus.toLowerCase().includes('delivered');
+        const invDate     = invChequeDate || pay.invoice_cheque_date || '—';
+        const orderStatus = p.booked_packet_status || '—';
+        const isDelivered = orderStatus.toLowerCase().includes('delivered');
 
-    /* ✅ FIX 2 continued: accumulate using charges-based COD paid flag */
-    if (isDelivered && !isCODPaid) unpaidDeliveredCOD += cod;
+        if (isDelivered && !isCODPaid) unpaidDeliveredCOD += cod;
 
-    /* ✅ FIX 3: Net amount column */
-    const netAmount = isDelivered ? (cod * 0.96) - billChg : -billChg;
-    const netColor  = netAmount >= 0 ? 'var(--lp-green)' : 'var(--lp-red)';
-    const netCell   = `<span style="font-family:'IBM Plex Mono',monospace;color:${netColor}">${fmtPKR(netAmount)}</span>`;
+        /* ---- NEW: classify order into Delivered / Returned / Pending ---- */
+        const isReturned = orderStatus.toLowerCase().includes('return');
+        const isPending  = !isDelivered && !isReturned;
 
-    /* Save for CSV */
-    const row = {
-        order_id: oid, cn_number: cn, products, order_total: cod,
-        order_status: orderStatus, ship_charges: billChg,
-        ship_paid: shipPaid.isPaid ? 'Paid' : 'Unpaid',
-        cod_pay_status: isCODPaid ? 'Paid' : 'Unpaid',
-        net_amount: netAmount, inv_date: invDate
-    };
-    allRows.push(row);
+        if (isDelivered)      { deliveredCount++; deliveredCOD += cod; }
+        else if (isReturned)  { returnedCount++;  returnedCOD  += cod; }
+        else                  { pendingCount++;   pendingCOD   += cod; }
 
-    /* Build product cell */
-    let productCell = '';
-    if (hasProductData) {
-        const imgSrc = p.item_image || 'https://via.placeholder.com/36?text=No+Image';
-        productCell  = `<div class="product-cell">
-            <img src="${imgSrc}" alt="Product" class="product-img"
-                 onerror="this.src='https://via.placeholder.com/36?text=No+Image'">
-            <div class="product-info"><p class="product-title">${products}</p></div>
-        </div>`;
-    }
+        /* Net amount column */
+        const netAmount = isDelivered ? (cod * 0.96) - billChg : -billChg;
+        const netColor  = netAmount >= 0 ? 'var(--lp-green)' : 'var(--lp-red)';
+        const netCell   = `<span style="font-family:'IBM Plex Mono',monospace;color:${netColor}">${fmtPKR(netAmount)}</span>`;
 
-    /* Build <tr> */
-    const tr = document.createElement('tr');
-    const commonCells = `
-        <td class="mono">${cod ? fmtPKR(cod) : '—'}</td>
-        <td>${statusBadgeOrder(orderStatus)}</td>
-        <td class="mono">${billChg ? fmtPKR(billChg) : '—'}</td>
-        <td>${shipPaid.badge}</td>
-        <td>${codPayBadge}</td>
-        <td>${netCell}</td>
-        <td class="mono">${invDate}</td>
-    `;
-    tr.innerHTML = hasProductData
-        ? `<td class="mono" style="color:var(--lp-yellow)">${oid}</td>
-           <td class="mono">${cn || '—'}</td>
-           <td>${productCell}</td>${commonCells}`
-        : `<td class="mono" style="color:var(--lp-yellow)">${oid}</td>
-           <td class="mono">${cn || '—'}</td>${commonCells}`;
+        /* Save for CSV */
+        const row = {
+            order_id: oid, cn_number: cn, products, order_total: cod,
+            order_status: orderStatus, ship_charges: billChg,
+            ship_paid: shipPaid.isPaid ? 'Paid' : 'Unpaid',
+            cod_pay_status: isCODPaid ? 'Paid' : 'Unpaid',
+            net_amount: netAmount, inv_date: invDate
+        };
+        allRows.push(row);
 
-    tbody.appendChild(tr);
-});
+        /* Product cell */
+        let productCell = '';
+        if (hasProductData) {
+            const imgSrc = p.item_image || 'https://via.placeholder.com/36?text=No+Image';
+            productCell  = `<div class="product-cell">
+                <img src="${imgSrc}" alt="Product" class="product-img"
+                     onerror="this.src='https://via.placeholder.com/36?text=No+Image'">
+                <div class="product-info"><p class="product-title">${products}</p></div>
+            </div>`;
+        }
+
+        /* Build <tr> */
+        const tr = document.createElement('tr');
+        const commonCells = `
+            <td class="mono">${cod ? fmtPKR(cod) : '—'}</td>
+            <td>${statusBadgeOrder(orderStatus)}</td>
+            <td class="mono">${billChg ? fmtPKR(billChg) : '—'}</td>
+            <td>${shipPaid.badge}</td>
+            <td>${codPayBadge}</td>
+            <td>${netCell}</td>
+            <td class="mono">${invDate}</td>
+        `;
+        tr.innerHTML = hasProductData
+            ? `<td class="mono" style="color:var(--lp-yellow)">${oid}</td>
+               <td class="mono">${cn || '—'}</td>
+               <td>${productCell}</td>${commonCells}`
+            : `<td class="mono" style="color:var(--lp-yellow)">${oid}</td>
+               <td class="mono">${cn || '—'}</td>${commonCells}`;
+
+        tbody.appendChild(tr);
+    });
 
     /* ---- Init DataTable ---- */
     dtInstance = $('#payTable').DataTable({
@@ -897,19 +919,27 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
         }
     });
 
-    /*
-     * CHANGE 3: Net Receivable = (Unpaid Delivered COD × 0.96) − Unpaid Shipping Charges
-     */
+    /* Net Receivable */
     const netReceivable = (unpaidDeliveredCOD * 0.96) - unpaidShippingTotal;
 
-    /* ---- Update KPI cards ---- */
+    /* ---- Update existing KPI cards ---- */
     document.getElementById('kpiRow').style.display = '';
     document.getElementById('kpiTotal').textContent           = packets.length;
     document.getElementById('kpiCOD').textContent             = fmtPKR(totalCOD);
     document.getElementById('kpiCharges').textContent         = totalCharges ? fmtPKR(totalCharges) : '—';
-    document.getElementById('kpiUnpaidDelivered').textContent = unpaidDeliveredCOD ? fmtPKR(unpaidDeliveredCOD) : '—';  // CHANGE 2
-    document.getElementById('kpiUnpaidCharges').textContent   = unpaidShippingTotal ? fmtPKR(unpaidShippingTotal) : '—'; // CHANGE 1
-    document.getElementById('kpiReceivable').textContent      = fmtPKR(netReceivable);                                   // CHANGE 3
+    document.getElementById('kpiUnpaidDelivered').textContent = unpaidDeliveredCOD ? fmtPKR(unpaidDeliveredCOD) : '—';
+    document.getElementById('kpiUnpaidCharges').textContent   = unpaidShippingTotal ? fmtPKR(unpaidShippingTotal) : '—';
+    document.getElementById('kpiReceivable').textContent      = fmtPKR(netReceivable);
+
+    /* ---- NEW: Delivered / Returned / Pending KPI cards ---- */
+    document.getElementById('kpiDeliveredCount').textContent = deliveredCount;
+    document.getElementById('kpiDeliveredAmt').textContent   = fmtPKR(deliveredCOD);
+
+    document.getElementById('kpiReturnedCount').textContent  = returnedCount;
+    document.getElementById('kpiReturnedAmt').textContent    = fmtPKR(returnedCOD);
+
+    document.getElementById('kpiPendingCount').textContent   = pendingCount;
+    document.getElementById('kpiPendingAmt').textContent     = fmtPKR(pendingCOD);
 
     document.getElementById('recordCount').textContent  = `${packets.length} records`;
     document.getElementById('lastUpdated').textContent  = 'Updated ' + new Date().toLocaleTimeString();

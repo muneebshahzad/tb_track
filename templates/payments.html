@@ -667,7 +667,7 @@ async function fetchPayments() {
     const to   = document.getElementById('toDate').value;
     if (!from || !to) { showError('Please select both From and To dates.'); return; }
 
-    hasProductData = false;
+    hasProductData = true;   // ← always show product column now
 
     showLoading('Fetching packets by date range…');
     document.getElementById('btnFetch').disabled = true;
@@ -685,8 +685,34 @@ async function fetchPayments() {
             return;
         }
 
-        showLoading(`Found ${packets.length} packets — fetching payment details…`);
+        /* ── Fetch special_instructions from trackBookedPacket in batches of 20 ── */
+        showLoading(`Found ${packets.length} packets — fetching product names…`);
         const cnNums = packets.map(p => p.tracking_number).filter(Boolean);
+        const trackMap = {};
+
+        const trackChunks = [];
+        for (let i = 0; i < cnNums.length; i += 20) trackChunks.push(cnNums.slice(i, i + 20));
+
+        for (const chunk of trackChunks) {
+            try {
+                const r = await fetch('/api/leopards/track-packets?track_numbers=' + chunk.join(','));
+                const d = await r.json();
+                if (d.status === 1 && Array.isArray(d.packet_list)) {
+                    d.packet_list.forEach(p => {
+                        trackMap[String(p.track_number)] = p.special_instructions || '—';
+                    });
+                }
+            } catch (_) {}
+        }
+
+        /* Inject product name into each packet */
+        packets.forEach(p => {
+            const cn = String(p.tracking_number || '');
+            p.products   = trackMap[cn] || '—';
+            p.item_image = '';   // no image from Leopards, leave blank
+        });
+
+        showLoading(`Fetching payment details…`);
         await enrichAndRender(packets, cnNums);
 
     } catch (e) {
@@ -696,6 +722,7 @@ async function fetchPayments() {
         document.getElementById('btnFetch').disabled = false;
     }
 }
+
 
 /* =========================================================
    STRATEGY 2 — Load from active Shopify orders
@@ -880,36 +907,44 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
 
         /* Build <tr> */
         const tr = document.createElement('tr');
-        const commonCells = `
-            <td class="mono">${cod ? fmtPKR(cod) : '—'}</td>
-            <td>${statusBadgeOrder(orderStatus)}</td>
-            <td class="mono">${billChg ? fmtPKR(billChg) : '—'}</td>
-            <td>${shipPaid.badge}</td>
-            <td>${codPayBadge}</td>
-            <td>${netCell}</td>
-            <td class="mono">${invDate}</td>
-        `;
-        tr.innerHTML = hasProductData
-            ? `<td class="mono" style="color:var(--lp-yellow)">${oid}</td>
-               <td class="mono">${cn || '—'}</td>
-               <td>${productCell}</td>${commonCells}`
-            : `<td class="mono" style="color:var(--lp-yellow)">${oid}</td>
-               <td class="mono">${cn || '—'}</td>${commonCells}`;
 
-        tbody.appendChild(tr);
+const commonCells = `
+    <td class="mono" data-order="${cod}">${cod ? fmtPKR(cod) : '—'}</td>
+    <td data-order="${orderStatus}">${statusBadgeOrder(orderStatus)}</td>
+    <td class="mono" data-order="${billChg}">${billChg ? fmtPKR(billChg) : '—'}</td>
+    <td data-order="${shipPaid.isPaid ? 1 : 0}">${shipPaid.badge}</td>
+    <td data-order="${isCODPaid ? 1 : 0}">${codPayBadge}</td>
+    <td data-order="${netAmount}">${netCell}</td>
+    <td class="mono" data-order="${invDate}">${invDate}</td>
+`;
+
+tr.innerHTML = hasProductData
+    ? `<td class="mono" style="color:var(--lp-yellow)" data-order="${oid}">${oid}</td>
+       <td class="mono" data-order="${cn}">${cn || '—'}</td>
+       <td>${productCell}</td>${commonCells}`
+    : `<td class="mono" style="color:var(--lp-yellow)" data-order="${oid}">${oid}</td>
+       <td class="mono" data-order="${cn}">${cn || '—'}</td>${commonCells}`;
+
+tbody.appendChild(tr);
+
     });
 
     /* ---- Init DataTable ---- */
-    dtInstance = $('#payTable').DataTable({
-        order: [[0, 'desc']],
-        pageLength: 25,
-        dom: '<"d-flex justify-content-between align-items-center px-1 py-2"lf>t<"d-flex justify-content-between align-items-center px-1 py-2"ip>',
-        language: {
-            search: '',
-            searchPlaceholder: 'Search…',
-            lengthMenu: 'Show _MENU_'
-        }
-    });
+dtInstance = $('#payTable').DataTable({
+    order: [[0, 'desc']],
+    pageLength: 25,
+    orderCellsTop: true,
+    dom: '<"d-flex justify-content-between align-items-center px-1 py-2"lf>t<"d-flex justify-content-between align-items-center px-1 py-2"ip>',
+    columnDefs: [
+        { type: 'num', targets: hasProductData ? [3, 5, 8] : [2, 4, 7] }   // numeric cols: COD, charges, net
+    ],
+    language: {
+        search: '',
+        searchPlaceholder: 'Search…',
+        lengthMenu: 'Show _MENU_'
+    }
+});
+
 
     /* Net Receivable */
     const netReceivable = (unpaidDeliveredCOD * 0.96) - unpaidShippingTotal;

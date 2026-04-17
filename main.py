@@ -78,15 +78,41 @@ def format_date(date_str):
     return date_obj.isoformat()
 
 
-async def fetch_tracking_data(session, tracking_number):
+async def fetch_tracking_data_bulk(session, tracking_numbers):
+    """
+    Fetch tracking data for a list of CN numbers in a single API call.
+    Returns a dict: { tracking_number: packet_dict }
+    """
+    if not tracking_numbers:
+        return {}
+
     api_key = os.getenv('LEOPARD_API_KEY')
     api_password = os.getenv('LEOPARD_PASSWORD')
-    url = f"https://merchantapi.leopardscourier.com/api/trackBookedPacket/?api_key={api_key}&api_password={api_password}&track_numbers={tracking_number}"
+    joined = ','.join(tracking_numbers)
+    url = (
+        f"https://merchantapi.leopardscourier.com/api/trackBookedPacket/"
+        f"?api_key={api_key}&api_password={api_password}&track_numbers={joined}"
+    )
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
-    async with session.get(url, ssl=ssl_context) as response:
-        return await response.json()
+
+    try:
+        async with session.get(url, ssl=ssl_context) as response:
+            data = await response.json()
+
+        result = {}
+        if data.get('status') == 1 and not data.get('error'):
+            for packet in data.get('packet_list', []):
+                cn = packet.get('track_number')
+                if cn:
+                    result[cn] = packet
+        return result
+
+    except Exception as e:
+        print(f"Error in fetch_tracking_data_bulk: {e}")
+        return {}
+
 
 
 @app.route('/generate_loadsheet', methods=['POST'])
@@ -120,96 +146,94 @@ def generate_loadsheet():
         return jsonify({"error": "Failed to connect to the API"}), 500
 
 
-async def process_line_item(session, line_item, fulfillments):
+def process_line_item(line_item, fulfillments, tracking_cache):
+    """
+    Synchronous now — no HTTP calls. Uses pre-fetched tracking_cache.
+    tracking_cache: { tracking_number: packet_dict }
+    """
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
         return []
 
     tracking_info = []
-    name = 'N/A'
-    address = 'N/A'
-    phone = 'N/A'
-    city = 'N/A'
 
     if line_item.fulfillment_status == "fulfilled":
         for fulfillment in fulfillments:
             if fulfillment.status == "cancelled":
                 continue
             for item in fulfillment.line_items:
-                if item.id == line_item.id:
-                    tracking_number = fulfillment.tracking_number
-                    data = await fetch_tracking_data(session, tracking_number)
-                    if data['status'] == 1 and not data['error']:
-                        packet_list = data['packet_list']
-                        if packet_list:
-                            name = packet_list[0]['consignment_name_eng']
-                            address = packet_list[0]['consignment_address']
-                            phone = packet_list[0]['consignment_phone']
-                            city = packet_list[0]['destination_city_name']
-                            tracking_details = packet_list[0].get('Tracking Detail', [])
+                if item.id != line_item.id:
+                    continue
 
-                            if tracking_details:
-                                last_tracking = tracking_details[-1]  # Last tracking update
-                                final_status = last_tracking.get('Status', 'Unknown')
-                                reason = last_tracking.get('Reason')
+                tracking_number = fulfillment.tracking_number
+                packet = tracking_cache.get(tracking_number)
 
-                                # Append reason to final status if available
-                                if reason and reason != 'N/A':
-                                    final_status += f" - {reason}"
+                if packet:
+                    name    = packet.get('consignment_name_eng', 'N/A')
+                    address = packet.get('consignment_address', 'N/A')
+                    phone   = packet.get('consignment_phone', 'N/A')
+                    city    = packet.get('destination_city_name', 'N/A')
+                    tracking_details = packet.get('Tracking Detail', [])
 
-                                keywords = ["Return", "hold", "UNTRACEABLE"]
-                                for detail in tracking_details:
-                                    status = detail['Status']
-                                    reason = detail.get('Reason', 'N/A')
+                    if tracking_details:
+                        last_tracking = tracking_details[-1]
+                        final_status  = last_tracking.get('Status', 'Unknown')
+                        reason        = last_tracking.get('Reason')
 
-                                    # Check for keywords in both status and reason
-                                    if any(kw in status for kw in keywords) or any(
-                                            kw in (reason or '') for kw in keywords):
-                                        final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
-                                        check_status = packet_list[0].get('booked_packet_status', 'Booked')
-                                        print(f"Final Status {check_status}")
+                        if reason and reason != 'N/A':
+                            final_status += f" - {reason}"
 
-                                        if "Returned to shipper" in check_status:
-                                            final_status = "RETURNED TO SHIPPER"
-                                        break  # Exit early to avoid duplicates
-                                    elif reason and reason != "N/A" and reason not in final_status:
-                                        final_status += f" - {reason}"
+                        keywords = ["Return", "hold", "UNTRACEABLE"]
+                        for detail in tracking_details:
+                            status = detail['Status']
+                            reason = detail.get('Reason', 'N/A')
 
-                                    check_status = packet_list[0].get('booked_packet_status', 'Booked')
-                                    print(f"Final Status {check_status}")
+                            if any(kw in status for kw in keywords) or any(
+                                    kw in (reason or '') for kw in keywords):
+                                final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
+                                check_status = packet.get('booked_packet_status', 'Booked')
+                                if "Returned to shipper" in check_status:
+                                    final_status = "RETURNED TO SHIPPER"
+                                break
+                            elif reason and reason != "N/A" and reason not in final_status:
+                                final_status += f" - {reason}"
 
-                                    if "Returned to shipper" in check_status:
-                                        final_status = "RETURNED TO SHIPPER"
-
-                            else:
-                                final_status = packet_list[0].get('booked_packet_status', 'Booked')
-                                if "Pickup Request not Send" in final_status:
-                                    final_status = "Booked"
-                        else:
-                            final_status = "Booked"
+                            check_status = packet.get('booked_packet_status', 'Booked')
+                            if "Returned to shipper" in check_status:
+                                final_status = "RETURNED TO SHIPPER"
                     else:
-                        final_status = "N/A"
+                        final_status = packet.get('booked_packet_status', 'Booked')
+                        if "Pickup Request not Send" in final_status:
+                            final_status = "Booked"
+                else:
+                    # CN not found in bulk response
+                    final_status = "Booked"
+                    name = address = phone = city = 'N/A'
 
-                    # Track quantity for each tracking number
-                    tracking_info.append({
-                        'tracking_number': tracking_number,
-                        'status': final_status,
-                        'quantity': item.quantity,
-                        'name': name,
-                        'address': address,
-                        'city': city,
-                        "phone": phone,
-                    })
+                tracking_info.append({
+                    'tracking_number': tracking_number,
+                    'status':   final_status,
+                    'quantity': item.quantity,
+                    'name':     name,
+                    'address':  address,
+                    'city':     city,
+                    'phone':    phone,
+                })
 
-    return tracking_info if tracking_info else [
-        {"tracking_number": "N/A", "status": "Un-Booked", "name": 'N/A', "address": 'N/A', "phone": 'N/A', "city": 'N/A',
-         "quantity": line_item.quantity}]
+    return tracking_info if tracking_info else [{
+        'tracking_number': 'N/A',
+        'status':   'Un-Booked',
+        'name':     'N/A',
+        'address':  'N/A',
+        'phone':    'N/A',
+        'city':     'N/A',
+        'quantity': line_item.quantity
+    }]
 
 
 
-async def process_order(session, order):
+async def process_order(order, tracking_cache):
     global LAST_REQUEST_TIME
 
-    # Ensure we respect the rate limit
     elapsed_time = time.time() - LAST_REQUEST_TIME
     if elapsed_time < 1 / RATE_LIMIT:
         await asyncio.sleep((1 / RATE_LIMIT) - elapsed_time)
@@ -217,68 +241,56 @@ async def process_order(session, order):
 
     order_start_time = time.time()
     input_datetime_str = order.created_at
-    parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
+    parsed_datetime    = datetime.fromisoformat(input_datetime_str[:-6])
     formatted_datetime = parsed_datetime.isoformat()
 
     try:
         status = (order.fulfillment_status).title()
     except:
         status = "Un-fulfilled"
-    print(order)
-    tags = []
+
     try:
         name = order.billing_address.name
     except AttributeError:
         name = " "
-        print("Error retrieving name")
 
     try:
         address = order.billing_address.address1
     except AttributeError:
         address = " "
-        print("Error retrieving address")
 
     try:
         city = order.billing_address.city
     except AttributeError:
         city = " "
-        print("Error retrieving city")
 
     try:
         phone = order.billing_address.phone
     except AttributeError:
         phone = " "
-        print("Error retrieving phone")
 
-    customer_details = {
-        "name": name,
-        "address": address,
-        "city": city,
-        "phone": phone
-    }
+    customer_details = {"name": name, "address": address, "city": city, "phone": phone}
+
     order_info = {
-        'order_link': "https://admin.shopify.com/store/tick-bags-best-bean-bags-in-pakistan/orders/" + str(order.id),
-        'order_id': order.name,
-        'tracking_id': 'N/A',
-        'created_at': formatted_datetime,
-        'total_price': order.total_price,
-        'line_items': [],
-        'financial_status': (order.financial_status).title(),
+        'order_link':        "https://admin.shopify.com/store/tick-bags-best-bean-bags-in-pakistan/orders/" + str(order.id),
+        'order_id':          order.name,
+        'tracking_id':       'N/A',
+        'created_at':        formatted_datetime,
+        'total_price':       order.total_price,
+        'line_items':        [],
+        'financial_status':  (order.financial_status).title(),
         'fulfillment_status': status,
-        'customer_details': customer_details,
-        'tags' : [tag for tag in order.tags.split(", ") if tag != "Leopards Courier"],
-        'id': order.id
+        'customer_details':  customer_details,
+        'tags':              [tag for tag in order.tags.split(", ") if tag != "Leopards Courier"],
+        'id':                order.id
     }
-    print(order.tags)
 
-    tasks = []
-    for line_item in order.line_items:
-        tasks.append(process_line_item(session, line_item, order.fulfillments))
-
-    results = await asyncio.gather(*tasks)
     variant_name = ""
-    for tracking_info_list, line_item in zip(results, order.line_items):
-        if tracking_info_list is None:
+    for line_item in order.line_items:
+        # Synchronous lookup — no HTTP call
+        tracking_info_list = process_line_item(line_item, order.fulfillments, tracking_cache)
+
+        if not tracking_info_list:
             continue
 
         if line_item.product_id is not None:
@@ -301,15 +313,15 @@ async def process_order(session, order):
         for info in tracking_info_list:
             order_info['line_items'].append({
                 'fulfillment_status': line_item.fulfillment_status,
-                'image_src': image_src,
-                'product_title': line_item.title + " - " + variant_name,
-                'quantity': info['quantity'],
-                'tracking_number': info['tracking_number'],
-                'status': info['status'],
-                'name': info.get('name', 'N/A'),
-                'address': info.get('address', 'N/A'),
-                'city': info.get('city', 'N/A'),
-                'phone': info.get('phone', 'N/A'),
+                'image_src':          image_src,
+                'product_title':      line_item.title + " - " + variant_name,
+                'quantity':           info['quantity'],
+                'tracking_number':    info['tracking_number'],
+                'status':             info['status'],
+                'name':               info.get('name', 'N/A'),
+                'address':            info.get('address', 'N/A'),
+                'city':               info.get('city', 'N/A'),
+                'phone':              info.get('phone', 'N/A'),
             })
             order_info['status'] = info['status']
 
@@ -388,38 +400,71 @@ async def limited_request(coroutine, semaphore):
 
 
 async def getShopifyOrders():
-    start_date = datetime(2024, 9, 1).isoformat()
+    start_date   = datetime(2024, 9, 1).isoformat()
     order_details = []
     total_start_time = time.time()
 
+    # ── 1. Fetch all order pages from Shopify ──────────────────────────────
+    all_orders = []
     try:
         orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
 
-    # Create a new semaphore tied to THIS event loop
+    while True:
+        all_orders.extend(orders)
+        try:
+            if not orders.has_next_page():
+                break
+            orders = orders.next_page()
+        except Exception as e:
+            print(f"Error fetching next page: {e}")
+            break
+
+    print(f"Fetched {len(all_orders)} orders from Shopify.")
+
+    # ── 2. Collect every tracking number from fulfilled line items ─────────
+    all_tracking_numbers = []
+    for order in all_orders:
+        for fulfillment in order.fulfillments:
+            if fulfillment.status == "cancelled":
+                continue
+            tn = fulfillment.tracking_number
+            if tn and tn not in all_tracking_numbers:
+                all_tracking_numbers.append(tn)
+
+    print(f"Found {len(all_tracking_numbers)} unique tracking numbers.")
+
+    # ── 3. Bulk-fetch tracking data in batches of 50 ──────────────────────
+    tracking_cache = {}
+    async with aiohttp.ClientSession() as session:
+        chunks = [all_tracking_numbers[i:i+50] for i in range(0, len(all_tracking_numbers), 50)]
+        print(f"Fetching tracking data in {len(chunks)} bulk API calls...")
+
+        for idx, chunk in enumerate(chunks):
+            batch_result = await fetch_tracking_data_bulk(session, chunk)
+            tracking_cache.update(batch_result)
+            print(f"  Bulk call {idx+1}/{len(chunks)} — got {len(batch_result)} results")
+
+    print(f"Tracking cache built: {len(tracking_cache)} CNs resolved.")
+
+    # ── 4. Process all orders using the cache (no more per-CN HTTP calls) ──
     semaphore = asyncio.Semaphore(2)
 
-    async with aiohttp.ClientSession() as session:
-        while True:
-            tasks = [limited_request(process_order(session, order), semaphore) for order in orders]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+    async def process_with_semaphore(order):
+        async with semaphore:
+            await asyncio.sleep(0.5)  # respect Shopify API rate limit
+            return await process_order(order, tracking_cache)
 
-            for result in results:
-                if isinstance(result, Exception):
-                    print(f"Error processing an order: {result}")
-                else:
-                    order_details.append(result)
+    tasks   = [process_with_semaphore(order) for order in all_orders]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            try:
-                if not orders.has_next_page():
-                    break
-                # Fetch next page
-                orders = orders.next_page()
-            except Exception as e:
-                print(f"Error fetching next page: {e}")
-                break
+    for result in results:
+        if isinstance(result, Exception):
+            print(f"Error processing an order: {result}")
+        else:
+            order_details.append(result)
 
     total_end_time = time.time()
     print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")

@@ -1172,6 +1172,22 @@ def leopards_shipping_charges():
     except Exception as e:
         return jsonify({"status": 0, "error": str(e)}), 500
 
+@app.route('/api/leopards/track-packets')
+def leopards_track_packets():
+    track_numbers = request.args.get('track_numbers', '')
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+
+    url = (
+        f"https://merchantapi.leopardscourier.com/api/trackBookedPacket/format/json/"
+        f"?api_key={api_key}&api_password={api_password}&track_numbers={track_numbers}"
+    )
+    try:
+        r = _req.get(url, verify=False, timeout=30)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"status": 0, "error": str(e)}), 500
+
 
 # ── Helper: pull CN numbers from already-loaded order_details ──
 # FIXED: This endpoint now includes product images and order status

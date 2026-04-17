@@ -12,6 +12,20 @@
     <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
 
     <style>
+        .filter-pill {
+    background: transparent;
+    color: var(--lp-muted);
+    border: 1px solid var(--lp-border);
+    border-radius: 20px;
+    padding: 4px 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .72rem;
+    cursor: pointer;
+    transition: all .2s;
+    white-space: nowrap;
+}
+.filter-pill:hover  { border-color: var(--lp-yellow); color: var(--lp-yellow); }
+.filter-pill.active { background: var(--lp-yellow); color: var(--lp-dark); border-color: var(--lp-yellow); font-weight: 600; }
         :root {
             --lp-yellow:    #F5C400;
             --lp-dark:      #1A1A1A;
@@ -523,8 +537,14 @@
             <!-- Table -->
             <div class="table-wrapper">
                 <div class="table-wrapper-header">
-                    <h6><i class="fas fa-table mr-2"></i>Payment Records</h6>
-                    <span id="recordCount" style="font-family:'IBM Plex Mono',monospace;font-size:.75rem;color:var(--lp-muted);"></span>
+<h6><i class="fas fa-table mr-2"></i>Payment Records</h6>
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <button class="filter-pill active" id="filterAll"            onclick="setFilter('all')">All</button>
+    <button class="filter-pill"        id="filterShipPaid"       onclick="setFilter('ship-paid')">Shipping Paid</button>
+    <button class="filter-pill"        id="filterDeliveredUnpaid" onclick="setFilter('delivered-unpaid')">Delivered &amp; COD Unpaid</button>
+</div>
+<span id="recordCount" style="font-family:'IBM Plex Mono',monospace;font-size:.75rem;color:var(--lp-muted);"></span>
+
                 </div>
 
                 <div id="emptyState">
@@ -582,6 +602,15 @@
 <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
 
 <script>
+
+    function parseBilledCharges(val) {
+    if (val === null || val === undefined || val === '') return NaN;
+    // May be comma-separated e.g. "-5280.00,5580.00" — sum all parts
+    const parts = String(val).split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+    if (!parts.length) return NaN;
+    return parts.reduce((a, b) => a + b, 0);
+}
+
 /* =========================================================
    Globals
    ========================================================= */
@@ -609,6 +638,25 @@ function fmtPKR(val) {
     const n = parseFloat(val) || 0;
     return 'Rs ' + n.toLocaleString('en-PK');
 }
+let activeFilter = 'all';
+function setFilter(name) {
+    activeFilter = name;
+    document.querySelectorAll('.filter-pill').forEach(el => el.classList.remove('active'));
+    const map = { 'all': 'filterAll', 'ship-paid': 'filterShipPaid', 'delivered-unpaid': 'filterDeliveredUnpaid' };
+    document.getElementById(map[name]).classList.add('active');
+    if (dtInstance) dtInstance.draw();
+}
+
+// Registered once — references activeFilter by closure
+$.fn.dataTable.ext.search.push(function(settings, data, dataIndex) {
+    if (settings.nTable.id !== 'payTable') return true;  // only apply to our table
+    if (activeFilter === 'all') return true;
+    const row = document.querySelector(`#payTable tbody tr:nth-child(${dataIndex + 1})`);
+    if (!row) return true;
+    if (activeFilter === 'ship-paid')        return row.dataset.shipPaid === 'true';
+    if (activeFilter === 'delivered-unpaid') return row.dataset.delivered === 'true' && row.dataset.codPaid === 'false';
+    return true;
+});
 
 function statusBadgeOrder(status) {
     if (!status) return `<span class="badge-status unbooked"><i class="fas fa-box"></i> Un-Booked</span>`;
@@ -790,6 +838,11 @@ async function enrichAndRender(packetList, cnNums) {
    ========================================================= */
 function renderTable(packets, payMap = {}, chargesMap = {}) {
     if (dtInstance) { dtInstance.destroy(); dtInstance = null; }
+    
+    activeFilter = 'all';
+document.querySelectorAll('.filter-pill').forEach(el => el.classList.remove('active'));
+const allPill = document.getElementById('filterAll');
+if (allPill) allPill.classList.add('active');
 
     const tbody = document.getElementById('payTableBody');
     tbody.innerHTML = '';
@@ -846,7 +899,7 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
         const charges = chargesMap[cn] || {};
 
         /* Shipping charge */
-        const totalCharged = parseFloat(charges.billed_charges);
+        const totalCharged = parseBilledCharges(charges.billed_charges);
         const billChg = !isNaN(totalCharged)
             ? Math.round(totalCharged * 1.25 * 1.16)
             : Math.round(charges.gross_charges || 0);
@@ -897,16 +950,22 @@ function renderTable(packets, payMap = {}, chargesMap = {}) {
         /* Product cell */
         let productCell = '';
         if (hasProductData) {
-            const imgSrc = p.item_image || 'https://via.placeholder.com/36?text=No+Image';
-            productCell  = `<div class="product-cell">
-                <img src="${imgSrc}" alt="Product" class="product-img"
-                     onerror="this.src='https://via.placeholder.com/36?text=No+Image'">
-                <div class="product-info"><p class="product-title">${products}</p></div>
-            </div>`;
-        }
+    const imgHtml = p.item_image
+        ? `<img src="${p.item_image}" alt="Product" class="product-img"
+                onerror="this.style.display='none'">`
+        : '';
+    productCell = `<div class="product-cell">
+        ${imgHtml}
+        <div class="product-info"><p class="product-title">${products}</p></div>
+    </div>`;
+}
 
         /* Build <tr> */
         const tr = document.createElement('tr');
+tr.dataset.shipPaid  = shipPaid.isPaid ? 'true' : 'false';
+tr.dataset.delivered = isDelivered ? 'true' : 'false';
+tr.dataset.codPaid   = isCODPaid   ? 'true' : 'false';
+
 
 const commonCells = `
     <td class="mono" data-order="${cod}">${cod ? fmtPKR(cod) : '—'}</td>

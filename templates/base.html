@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}TB Track{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: 'DM Sans', sans-serif; background: #f8f9fc; color: #3a3b45; -webkit-font-smoothing: antialiased; display: none; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #d1d3e2; border-radius: 99px; }
+
+    /* ── Layout ── */
+    #app { display: flex; height: 100vh; overflow: hidden; }
+    #sidebar { width: 200px; flex-shrink: 0; background: linear-gradient(180deg,#1a3a6b 0%,#2e59d9 100%); display: flex; flex-direction: column; transition: width 0.22s; overflow: hidden; }
+    #sidebar.collapsed { width: 56px; }
+    #main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+
+    /* ── Sidebar brand ── */
+    .sb-brand { height: 56px; display: flex; align-items: center; padding: 0 16px; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer; flex-shrink: 0; }
+    #sidebar.collapsed .sb-brand { padding: 0 12px; justify-content: center; }
+    .sb-logo { width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.18); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 900; color: #fff; flex-shrink: 0; }
+    .sb-name { font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap; }
+    #sidebar.collapsed .sb-name { display: none; }
+
+    /* ── Nav items ── */
+    nav.sb-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
+    .sb-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 16px; border: none; cursor: pointer; background: transparent; color: rgba(255,255,255,0.65); font-size: 13px; font-family: 'DM Sans', sans-serif; font-weight: 400; border-left: 3px solid transparent; transition: all 0.15s; text-decoration: none; white-space: nowrap; }
+    .sb-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .sb-item.active { background: rgba(255,255,255,0.15); color: #fff; font-weight: 600; border-left-color: rgba(255,255,255,0.8); }
+    #sidebar.collapsed .sb-item { padding: 9px 0; justify-content: center; }
+    #sidebar.collapsed .sb-item-label { display: none; }
+    .sb-icon { font-size: 15px; flex-shrink: 0; }
+
+    /* ── User ── */
+    .sb-user { padding: 10px 16px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    #sidebar.collapsed .sb-user { padding: 10px 0; justify-content: center; }
+    #sidebar.collapsed .sb-user-label { display: none; }
+    .sb-avatar { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
+    .sb-user-label { font-size: 12px; color: rgba(255,255,255,0.7); white-space: nowrap; }
+
+    /* ── Shared components ── */
+    .status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+    .tag-badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; white-space: nowrap; }
+
+    .tb-avatar { border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
+
+    /* ── Dropdown ── */
+    .tb-dd { position: relative; display: inline-block; }
+    .tb-dd-menu { display: none; position: absolute; top: 100%; right: 0; margin-top: 4px; background: #fff; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.13); border: 1px solid #e3e6f0; z-index: 1000; min-width: 170px; overflow: hidden; }
+    .tb-dd-menu.left { right: auto; left: 0; }
+    .tb-dd.open .tb-dd-menu { display: block; }
+    .tb-dd-item { display: block; width: 100%; padding: 8px 14px; border: none; background: none; text-align: left; font-size: 12px; cursor: pointer; color: #3a3b45; font-family: 'DM Sans', sans-serif; font-weight: 500; white-space: nowrap; }
+    .tb-dd-item:hover { background: #f8f9fc; }
+    .tb-dd-item.danger { color: #e74a3b; }
+    .tb-dd-sep { height: 1px; background: #e3e6f0; margin: 2px 0; }
+
+    /* ── Stat card ── */
+    .stat-card { background: #fff; border-radius: 10px; padding: 14px 16px; border: 1px solid #e3e6f0; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+    .stat-icon { width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .stat-label { font-size: 10px; color: #858796; font-weight: 600; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .stat-value { font-size: 20px; font-weight: 700; }
+
+    /* ── Toast ── */
+    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #1a3a6b; color: #fff; padding: 10px 22px; border-radius: 10px; font-size: 13px; font-weight: 500; box-shadow: 0 8px 32px rgba(0,0,0,0.22); z-index: 9999; display: none; }
+
+    /* ── Topbar ── */
+    .topbar { height: 52px; background: #fff; border-bottom: 1px solid #e3e6f0; display: flex; align-items: center; padding: 0 24px; gap: 12px; flex-shrink: 0; }
+    .topbar-title { font-size: 16px; font-weight: 700; color: #3a3b45; }
+
+    /* ── Search box ── */
+    .search-box { display: flex; align-items: center; gap: 8px; background: #f8f9fc; border-radius: 8px; padding: 6px 12px; border: 1px solid #e3e6f0; }
+    .search-box input { border: none; background: transparent; outline: none; font-size: 13px; color: #3a3b45; font-family: 'DM Sans', sans-serif; }
+    .search-box input::placeholder { color: #858796; }
+
+    /* ── Buttons ── */
+    .btn { padding: 6px 14px; border-radius: 8px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; font-family: 'DM Sans', sans-serif; display: inline-flex; align-items: center; gap: 5px; }
+    .btn-primary { background: #4e73df; color: #fff; }
+    .btn-success { background: #1cc88a; color: #fff; }
+    .btn-danger  { background: #e74a3b; color: #fff; }
+    .btn-outline { background: #fff; color: #36b9cc; border: 1.5px solid #e3e6f0; }
+    .btn:disabled { opacity: 0.7; cursor: not-allowed; }
+
+    /* ── Section card ── */
+    .section-card { background: #fff; border-radius: 12px; border: 1px solid #e3e6f0; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+    .section-header { padding: 14px 20px; border-bottom: 1px solid #e3e6f0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .section-count { background: rgba(78,115,223,0.1); color: #4e73df; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; }
+
+    /* ── Col headers ── */
+    .col-headers { display: grid; align-items: center; padding: 8px 16px; border-bottom: 1px solid #e3e6f0; font-size: 10px; font-weight: 700; color: #858796; text-transform: uppercase; letter-spacing: 0.05em; background: #f8f9fc; }
+    .order-list { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+    @keyframes shimmerBar { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+
+    @media (max-width: 767px) {
+      #sidebar { width: 56px !important; }
+      #sidebar .sb-name, #sidebar .sb-item-label, #sidebar .sb-user-label { display: none; }
+      #sidebar .sb-brand { padding: 0 12px; justify-content: center; }
+      #sidebar .sb-item { padding: 9px 0; justify-content: center; }
+      #sidebar .sb-user { padding: 10px 0; justify-content: center; }
+    }
+  </style>
+</head>
+<body>
+
+<script>
+(function() {
+  const pw = 'security';
+  const ttl = 10 * 60 * 1000;
+  const last = localStorage.getItem('tbLastAccess');
+  if (last && Date.now() - last < ttl) { document.body.style.display = 'block'; return; }
+  let entered;
+  do { entered = prompt('Enter password:'); if (entered === null) break; }
+  while (entered !== pw && (alert('Wrong password') || true));
+  if (entered === pw) { localStorage.setItem('tbLastAccess', Date.now()); document.body.style.display = 'block'; }
+})();
+</script>
+
+<div id="app">
+  <!-- ── Sidebar ── -->
+  <div id="sidebar">
+    <div class="sb-brand" onclick="toggleSidebar()">
+      <div class="sb-logo">TB</div>
+      <div class="sb-name">Daily Tasker</div>
+    </div>
+    <nav class="sb-nav">
+      <a href="/" class="sb-item {% if request.path == '/' %}active{% endif %}"><span class="sb-icon">🏠</span><span class="sb-item-label">Dashboard</span></a>
+      <a href="#" class="sb-item"><span class="sb-icon">📊</span><span class="sb-item-label">Report</span></a>
+      <a href="/scan" class="sb-item {% if request.path == '/scan' %}active{% endif %}"><span class="sb-icon">🔍</span><span class="sb-item-label">Scan</span></a>
+      <a href="/pending" class="sb-item {% if request.path == '/pending' %}active{% endif %}"><span class="sb-icon">📋</span><span class="sb-item-label">Pending Orders</span></a>
+      <a href="/undelivered" class="sb-item {% if request.path == '/undelivered' %}active{% endif %}"><span class="sb-icon">🚚</span><span class="sb-item-label">Undelivered Orders</span></a>
+      <a href="#" class="sb-item" id="refreshDataBtn" onclick="triggerRefresh(event)"><span class="sb-icon">🔄</span><span class="sb-item-label">Refresh Data</span></a>
+      <a href="/payments" class="sb-item {% if request.path == '/payments' %}active{% endif %}"><span class="sb-icon">💰</span><span class="sb-item-label">Finance</span></a>
+    </nav>
+    <div class="sb-user">
+      <div class="sb-avatar">U</div>
+      <span class="sb-user-label">User</span>
+    </div>
+  </div>
+
+  <!-- ── Main ── -->
+  <div id="main">
+    {% block content %}{% endblock %}
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+function toggleSidebar() {
+  if (window.innerWidth < 768) return;
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+function showToast(msg, dur) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  t.style.animation = 'toastIn 0.22s ease';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.style.display = 'none', dur || 2500);
+}
+
+// Dropdown toggle
+document.addEventListener('click', function(e) {
+  const trigger = e.target.closest('[data-dd-trigger]');
+  if (trigger) {
+    const dd = trigger.closest('.tb-dd');
+    document.querySelectorAll('.tb-dd.open').forEach(d => { if (d !== dd) d.classList.remove('open'); });
+    dd.classList.toggle('open');
+    e.stopPropagation();
+    return;
+  }
+  document.querySelectorAll('.tb-dd.open').forEach(d => d.classList.remove('open'));
+});
+
+// Avatar generation
+function initAvatars() {
+  document.querySelectorAll('.tb-avatar[data-name]').forEach(el => {
+    const name = el.dataset.name || '';
+    if (!name || name === 'N/A' || name === 'None') { el.textContent = '?'; el.style.background = '#e3e6f0'; el.style.color = '#858796'; return; }
+    const parts = name.trim().split(/\s+/);
+    const initials = parts.slice(0,2).map(w => w[0]).join('').toUpperCase();
+    const hue = ((name.charCodeAt(0)||0)*37 + (name.charCodeAt(1)||0)*13) % 360;
+    el.textContent = initials;
+    el.style.background = `hsl(${hue},60%,88%)`;
+    el.style.color = `hsl(${hue},60%,35%)`;
+  });
+}
+document.addEventListener('DOMContentLoaded', initAvatars);
+
+function triggerRefresh(e) {
+  e.preventDefault();
+  const btn = document.getElementById('refreshDataBtn');
+  btn.style.opacity = '0.5';
+  btn.style.pointerEvents = 'none';
+  fetch('/refresh', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.message === 'Data refreshed successfully') location.reload();
+      else showToast('Refresh failed: ' + (d.message || 'Unknown error'));
+    })
+    .catch(() => showToast('Refresh failed. Check connection.'))
+    .finally(() => { btn.style.opacity = ''; btn.style.pointerEvents = ''; });
+}
+</script>
+
+{% block extra_js %}{% endblock %}
+</body>
+</html>

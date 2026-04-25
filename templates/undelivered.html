@@ -1,394 +1,233 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends 'base.html' %}
+{% block title %}TB Track – Undelivered Orders{% endblock %}
 
-<head>
+{% block content %}
+<style>
+  .stats-grid4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 20px; }
+  .undelivered-card { background: #fff; border-radius: 10px; overflow: hidden; border: 1px solid #e3e6f0; box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: border-color 0.18s, box-shadow 0.18s; }
+  .uc-header { padding: 10px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .uc-chevron { color: #858796; transition: transform 0.2s; flex-shrink: 0; }
+  .uc-chevron.open { transform: rotate(90deg); }
+  .uc-body { border-top: 1px solid #e3e6f0; padding: 10px 12px 12px 36px; display: none; }
+  .uc-body.open { display: block; }
+  .pri-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+  .pri-dot { width: 5px; height: 5px; border-radius: 50%; }
+  @media (max-width: 767px) { .stats-grid4 { grid-template-columns: repeat(2,1fr); } .hide-mob { display: none !important; } }
+</style>
 
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description" content="">
-    <meta name="author" content="">
-
-    <title>Daily Tasker - Undelivered Orders</title>
-
-    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
-    <link
-        href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
-        rel="stylesheet">
-
-    <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
-
-    <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
-    <style>
-        .status-buttons {
-            display: none;
-            margin-top: 10px;
-        }
-        .status-buttons .btn {
-            margin-right: 5px;
-            margin-bottom: 5px;
-        }
-        .pending-since-cell {
-            font-size: 30px;
-            font-weight: bold;
-            padding: 10px;
-            text-align: center;
-            vertical-align: middle !important;
-        }
-    </style>
-</head>
-
-<body id="page-top">
-
-    <div id="wrapper">
-
-        {% include 'header.html' %}
-        <div id="content-wrapper" class="d-flex flex-column">
-
-            <div id="content">
-
-                <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
-                    <form class="form-inline">
-                        <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
-                            <i class="fa fa-bars"></i>
-                        </button>
-                    </form>
-                    <ul class="navbar-nav ml-auto">
-                        <li class="nav-item dropdown no-arrow">
-                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
-                                <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
-                            </a>
-                            <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in" aria-labelledby="userDropdown">
-                                <a class="dropdown-item" href="#" data-toggle="modal" data-target="#logoutModal">
-                                    <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Logout
-                                </a>
-                            </div>
-                        </li>
-                    </ul>
-                </nav>
-                <div class="container-fluid">
-                    <h1 class="h3 mb-2 text-gray-800">Undelivered Order Tracking</h1>
-
-                    <div class="card shadow mb-4">
-                        <div class="card-header py-3 d-flex justify-content-between align-items-center">
-    <h6 class="m-0 font-weight-bold text-primary">Undelivered Orders</h6>
-    <div class="btn-group btn-group-sm" role="group">
-        <button type="button" class="btn btn-danger" id="btn-high-priority">High Priority</button>
-        <button type="button" class="btn btn-warning" id="btn-medium-priority">Medium Priority</button>
-        <button type="button" class="btn btn-info" id="btn-low-priority">Low Priority</button>
-        <button type="button" class="btn btn-secondary" id="btn-show-all">Show All</button>
+<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+  <!-- Topbar -->
+  <div class="topbar" style="flex-wrap:wrap;gap:6px;height:auto;min-height:52px;padding:8px 16px;">
+    <span class="topbar-title">Undelivered Orders</span>
+    <span id="highCount" style="background:#fce8e6;color:#e74a3b;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;"></span>
+    <div style="flex:1"></div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+      <button class="pri-filter-btn" data-pri="all" onclick="setPri(this)" style="padding:4px 10px;border-radius:8px;border:none;cursor:pointer;font-size:11px;font-weight:500;background:#4e73df;color:#fff;font-family:'DM Sans',sans-serif;">All</button>
+      <button class="pri-filter-btn" data-pri="high" onclick="setPri(this)" style="padding:4px 10px;border-radius:8px;border:none;cursor:pointer;font-size:11px;font-weight:500;background:#f8f9fc;color:#858796;font-family:'DM Sans',sans-serif;">🔴 High</button>
+      <button class="pri-filter-btn" data-pri="medium" onclick="setPri(this)" style="padding:4px 10px;border-radius:8px;border:none;cursor:pointer;font-size:11px;font-weight:500;background:#f8f9fc;color:#858796;font-family:'DM Sans',sans-serif;">🟡 Medium</button>
+      <button class="pri-filter-btn" data-pri="low" onclick="setPri(this)" style="padding:4px 10px;border-radius:8px;border:none;cursor:pointer;font-size:11px;font-weight:500;background:#f8f9fc;color:#858796;font-family:'DM Sans',sans-serif;">🔵 Low</button>
     </div>
-</div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
-                                    <thead>
-                                        <tr>
-                                            <th>Order ID</th>
-                                            <th style="width: 3%;">Pending Since (Days)</th>
-                                            <th style="width: 15%;">Customer</th>
-                                            <th>Tags</th>
-                                            <th>Date</th>
-                                            <th>Total Price</th>
-                                            <th>Items</th>
-                                            <th>Status</th>
-                                            <th style="width: 15%;">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tfoot>
-                                        <tr>
-                                            <th>Order ID</th>
-                                            <th>Pending Since (Days)</th>
-                                            <th>Customer</th>
-                                            <th>Tags</th>
-                                            <th>Date</th>
-                                            <th>Total Price</th>
-                                            <th>Items</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </tfoot>
-                                    <tbody>
-                                        {# --- Shopify Orders Loop --- #}
-                                        {% for order in order_details %}
-                                            {% if order.status not in ['Booked', 'Un-Booked', 'Delivered'] and not ('Cancelled' in ' '.join(order.tags)) and not ('Returned' in ' '.join(order.tags)) %}
-                                            <tr>
-                                                <td><a href="{{ order.order_link }}" target="_blank">{{ order.order_id }}</a></td>
-                                                <td class="pending-since-cell" data-created-at="{{ order.created_at }}" data-status="{{ order.status }}"></td>
-                                                <td>
-                                                    {{ order.line_items[0].name }}<br>
-                                                    {{ order.line_items[0].address }}<br>
-                                                    {{ order.line_items[0].city }}<br>
-                                                    <a href="tel:{{ order.line_items[0].phone }}">{{ order.line_items[0].phone }}</a><br>
-                                                    <a href="tel:{{ order.line_items[0].phone }}" class="btn btn-primary btn-sm mt-1">Call</a>
-                                                    <div class="btn-group mt-1">
-                                                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                                            WhatsApp
-                                                        </button>
-                                                        <div class="dropdown-menu">
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone | replace('+', '') }}?text=Hello%20{{ order.line_items[0].name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone | replace('+', '') }}?text=Hello%20{{ order.line_items[0].name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td>
-                                                    {% for tag in order.tags %}
-                                                        <span class="badge badge-secondary">{{ tag }}</span><br>
-                                                    {% endfor %}
-                                                </td>
-                                                <td>{{ order.created_at.split('T')[0] }}</td>
-                                                <td>{{ order.total_price }}</td>
-                                                <td>
-                                                    <table class="table table-sm">
-                                                        <thead><tr><th>Image</th><th style="width: 30%;">Title</th><th>Pcs</th><th>Tracking Number</th><th>Email</th></tr></thead>
-                                                        <tbody>
-                                                            {% for item in order.line_items %}
-                                                            <tr>
-                                                                <td><img src="{{ item.image_src }}" width="50" height="50"></td>
-                                                                <td>{{ item.product_title }}</td>
-                                                                <td>{{ item.quantity }}</td>
-                                                                <td><a href="track/{{item.tracking_number}}" target="_blank">{{ item.tracking_number }}</a></td>
-                                                                <td>
-                                                                    <div class="btn-group">
-                                                                        <button type="button" class="btn btn-info btn-sm dropdown-toggle" data-toggle="dropdown">Email</button>
-                                                                        <div class="dropdown-menu">
-                                                                            <a class="dropdown-item" href="#" onclick="sendEmail('delay', '{{ item.tracking_number }}')">Delay</a>
-                                                                            <a class="dropdown-item" href="#" onclick="sendEmail('incomplete', '{{ item.tracking_number }}')">Incomplete Address</a>
-                                                                            <a class="dropdown-item" href="#" onclick="sendEmail('refusal', '{{ item.tracking_number }}')">Fake Refusal</a>
-                                                                        </div>
-                                                                    </div>
-                                                                </td>
-                                                            </tr>
-                                                            {% endfor %}
-                                                        </tbody>
-                                                    </table>
-                                                </td>
-                                                <td>{{ order.status }}</td>
-                                                <td>
-                                                    <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
-                                                    <div class="status-buttons">
-                                                        <button class="btn btn-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
-                                                        <button class="btn btn-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
-                                                        <button class="btn btn-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
-                                                        <button class="btn btn-info btn-sm" onclick="applyTag('{{ order.id }}', 'Customer Wants to Receive Parcel')">Wants to Receive</button>
-                                                        <div class="input-group mt-2">
-                                                            <input type="text" id="customTagInput{{ order.id }}" class="form-control" placeholder="Custom tag">
-                                                            <button class="btn btn-outline-primary" onclick="applyCustomTag('{{ order.id }}')">Apply</button>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                            {% endif %}
-                                        {% endfor %}
+  </div>
 
-                                        {# --- Daraz Orders Loop (Corrected Structure) --- #}
-                                        {% for order in darazOrders %}
-                                            {% if order.status not in ['Ready To Ship', 'Pending', 'Delivered', 'Returned', 'Cancelled'] %}
-                                            <tr>
-                                                <td>{{ order.order_id }}</td>
-                                                <td class="pending-since-cell" data-created-at="{{ order.date }}" data-status="{{ order.status }}"></td>
-                                                <td>
-                                                    {{ order.customer.name }}<br>
-                                                    {{ order.customer.address }}<br>
-                                                    {{ order.customer.phone }}<br>
-                                                    <a href="tel:{{ order.customer.phone }}" class="btn btn-primary btn-sm mt-1">Call</a>
-                                                    <div class="btn-group mt-1">
-                                                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown">WhatsApp</button>
-                                                         <div class="dropdown-menu">
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone | replace('+', '') }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Address Closed</a>
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone | replace('+', '') }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Refused Message</a>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td><span class="badge badge-info">DARAZ</span></td>
-                                                <td>{{ order.date.split('T')[0] }}</td>
-                                                <td>{{ order.total_price }}</td>
-                                                <td>
-                                                    <table class="table table-sm">
-                                                        <thead>
-                                                            <tr><th>Image</th><th style="width: 50%;">Title</th><th>Tracking Number</th><th>Status</th></tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {% for item in order.items_list %}
-                                                            <tr>
-                                                                <td><img src="{{ item.item_image }}" width="50" height="50"></td>
-                                                                <td>{{ item.item_title }}</td>
-                                                                <td><a href="https://www.daraz.pk/customer/order/view/?tradeOrderId={{ order.order_id }}" target="_blank">{{ item.tracking_number }}</a></td>
-                                                                <td>{{ item.status }}</td>
-                                                            </tr>
-                                                            {% endfor %}
-                                                        </tbody>
-                                                    </table>
-                                                </td>
-                                                <td>{{ order.status }}</td>
-                                                <td></td>
-                                            </tr>
-                                        {% endif %}
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                </div>
-            <footer class="sticky-footer bg-white">
-                <div class="container my-auto">
-                    <div class="copyright text-center my-auto">
-                        <span>Copyright &copy; Your Website 2024</span>
-                    </div>
-                </div>
-            </footer>
-        </div>
+  <div style="flex:1;overflow:auto;padding:16px;">
+    <!-- Stats -->
+    <div class="stats-grid4">
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,0.1)">🚚</div><div><div class="stat-label">Total Undelivered</div><div class="stat-value" style="color:#4e73df" id="statAll">0</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(231,74,59,0.1)">🔴</div><div><div class="stat-label">High Priority</div><div class="stat-value" style="color:#e74a3b" id="statHigh">0</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(246,194,62,0.1)">🟡</div><div><div class="stat-label">Medium Priority</div><div class="stat-value" style="color:#f6c23e" id="statMed">0</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(54,185,204,0.1)">🔵</div><div><div class="stat-label">Low Priority</div><div class="stat-value" style="color:#36b9cc" id="statLow">0</div></div></div>
     </div>
 
-    <a class="scroll-to-top rounded" href="#page-top"><i class="fas fa-angle-up"></i></a>
+    <div class="section-card">
+      <div class="section-header">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Orders</span>
+        <span class="section-count" id="visibleCount">0</span>
+      </div>
+      <div style="padding:8px 10px;display:flex;flex-direction:column;gap:6px;" id="undeliveredList">
+        {% for order in order_details %}
+          {% set items  = order.line_items or [] %}
+          {% set item0  = items[0] if items else {} %}
+          {% set phone  = item0.get('phone') or order.customer_details.get('phone','') %}
+          {% set name   = item0.get('name')  or order.customer_details.get('name','') %}
+          {% set city   = item0.get('city')  or order.customer_details.get('city','') %}
+          {% set addr   = order.customer_details.get('address','') %}
 
-    <div class="modal fade" id="logoutModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="exampleModalLabel">Ready to Leave?</h5>
-                    <button class="close" type="button" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">×</span></button>
-                </div>
-                <div class="modal-body">Select "Logout" below if you are ready to end your current session.</div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" type="button" data-dismiss="modal">Cancel</button>
-                    <a class="btn btn-primary" href="/logout">Logout</a>
-                </div>
+        <div class="undelivered-card" data-created="{{ order.created_at }}" data-status="{{ order.status }}">
+          <div class="uc-header" onclick="toggleCard(this)">
+            <svg class="uc-chevron" width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="pri-badge js-pri-badge" style="background:#e8f8fb;color:#0a5c6e;"><span class="pri-dot" style="background:#36b9cc;"></span>Low</span>
+            <span class="js-days" style="font-size:20px;font-weight:800;color:#36b9cc;line-height:1;flex-shrink:0;">0<span style="font-size:9px;font-weight:500;color:#858796;"> d</span></span>
+            <div class="tb-avatar" data-name="{{ name }}" style="width:26px;height:26px;font-size:10px;"></div>
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:12px;font-weight:600;color:#3a3b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ name or '—' }}</div>
+              <div style="font-size:11px;color:#858796;">{{ city or '—' }} · 🛍 Shopify</div>
             </div>
+            <div class="hide-mob" style="display:flex;flex-wrap:wrap;gap:3px;">
+              {% for tag in (order.tags or []) %}<span class="tag-badge" style="{{ tag_style(tag) }}">{{ tag }}</span>{% endfor %}
+            </div>
+            {{ status_badge(order.status) }}
+            <span class="hide-mob" style="font-size:13px;font-weight:700;color:#3a3b45;flex-shrink:0;">{{ order.total_price|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
+            <div style="display:flex;gap:4px;flex-shrink:0;" onclick="event.stopPropagation()">
+              {% if phone %}
+              <a href="tel:{{ phone }}" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;color:#4e73df;text-decoration:none;font-size:11px;">📞</a>
+              <div class="tb-dd">
+                <button data-dd-trigger style="width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;background:none;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;">💬</button>
+                <div class="tb-dd-menu">
+                  {% set wa = 'https://wa.me/' ~ phone|replace('+','') %}
+                  <a class="tb-dd-item" href="{{ wa }}?text={{ ('Hello ' ~ name ~ ', Logistics attempted delivery of order#' ~ order.order_id ~ ' from TickBags.com but address was closed. Please let us know when to re-arrange delivery.')|urlencode }}" target="_blank">🏠 Address Closed</a>
+                  <a class="tb-dd-item" href="{{ wa }}?text={{ ('Hello ' ~ name ~ ', Logistics attempted delivery of order#' ~ order.order_id ~ ' but you refused. Let us know if you\'re still interested.')|urlencode }}" target="_blank">🚫 Refused Message</a>
+                </div>
+              </div>
+              {% endif %}
+              <div class="tb-dd">
+                <button data-dd-trigger class="btn btn-primary" style="font-size:11px;padding:5px 10px;">Mark ▾</button>
+                <div class="tb-dd-menu">
+                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Delivered')">✅ Delivered</button>
+                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Returned')">↩ Returned</button>
+                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Cancelled')">✕ Cancelled</button>
+                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Customer Wants to Receive Parcel')">📦 Wants to Receive</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="uc-body">
+            {% if addr %}
+            <div style="font-size:11px;color:#858796;margin-bottom:8px;display:flex;align-items:flex-start;gap:4px;">
+              📍 <span>{{ addr }}</span>
+              {% if phone %}<span style="margin-left:8px;font-family:'DM Mono',monospace;font-size:10px;color:#4e73df;background:#dde4fb;padding:1px 6px;border-radius:4px;">{{ phone }}</span>{% endif %}
+            </div>
+            {% endif %}
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              {% for item in items %}
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f8f9fc;border-radius:7px;border:1px solid #e3e6f0;">
+                <div style="width:36px;height:36px;border-radius:5px;flex-shrink:0;background:#e3e6f0;display:flex;align-items:center;justify-content:center;font-size:9px;color:#858796;overflow:hidden;">
+                  {% if item.image_src and item.image_src != 'None' %}<img src="{{ item.image_src }}" style="width:100%;height:100%;object-fit:cover;">{% else %}IMG{% endif %}
+                </div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:12px;font-weight:600;color:#3a3b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ item.product_title }}</div>
+                  <div style="font-size:11px;color:#858796;">Qty: <strong>{{ item.quantity }}</strong></div>
+                </div>
+                {% if item.tracking_number and item.tracking_number != 'N/A' %}
+                <span style="font-family:'DM Mono',monospace;font-size:11px;color:#4e73df;background:#dde4fb;padding:2px 8px;border-radius:5px;flex-shrink:0;">{{ item.tracking_number }}</span>
+                {% endif %}
+                {{ status_badge(item.status) }}
+              </div>
+              {% endfor %}
+            </div>
+          </div>
         </div>
+        {% endfor %}
+
+        {% for order in darazOrders %}
+          {% set items = order.items_list or [] %}
+          {% set phone = order.customer.phone if order.customer else '' %}
+          {% set name  = order.customer.name  if order.customer else '' %}
+          {% set addr  = order.customer.address if order.customer else '' %}
+
+        <div class="undelivered-card" data-created="{{ order.date }}" data-status="{{ order.status }}">
+          <div class="uc-header" onclick="toggleCard(this)">
+            <svg class="uc-chevron" width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="pri-badge js-pri-badge" style="background:#e8f8fb;color:#0a5c6e;"><span class="pri-dot" style="background:#36b9cc;"></span>Low</span>
+            <span class="js-days" style="font-size:20px;font-weight:800;color:#36b9cc;line-height:1;flex-shrink:0;">0<span style="font-size:9px;font-weight:500;color:#858796;"> d</span></span>
+            <div class="tb-avatar" data-name="{{ name }}" style="width:26px;height:26px;font-size:10px;"></div>
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:12px;font-weight:600;color:#3a3b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ name or '—' }}</div>
+              <div style="font-size:11px;color:#858796;">🛒 Daraz · {{ order.order_id }}</div>
+            </div>
+            {{ status_badge(order.status) }}
+            <span class="hide-mob" style="font-size:13px;font-weight:700;color:#3a3b45;flex-shrink:0;">{{ order.total_price|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
+            {% if phone %}
+            <div style="display:flex;gap:4px;flex-shrink:0;" onclick="event.stopPropagation()">
+              <a href="tel:{{ phone }}" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;color:#4e73df;text-decoration:none;font-size:11px;">📞</a>
+            </div>
+            {% endif %}
+          </div>
+          <div class="uc-body">
+            {% if addr %}
+            <div style="font-size:11px;color:#858796;margin-bottom:8px;">📍 {{ addr }}</div>
+            {% endif %}
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              {% for item in items %}
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f8f9fc;border-radius:7px;border:1px solid #e3e6f0;">
+                <div style="width:36px;height:36px;border-radius:5px;flex-shrink:0;background:#e3e6f0;overflow:hidden;">
+                  {% if item.item_image and item.item_image != 'N/A' %}<img src="{{ item.item_image }}" style="width:100%;height:100%;object-fit:cover;">{% endif %}
+                </div>
+                <div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:#3a3b45;">{{ item.item_title }}</div><div style="font-size:11px;color:#858796;">Qty: <strong>{{ item.quantity }}</strong></div></div>
+                {{ status_badge(item.status) }}
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+
+        <div id="emptyMsg" style="display:none;text-align:center;padding:40px 0;color:#858796;font-size:13px;">No orders in this priority range.</div>
+      </div>
     </div>
+  </div>
+</div>
+{% endblock %}
 
-    <script src="static/assets/vendor/jquery/jquery.min.js"></script>
-    <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-    <script src="static/assets/js/sb-admin-2.min.js"></script>
-
-    <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
-    <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
-    <script src="static/assets/js/demo/datatables-demo.js"></script>
-
-    <script src="static/assets/js/track.js"></script>
-
+{% block extra_js %}
 <script>
-    $(document).ready(function() {
-        // Initialize the DataTable
-        const table = $('#dataTable').DataTable();
-
-        // Variable to hold the current filter state
-        let currentPriorityFilter = 'all';
-
-        // --- New Custom Filtering Logic ---
-        $.fn.dataTable.ext.search.push(
-            function(settings, data, dataIndex) {
-                // If the filter is 'all', show every row
-                if (currentPriorityFilter === 'all') {
-                    return true;
-                }
-
-                // Get the row's data needed for calculation
-                const rowNode = settings.aoData[dataIndex].nTr;
-                const pendingCell = $(rowNode).find('.pending-since-cell');
-                if (pendingCell.length === 0) return true;
-
-                const orderDateStr = pendingCell.data('created-at');
-                const orderStatus = (pendingCell.data('status') || '').toLowerCase();
-                if (!orderDateStr) return true;
-
-                // Calculate days pending
-                const today = new Date();
-                const orderDate = new Date(orderDateStr);
-                const daysPending = Math.floor((today - orderDate) / (1000 * 60 * 60 * 24));
-
-                // Apply the filter logic
-                switch (currentPriorityFilter) {
-                    case 'high':
-                        return daysPending > 15 || orderStatus.includes("return");
-                    case 'medium':
-                        return (daysPending > 7 && daysPending <= 15) && !orderStatus.includes("return");
-                    case 'low':
-                        return daysPending <= 7 && !orderStatus.includes("return");
-                    default:
-                        return true;
-                }
-            }
-        );
-
-        // --- Event Listeners for Filter Buttons ---
-        $('#btn-high-priority').on('click', function() {
-            currentPriorityFilter = 'high';
-            table.draw(); // Redraw the table to apply the filter
-        });
-
-        $('#btn-medium-priority').on('click', function() {
-            currentPriorityFilter = 'medium';
-            table.draw();
-        });
-
-        $('#btn-low-priority').on('click', function() {
-            currentPriorityFilter = 'low';
-            table.draw();
-        });
-
-        $('#btn-show-all').on('click', function() {
-            currentPriorityFilter = 'all';
-            table.draw();
-        });
-
-        // --- Original script to calculate and color the "Pending Since" cells ---
-        function calculateAndColorCells() {
-    const pendingCells = document.querySelectorAll(".pending-since-cell");
-    const today = new Date();
-
-    pendingCells.forEach(cell => {
-        const orderDateStr = cell.getAttribute("data-created-at");
-        const orderStatus = (cell.getAttribute("data-status") || "").toLowerCase();
-
-        if (!orderDateStr) return;
-
-        const orderDate = new Date(orderDateStr);
-        const timeDiff = today - orderDate;
-        const daysPending = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-
-        // This line displays the number in the cell
-        cell.textContent = daysPending;
-
-        // ✅ ADD THIS LINE to provide a numeric value for sorting
-        cell.setAttribute('data-order', daysPending);
-
-        // Apply color coding
-        if (orderStatus.includes("return") || daysPending > 15) {
-            cell.style.backgroundColor = "#e74a3b"; // Red
-            cell.style.color = "white";
-        } else if (daysPending > 7 && daysPending <= 15) {
-            cell.style.backgroundColor = "#f6c23e"; // Yellow/Orange
-            cell.style.color = "#5a5c69";
-        } else {
-            cell.style.backgroundColor = "#ddf4ff"; // Light blue/info
-            cell.style.color = "#5a5c69";
-        }
-    });
+const PRI_CONFIG = {
+  high:   { bg:'#fce8e6', text:'#8b1a10', dot:'#e74a3b', label:'High'   },
+  medium: { bg:'#fef8e4', text:'#7a5c00', dot:'#f6c23e', label:'Medium' },
+  low:    { bg:'#e8f8fb', text:'#0a5c6e', dot:'#36b9cc', label:'Low'    },
+};
+function getPri(created, status) {
+  const days = Math.floor((Date.now() - new Date(created)) / 86400000);
+  const s = (status||'').toLowerCase();
+  if (days > 15 || s.includes('return') || s.includes('refus')) return 'high';
+  if (days > 7) return 'medium';
+  return 'low';
 }
-
-        // Initial calculation on page load
-        calculateAndColorCells();
-
-        // Re-calculate on every table draw (e.g., after filtering or pagination)
-        table.on('draw', function() {
-            calculateAndColorCells();
-        });
-
-        // --- Original script for custom tags ---
-        window.applyCustomTag = function(orderId) {
-            let customTag = document.getElementById('customTagInput' + orderId).value;
-            if (customTag.trim() !== "") {
-                applyTag(orderId, customTag);
-            }
-        }
-    });
+function toggleCard(h) {
+  const body = h.nextElementSibling;
+  h.querySelector('.uc-chevron').classList.toggle('open');
+  body.classList.toggle('open');
+}
+let curPri = 'all';
+function setPri(btn) {
+  document.querySelectorAll('.pri-filter-btn').forEach(b => { b.style.background='#f8f9fc'; b.style.color='#858796'; });
+  btn.style.background = '#4e73df'; btn.style.color = '#fff';
+  curPri = btn.dataset.pri; applyFilter();
+}
+function applyFilter() {
+  let v = 0;
+  document.querySelectorAll('#undeliveredList .undelivered-card').forEach(c => {
+    const show = curPri === 'all' || c.dataset.pri === curPri;
+    c.style.display = show ? '' : 'none'; if (show) v++;
+  });
+  document.getElementById('visibleCount').textContent = v;
+  document.getElementById('emptyMsg').style.display = v === 0 ? 'block' : 'none';
+}
+document.addEventListener('DOMContentLoaded', function() {
+  let counts = {all:0,high:0,medium:0,low:0};
+  document.querySelectorAll('#undeliveredList .undelivered-card').forEach(card => {
+    const pri = getPri(card.dataset.created, card.dataset.status);
+    card.dataset.pri = pri; counts.all++; counts[pri]++;
+    const days = Math.max(0, Math.floor((Date.now()-new Date(card.dataset.created))/86400000));
+    const pc = PRI_CONFIG[pri];
+    const dEl = card.querySelector('.js-days');
+    const bEl = card.querySelector('.js-pri-badge');
+    if (dEl) { dEl.style.color = pc.dot; dEl.innerHTML = days+'<span style="font-size:9px;font-weight:500;color:#858796;"> d</span>'; }
+    if (bEl) { bEl.style.background=pc.bg; bEl.style.color=pc.text; bEl.innerHTML=`<span class="pri-dot" style="background:${pc.dot}"></span>${pc.label}`; }
+    card.addEventListener('mouseenter',()=>card.style.borderColor=pc.dot+'55');
+    card.addEventListener('mouseleave',()=>card.style.borderColor='#e3e6f0');
+  });
+  document.getElementById('statAll').textContent  = counts.all;
+  document.getElementById('statHigh').textContent = counts.high;
+  document.getElementById('statMed').textContent  = counts.medium;
+  document.getElementById('statLow').textContent  = counts.low;
+  document.getElementById('visibleCount').textContent = counts.all;
+  document.getElementById('highCount').textContent = counts.high + ' high';
+  applyFilter(); initAvatars();
+});
+function markOrder(id, tag) {
+  fetch('/apply_tag',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:id,tag})})
+    .then(r=>r.json()).then(d=>showToast(d.success?`Marked as "${tag}"`:'Failed'))
+    .catch(()=>showToast('Request failed'));
+}
 </script>
-</body>
-</html>
+{% endblock %}

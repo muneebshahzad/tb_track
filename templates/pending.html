@@ -1,706 +1,166 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends 'base.html' %}
+{% block title %}TB Track – Pending Orders{% endblock %}
 
-<head>
-
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description" content="">
-    <meta name="author" content="">
-
-    <title>Daily Tasker - Pending Orders</title>
-
-    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
-    <link
-        href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
-        rel="stylesheet">
-
-    <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
-
-    <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
- <style>
-        .status-buttons {
-            display: none;
-            margin-top: 10px;
-        }
-        .status-buttons .btn {
-            margin-right: 5px;
-            margin-bottom: 5px;
-        }
-    </style>
-    <style>
-  /* Let the two tables shrink properly */
-  .top-products .table-responsive { flex: 1 1 0; min-width: 0; }
-
-  /* Keep sensible widths on desktop */
-  .top-products table th:first-child,
-  .top-products table td:first-child { width: 90px; }   /* Image */
-  .top-products table th:nth-child(3),
-  .top-products table td:nth-child(3) { width: 80px; }  /* Qty */
-
-  /* Stack vertically on tablets/phones */
-  @media (max-width: 992px) {
-    .top-products { flex-direction: column; align-items: stretch; }
+{% block content %}
+<style>
+  .stats-grid3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 20px; }
+  .split-tables { display: flex; gap: 16px; padding: 16px; }
+  .split-table { flex: 1; border-radius: 8px; border: 1px solid #e3e6f0; overflow: hidden; }
+  .split-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .split-table th { padding: 8px 10px; text-align: left; font-weight: 700; color: #858796; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; background: #f8f9fc; }
+  .split-table td { padding: 8px 10px; border-bottom: 1px solid #e3e6f0; vertical-align: middle; }
+  .split-table tr:hover td { background: #f8f9fc; }
+  .done-btn { width: 28px; height: 28px; border-radius: 50%; border: none; background: #1cc88a; color: #fff; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+  .pending-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .pending-table th { padding: 9px 14px; text-align: left; font-weight: 700; color: #858796; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; background: #f8f9fc; white-space: nowrap; }
+  .pending-table td { padding: 10px 14px; border-bottom: 1px solid #e3e6f0; vertical-align: top; }
+  .pending-table tr:hover td { background: #f8f9fc; }
+  @media (max-width: 767px) {
+    .stats-grid3 { grid-template-columns: repeat(2,1fr); }
+    .split-tables { flex-direction: column; }
   }
-
-  /* Phone fixes: wrap long titles, avoid overflow */
-  @media (max-width: 576px) {
-    .top-products table { table-layout: fixed; }
-    .top-products th, .top-products td { white-space: normal; word-break: break-word; }
-    .top-products th:nth-child(2), .top-products td:nth-child(2) { width: auto !important; }
-    .top-products img { width: 64px; height: 64px; object-fit: cover; }
-  }
-
-  /* Make the search bar fluid on mobile (overrides inline max-width) */
-  #topProductsSearch { width: 100%; min-width: 0; }
-  .input-group.input-group-sm[style*="max-width:420px"] { max-width: 100% !important; }
 </style>
 
-</head>
+<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+  <!-- Topbar -->
+  <div class="topbar">
+    <span class="topbar-title">Pending Orders</span>
+    <div style="flex:1"></div>
+    <input type="datetime-local" id="dateFilter" onchange="filterItems()"
+      style="padding:5px 10px;border-radius:7px;border:1px solid #e3e6f0;font-size:12px;font-family:'DM Sans',sans-serif;color:#3a3b45;cursor:pointer;"/>
+    <div class="search-box">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#858796" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="itemSearch" placeholder="Search items…" style="width:160px;" oninput="filterItems()"/>
+    </div>
+  </div>
 
-<body id="page-top">
+  <div style="flex:1;overflow:auto;padding:20px;">
 
-    <div id="wrapper">
-
-        {% include 'header.html' %}
-        <div id="content-wrapper" class="d-flex flex-column">
-
-            <div id="content">
-
-                <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
-
-                    <form class="form-inline">
-                        <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
-                            <i class="fa fa-bars"></i>
-                        </button>
-                    </form>
-
-                    <ul class="navbar-nav ml-auto">
-
-                        <li class="nav-item dropdown no-arrow d-sm-none">
-                            <a class="nav-link dropdown-toggle" href="#" id="searchDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <i class="fas fa-search fa-fw"></i>
-                            </a>
-                            <div class="dropdown-menu dropdown-menu-right p-3 shadow animated--grow-in" aria-labelledby="searchDropdown">
-                                <form class="form-inline mr-auto w-100 navbar-search">
-                                    <div class="input-group">
-                                        <input type="text" class="form-control bg-light border-0 small" placeholder="Search for..." aria-label="Search" aria-describedby="basic-addon2">
-                                        <div class="input-group-append">
-                                            <button class="btn btn-primary" type="button">
-                                                <i class="fas fa-search fa-sm"></i>
-                                            </button>
-
-                                        </div>
-                                    </div>
-                                </form>
-                            </div>
-                        </li>
-
-
-                         <div class="topbar-divider d-none d-sm-block"></div>
-
-                        <li class="nav-item dropdown no-arrow">
-                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
-                                <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
-                            </a>
-                            <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in" aria-labelledby="userDropdown">
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-user fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Profile
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-cogs fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Settings
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-list fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Activity Log
-                                </a>
-                                <div class="dropdown-divider"></div>
-                                <a class="dropdown-item" href="#" data-toggle="modal" data-target="#logoutModal">
-                                    <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Logout
-                                </a>
-                            </div>
-                        </li>
-
-                    </ul>
-
-                </nav>
-                <div class="container-fluid">
-
-
-                    <div class="card shadow mb-4">
-                        <div class="card-header py-3 d-flex justify-content-between align-items-center">
-                            <h6 class="m-0 font-weight-bold text-primary">Pending Orders </h6>
-                            <div class="input-group" style="width: auto;">
-                                <div class="input-group-prepend">
-                                    <label class="input-group-text" for="datetime-filter">From:</label>
-                                </div>
-                                <input type="datetime-local" id="datetime-filter" class="form-control form-control-sm">
-                            </div>
-                        </div>
-<div class="top-products" style="display: flex; justify-content: center; gap: 20px;">
-    <div class="table-responsive" style="flex: 1;">
-        <table class="table table-bordered" width="100%" cellspacing="0">
-            <thead>
-                <tr>
-                    <th>Image</th>
-                    <th style="width: 30%;">Title</th>
-                    <th>Quantity</th>
-                    <th style="width: 10%;">Done</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in pending_items[:half] %}
-                <tr data-order-date="{{ item.order_date }}">
-                    <td><img src="{{ item.item_image }}" width="75" height="75"></td>
-                    <td><span contenteditable="true">{{ item.item_title }}</span></td>
-                    <td><span contenteditable="true">{{ item.quantity }}</span></td>
-                    <td><button class="btn btn-success btn-circle btn-sm mark-done"><i class="fas fa-check"></i></button></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <!-- Stats -->
+    <div class="stats-grid3">
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,0.1)">📦</div><div><div class="stat-label">Items to Pack</div><div class="stat-value" style="color:#4e73df" id="statItems">{{ pending_items|length }}</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(246,194,62,0.1)">🔢</div><div><div class="stat-label">Total Qty</div><div class="stat-value" style="color:#f6c23e" id="statQty">{{ pending_items|sum(attribute='quantity') }}</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(28,200,138,0.1)">💰</div><div><div class="stat-label">Orders Value</div><div class="stat-value" style="color:#1cc88a;font-size:15px;" id="statVal">Rs {{ all_orders|sum(attribute='total_price')|int|format_number }}</div></div></div>
     </div>
 
-    <div class="table-responsive" style="flex: 1;">
-        <table class="table table-bordered" width="100%" cellspacing="0">
-            <thead>
-                <tr>
-                    <th>Image</th>
-                    <th style="width: 30%;">Title</th>
-                    <th>Quantity</th>
-                    <th style="width: 10%;">Done</th>
-                </tr>
-            </thead>
+    <!-- Items to Pack -->
+    <div class="section-card" style="margin-bottom:20px;">
+      <div class="section-header">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Items to Pack</span>
+        <span class="section-count" id="packCount">{{ pending_items|length }}</span>
+      </div>
+      <div class="split-tables" id="splitTablesContainer">
+        {% set half = ((pending_items|length) / 2)|round(0,'ceil')|int %}
+        {% for side in [pending_items[:half], pending_items[half:]] %}
+        <div class="split-table" id="table{{ loop.index }}">
+          <table>
+            <thead><tr><th>Image</th><th>Title</th><th>Qty</th><th>Done</th></tr></thead>
             <tbody>
-                {% for item in pending_items[half:] %}
-                <tr data-order-date="{{ item.order_date }}">
-                    <td><img src="{{ item.item_image }}" width="75" height="75"></td>
-                    <td><span contenteditable="true">{{ item.item_title }}</span></td>
-                    <td><span contenteditable="true">{{ item.quantity }}</span></td>
-                    <td><button class="btn btn-success btn-circle btn-sm mark-done"><i class="fas fa-check"></i></button></td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</div>
-
-
-                        <div style="overflow-x:auto;" class="card-body">
-                            <div class="table-responsive">
-
-                                <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
-    <thead>
-        <tr>
-            <th>Pending Since</th>
-            <th>Order#</th>
-            <th>Total</th>
-            <th>Total Items</th>
-            <th style="display: none;">Hidden</th>
-            <th style="display: none;">Hidden</th>
-        </tr>
-    </thead>
-    <tfoot>
-        <tr>
-            <th>Pending Since</th>
-            <th>Order#</th>
-            <th>Total</th>
-            <th>Total Items</th>
-            <th style="display: none;">Hidden</th>
-            <th style="display: none;">Hidden</th>
-        </tr>
-    </tfoot>
-    <tbody>
-        {% for order in all_orders %}
-            <tr>
-                <td class="pending-since" data-order-date="{{ order.date }}" style="font-size: 18px; font-weight: bold;"></td>
-
-                <td>{{ order.order_via }} <br> {{ order.order_id }} <br>{{ order.date }}</td>
-                <td>{{ order.total_price }}</td>
+              {% for item in side %}
+              <tr data-title="{{ item.item_title|lower }}" data-date="{{ item.order_date }}">
                 <td>
-                    <table class="table table-sm nested-table">
-                        <thead>
-                            <tr>
-                                <th>Image</th>
-                                <th style="width: 30%;">Title</th>
-                                <th style="width: 5%;">Quantity</th>
-                                <th style="width: 20%;" >Tracking</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in order.items_list %}
-                                <tr>
-                                    <td><img src="{{ item.item_image }}" width="100" height="100"></td>
-                                    <td>{{ item.item_title }}</td>
-                                    <td>{{ item.quantity }}</td>
-                                    <td>
-                                        {% if item.tracking_number != 'N/A' %}
-                                            <a href="track/{{ item.tracking_number }}" target="_blank">{{ item.tracking_number }}</a>
-                                        {% else %}
-                                            N/A
-                                        {% endif %}
-                                        <br>
-                                        {{ item.status }}
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                  <div style="width:44px;height:44px;border-radius:6px;background:#e3e6f0;display:flex;align-items:center;justify-content:center;font-size:9px;color:#858796;font-family:'DM Mono',monospace;overflow:hidden;">
+                    {% if item.item_image and item.item_image != 'N/A' %}<img src="{{ item.item_image }}" style="width:100%;height:100%;object-fit:cover;">{% else %}IMG{% endif %}
+                  </div>
                 </td>
-                <td></td>
-                <td></td>
-            </tr>
+                <td><span contenteditable="true" style="outline:none;cursor:text;">{{ item.item_title }}</span></td>
+                <td style="font-weight:700;color:#4e73df;">{{ item.quantity }}</td>
+                <td><button class="done-btn" onclick="markDone(this)">✓</button></td>
+              </tr>
+              {% endfor %}
+              {% if not side %}
+              <tr><td colspan="4" style="padding:20px;text-align:center;color:#858796;">No items</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
         {% endfor %}
-    </tbody>
-</table>
-
-
-                            </div>
-                        </div>
-                    </div>
- <div class="totals">
-    <p>Total Items: <span id="totalItems">0.00</span></p>
-    <p>Total Value: <span id="totalValue">0.00</span></p>
-</div>
-                </div>
-                </div>
-            <footer class="sticky-footer bg-white">
-                <div class="container my-auto">
-                    <div class="copyright text-center my-auto">
-                        <span>Copyright &copy; Your Website 2020</span>
-                    </div>
-                </div>
-            </footer>
-            </div>
-        </div>
-    <a class="scroll-to-top rounded" href="#page-top">
-        <i class="fas fa-angle-up"></i>
-    </a>
-
-    <div class="modal fade" id="logoutModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel"
-        aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="exampleModalLabel">Ready to Leave?</h5>
-                    <button class="close" type="button" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">×</span>
-                    </button>
-                </div>
-                <div class="modal-body">Select "Logout" below if you are ready to end your current session.</div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" type="button" data-dismiss="modal">Cancel</button>
-                    <a class="btn btn-primary" href="login.html">Logout</a>
-                </div>
-            </div>
-        </div>
+      </div>
+      <div style="padding:8px 20px 12px;border-top:1px solid #e3e6f0;display:flex;gap:24px;">
+        <span style="font-size:12px;color:#858796;">Total Items: <strong style="color:#3a3b45;" id="footerItems">{{ pending_items|length }}</strong></span>
+        <span style="font-size:12px;color:#858796;">Total Qty: <strong style="color:#3a3b45;" id="footerQty">{{ pending_items|sum(attribute='quantity') }}</strong></span>
+        <span style="font-size:12px;color:#858796;">Total Value: <strong style="color:#1cc88a;">Rs {{ all_orders|sum(attribute='total_price')|int|format_number }}</strong></span>
+      </div>
     </div>
 
-    <script src="static/assets/vendor/jquery/jquery.min.js"></script>
-    <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <!-- All Pending Orders -->
+    <div class="section-card">
+      <div class="section-header">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">All Pending Orders</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="pending-table">
+          <thead>
+            <tr><th>Pending Since</th><th>Order #</th><th>Platform</th><th>Total</th><th>Items</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {% for order in all_orders %}
+            {% set days = ((now - order.date|parse_date).days) if order.date else 0 %}
+            <tr>
+              <td>
+                <span style="font-size:18px;font-weight:700;color:{% if days >= 3 %}#e74a3b{% elif days >= 1 %}#f6c23e{% else %}#1cc88a{% endif %};">{{ days }}d</span>
+              </td>
+              <td style="font-family:'DM Mono',monospace;font-weight:700;color:#4e73df;">#{{ order.order_id }}</td>
+              <td style="color:#858796;">{{ order.order_via }}</td>
+              <td style="font-weight:600;color:#3a3b45;">Rs {{ order.total_price|int|format_number }}</td>
+              <td>
+                <div style="display:flex;flex-direction:column;gap:2px;">
+                  {% for item in order.items_list %}
+                  <div style="font-size:11px;color:#3a3b45;">
+                    <span style="font-weight:600;">{{ item.quantity }}×</span> {{ item.item_title }}
+                    {% if item.tracking_number and item.tracking_number != 'N/A' %}
+                    <span style="margin-left:6px;font-family:'DM Mono',monospace;font-size:10px;color:#4e73df;background:#dde4fb;padding:1px 5px;border-radius:4px;">{{ item.tracking_number }}</span>
+                    {% endif %}
+                  </div>
+                  {% endfor %}
+                </div>
+              </td>
+              <td>{{ status_badge(order.status) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" style="padding:36px;text-align:center;color:#858796;">No pending orders.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
 
-    <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-
-    <script src="static/assets/js/sb-admin-2.min.js"></script>
-
-    <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
-    <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
-
-    <script src="static/assets/js/demo/datatables-demo.js"></script>
-        <script src="static/assets/js/demo/datatables-demo.js"></script>
-    <script src="static/assets/js/track.js"></script>
-
+{% block extra_js %}
 <script>
-    $(document).ready(function() {
-        // Check if the table is already a DataTable and destroy it if necessary
-        if ($.fn.DataTable.isDataTable('#dataTable')) {
-            $('#dataTable').DataTable().destroy();
-        }
-
-        // Initialize the DataTable with desired settings
-        $('#dataTable').DataTable({
-            "columnDefs": [
-                { "searchable": false, "targets": [-1, 4] }  // Make the last column and the 5th column non-searchable
-            ]
-        });
-    });
-</script>
-<script>
-        $(document).ready(function() {
-            var currentUrl = window.location.pathname;
-            $('.nav-item a').each(function() {
-                var linkUrl = $(this).attr('href');
-                if (currentUrl === '/' + linkUrl) {
-                    $(this).parent().addClass('active');
-                }
-            });
-        });
-
-     var table = $('#dataTable').DataTable();
-
-function updateTotals() {
-    var filteredData = table.rows({ filter: 'applied' }).nodes(); // get DOM nodes
-    var totalItems = 0;
-    var totalValue = 0;
-
-    filteredData.each(function (row) {
-        // Get the total column value (e.g. Rs 13498.00)
-        var amount = parseFloat($(row).find('td:eq(2)').text().replace(/,/g, '')) || 0;
-        totalValue += amount;
-
-        // Now count quantities from the nested "Total Items" cell (3rd column, index 2)
-        $(row).find('td:eq(3) table tbody tr').each(function () {
-            var qtyText = $(this).find('td').eq(2).text().trim(); // Quantity is in 3rd column inside nested table
-            var qty = parseInt(qtyText) || 0;
-            totalItems += qty;
-        });
-    });
-
-    $('#totalItems').text(totalItems);
-    $('#totalValue').text(totalValue.toFixed(2));
+function markDone(btn) {
+  const row = btn.closest('tr');
+  row.style.transition = 'opacity 0.3s';
+  row.style.opacity = '0';
+  setTimeout(() => { row.remove(); updateStats(); }, 300);
 }
-
-    // Initial call
-    updateTotals();
-    </script>
-<script>
-  function parseFlexibleDate(dateStr) {
-    if (!dateStr) return null;
-
-    // Clean and normalize date string
-    dateStr = dateStr.trim().replace(/\s+/g, ' ');
-
-    // Try direct parse
-    let date = new Date(dateStr);
-    if (!isNaN(date.getTime())) return date;
-
-    // Try "Aug 06, 2025"
-    const match = dateStr.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
-    if (match) {
-      let parsed = Date.parse(match[1]);
-      if (!isNaN(parsed)) return new Date(parsed);
+function updateStats() {
+  const rows = document.querySelectorAll('#splitTablesContainer tr[data-title]');
+  let qty = 0;
+  rows.forEach(r => {
+    if (r.style.display !== 'none') {
+      const q = parseInt(r.querySelector('td:nth-child(3)')?.textContent) || 0;
+      qty += q;
     }
-
-    // Try "2025-08-06"
-    const isoMatch = dateStr.match(/(\d{4}-\d{2}-\d{2})/);
-    if (isoMatch) return new Date(isoMatch[1]);
-
-    return null;
-  }
-
-  function updatePendingSince() {
-    const cells = document.querySelectorAll(".pending-since");
-
-    cells.forEach(cell => {
-      const dateStr = cell.getAttribute("data-order-date");
-      const orderDate = parseFlexibleDate(dateStr);
-
-      if (!orderDate) {
-        cell.textContent = "—";
-        return;
-      }
-
-      const now = new Date();
-      const diffTime = now.setHours(0, 0, 0, 0) - orderDate.setHours(0, 0, 0, 0);
-      const diffDays = Math.max(Math.floor(diffTime / (1000 * 60 * 60 * 24)), 0);
-
-      cell.textContent = `${diffDays} day${diffDays !== 1 ? 's' : ''}`;
-      cell.style.fontSize = "18px";
-      cell.style.fontWeight = "bold";
-    });
-  }
-
-  document.addEventListener("DOMContentLoaded", function () {
-    // Initialize DataTable if you're using it
-    const table = $('#dataTable').DataTable();
-
-    // Update initially
-    updatePendingSince();
-
-    // Update on every redraw (pagination, sort, etc.)
-    table.on('draw', function () {
-      updatePendingSince();
-    });
   });
-</script>
-
-<script>
-(function () {
-  document.addEventListener('DOMContentLoaded', initTopProductsLogic);
-
-  function initTopProductsLogic() {
-    // Find the flex container holding the two small product tables
-    const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
-    if (!flex) { console.warn('Top products flex container not found'); return; }
-
-    const tables = flex.querySelectorAll('table.table');
-    if (tables.length < 2) { console.warn('Expected two top product tables; found:', tables.length); return; }
-
-    const [leftTable, rightTable] = tables;
-    const leftBody  = leftTable.tBodies && leftTable.tBodies[0];
-    const rightBody = rightTable.tBodies && rightTable.tBodies[0];
-    if (!leftBody || !rightBody) { console.warn('One of the top tables has no <tbody>'); return; }
-
-    // --- Build toolbar (search + count) ---
-    const toolbar = document.createElement('div');
-    toolbar.className = 'mb-2';
-    toolbar.innerHTML = `
-      <div class="input-group input-group-sm" style="max-width:420px;">
-        <div class="input-group-prepend">
-          <span class="input-group-text"><i class="fas fa-search"></i></span>
-        </div>
-        <input type="search" id="topProductsSearch" class="form-control" placeholder="Search top products (title or qty)">
-        <div class="input-group-append">
-          <span class="input-group-text" id="topProductsCount"></span>
-        </div>
-      </div>`;
-    // Insert toolbar just above the two tables
-    flex.parentNode.insertBefore(toolbar, flex);
-
-    const $input = toolbar.querySelector('#topProductsSearch');
-    const $count = toolbar.querySelector('#topProductsCount');
-
-    // --- Capture a master list of the actual <tr> nodes (detach from DOM when rendering) ---
-    const masterRows = [...leftBody.rows, ...rightBody.rows];
-
-    // Helper to normalize text (case-insensitive search)
-    const norm = s => (s || '').toString().toLowerCase();
-
-    // Precompute searchable keys to speed up filtering
-    const keys = new Map(masterRows.map(row => {
-      const title = row.cells[1] ? row.cells[1].textContent : '';
-      const qty   = row.cells[2] ? row.cells[2].textContent : '';
-      return [row, norm(`${title} ${qty}`)];
-    }));
-
-    // Remove all rows now; render() will place them back
-    masterRows.forEach(r => r.remove());
-
-    // Sorting comparator: Title (A→Z), tie-break by Qty (desc)
-    function compareRows(a, b) {
-      const A = (a.cells[1]?.textContent || '').trim();
-      const B = (b.cells[1]?.textContent || '').trim();
-      const byTitle = A.localeCompare(B, undefined, { numeric: true, sensitivity: 'base' });
-      if (byTitle !== 0) return byTitle;
-
-      const qa = parseInt((a.cells[2]?.textContent || '').trim(), 10) || 0;
-      const qb = parseInt((b.cells[2]?.textContent || '').trim(), 10) || 0;
-      return qb - qa; // higher qty first when same title
-    }
-
-    // Set false to use round-robin (L,R,L,R,...) instead of split-in-halves
-    const splitHalves = true;
-
-    function render(filterText = '') {
-        const f = norm(filterText);
-
-        // Get the current date filter value
-        const datetimeInput = document.getElementById('datetime-filter');
-        const filterValue = datetimeInput.value;
-
-        // Filter by both search text and date
-        let rows = masterRows.filter(r => {
-            const rowSearchableText = keys.get(r);
-            const searchMatch = !f || rowSearchableText.includes(f);
-
-            // This is the corrected logic:
-            // The date matches if EITHER no filter is set, OR the item's date passes the filter.
-            const orderDateStr = r.getAttribute('data-order-date');
-            const orderDate = orderDateStr ? parseFlexibleDate(orderDateStr) : null;
-            const dateMatch = !filterValue || (orderDate && orderDate >= new Date(filterValue));
-
-            return searchMatch && dateMatch;
-        });
-
-        // Sort
-        rows.sort(compareRows);
-
-      // Detach any existing rows from both bodies
-      while (leftBody.firstChild) leftBody.removeChild(leftBody.firstChild);
-      while (rightBody.firstChild) rightBody.removeChild(rightBody.firstChild);
-
-      // Distribute
-      if (splitHalves) {
-        const mid = Math.ceil(rows.length / 2);
-        const leftFrag  = document.createDocumentFragment();
-        const rightFrag = document.createDocumentFragment();
-        rows.slice(0, mid).forEach(r => leftFrag.appendChild(r));
-        rows.slice(mid).forEach(r => rightFrag.appendChild(r));
-        leftBody.appendChild(leftFrag);
-        rightBody.appendChild(rightFrag);
-      } else {
-        rows.forEach((r, i) => (i % 2 === 0 ? leftBody : rightBody).appendChild(r));
-      }
-
-      // Update counter
-      $count.textContent = `${rows.length}/${masterRows.length}`;
-    }
-
-    // Debounce input to avoid excessive reflows
-    let timer;
-    $input.addEventListener('input', () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => render($input.value), 120);
-    });
-
-    // We now render when the date filter changes as well
-    document.getElementById('datetime-filter').addEventListener('change', () => {
-        render($input.value);
-    });
-
-    // Initial render (no filter)
-    render('');
-  }
-})();
-</script>
-
-<script>
-  // Hide sidebar on load for mobile; keep SB Admin 2's normal toggle behavior
-  document.addEventListener('DOMContentLoaded', function () {
-    function applySidebarDefault() {
-      const sidebars = document.querySelectorAll('.sidebar');
-      if (window.innerWidth < 768) {
-        document.body.classList.add('sidebar-toggled');
-        sidebars.forEach(s => s.classList.add('toggled'));   // hidden on mobile in SB Admin 2
-      } else {
-        document.body.classList.remove('sidebar-toggled');
-        sidebars.forEach(s => s.classList.remove('toggled')); // normal on desktop/tablet
-      }
-    }
-    applySidebarDefault();
-
-    // Re-evaluate on resize/orientation change (debounced)
-    let t;
-    window.addEventListener('resize', () => {
-      clearTimeout(t);
-      t = setTimeout(applySidebarDefault, 150);
-    });
+  const visible = [...document.querySelectorAll('#splitTablesContainer tr[data-title]')].filter(r => r.style.display !== 'none').length;
+  document.getElementById('statItems').textContent = visible;
+  document.getElementById('statQty').textContent = qty;
+  document.getElementById('packCount').textContent = visible;
+  document.getElementById('footerItems').textContent = visible;
+  document.getElementById('footerQty').textContent = qty;
+}
+function filterItems() {
+  const q = document.getElementById('itemSearch').value.toLowerCase();
+  const d = document.getElementById('dateFilter').value.slice(0,10);
+  document.querySelectorAll('#splitTablesContainer tr[data-title]').forEach(row => {
+    const matchQ = !q || row.dataset.title.includes(q);
+    const matchD = !d || row.dataset.date >= d;
+    row.style.display = matchQ && matchD ? '' : 'none';
   });
+  updateStats();
+}
 </script>
-
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Event listener for all "mark as done" buttons
-        document.querySelectorAll('.mark-done').forEach(button => {
-            button.addEventListener('click', function() {
-                // Find the closest parent row (<tr>) and remove it
-                this.closest('tr').remove();
-            });
-        });
-    });
-</script>
-
-<script>
-(function () {
-  document.addEventListener('DOMContentLoaded', initFilteringLogic);
-
-  function initFilteringLogic() {
-    // --- Setup for Top Product Tables ---
-    const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
-    if (!flex) return;
-    const [leftTable, rightTable] = flex.querySelectorAll('table.table');
-    const leftBody  = leftTable.tBodies[0];
-    const rightBody = rightTable.tBodies[0];
-    if (!leftBody || !rightBody) return;
-
-    const toolbar = document.createElement('div');
-    toolbar.className = 'mb-2';
-    toolbar.innerHTML = `
-      <div class="input-group input-group-sm" style="max-width:420px;">
-        <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div>
-        <input type="search" id="topProductsSearch" class="form-control" placeholder="Search top products...">
-        <div class="input-group-append"><span class="input-group-text" id="topProductsCount"></span></div>
-      </div>`;
-    flex.parentNode.insertBefore(toolbar, flex);
-
-    const $input = toolbar.querySelector('#topProductsSearch');
-    const $count = toolbar.querySelector('#topProductsCount');
-    const masterRows = [...leftBody.rows, ...rightBody.rows];
-    masterRows.forEach(r => r.remove());
-
-    const norm = s => (s || '').toString().toLowerCase();
-    const keys = new Map(masterRows.map(row => {
-      const title = row.cells[1]?.textContent || '';
-      const qty   = row.cells[2]?.textContent || '';
-      return [row, norm(`${title} ${qty}`)];
-    }));
-
-    function compareRows(a, b) {
-      const byTitle = (a.cells[1]?.textContent || '').localeCompare(b.cells[1]?.textContent || '', undefined, { numeric: true, sensitivity: 'base' });
-      if (byTitle !== 0) return byTitle;
-      return (parseInt(b.cells[2]?.textContent || 0, 10)) - (parseInt(a.cells[2]?.textContent || 0, 10));
-    }
-
-    function renderTopTables(searchText = '') {
-      const f = norm(searchText);
-      const filterValue = document.getElementById('datetime-filter').value;
-
-      let rows = masterRows.filter(r => {
-        const searchMatch = !f || keys.get(r).includes(f);
-        const orderDateStr = r.getAttribute('data-order-date');
-        const orderDate = orderDateStr ? parseFlexibleDate(orderDateStr) : null;
-        const dateMatch = !filterValue || (orderDate && orderDate >= new Date(filterValue));
-        return searchMatch && dateMatch;
-      });
-
-      rows.sort(compareRows);
-
-      while (leftBody.firstChild) leftBody.removeChild(leftBody.firstChild);
-      while (rightBody.firstChild) rightBody.removeChild(rightBody.firstChild);
-
-      const mid = Math.ceil(rows.length / 2);
-      rows.slice(0, mid).forEach(r => leftBody.appendChild(r));
-      rows.slice(mid).forEach(r => rightBody.appendChild(r));
-
-      $count.textContent = `${rows.length}/${masterRows.length}`;
-    }
-
-    // --- Setup for Main DataTable ---
-    const mainDataTable = $('#dataTable').DataTable();
-
-    // Add a persistent custom filter that reads the date input value
-    $.fn.dataTable.ext.search.push(
-        function(settings, data, dataIndex) {
-            if (settings.nTable.id !== 'dataTable') return true;
-
-            const filterValue = document.getElementById('datetime-filter').value;
-            if (!filterValue) return true;
-
-            const filterDate = new Date(filterValue);
-            if (isNaN(filterDate.getTime())) return true;
-
-            const rowNode = settings.aoData[dataIndex].nTr;
-            const orderDateStr = $(rowNode).find('.pending-since').attr('data-order-date');
-            const orderDate = parseFlexibleDate(orderDateStr);
-            if (!orderDate) return true;
-
-            return orderDate >= filterDate;
-        }
-    );
-
-    // --- Unified Event Listeners ---
-    let timer;
-    $input.addEventListener('input', () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => renderTopTables($input.value), 120);
-    });
-
-    document.getElementById('datetime-filter').addEventListener('change', () => {
-        renderTopTables($input.value); // Redraw top tables
-        mainDataTable.draw();        // Redraw main table
-    });
-
-    // Initial render
-    renderTopTables('');
-  }
-})();
-</script>
-
-</body>
-
-</html>
+{% endblock %}

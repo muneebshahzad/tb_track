@@ -1,1085 +1,229 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>Payment Details - Leopards</title>
+{% extends 'base.html' %}
+{% block title %}TB Track – Finance{% endblock %}
 
-    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
-    <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
+{% block content %}
+<style>
+  .kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 16px; }
+  .kpi-card { background: #fff; border-radius: 10px; padding: 13px 16px; border: 1px solid #e3e6f0; position: relative; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+  .kpi-bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .fin-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .fin-table th { padding: 8px 11px; text-align: left; font-size: 10px; font-weight: 700; color: #858796; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; white-space: nowrap; background: #f8f9fc; }
+  .fin-table td { padding: 9px 11px; border-bottom: 1px solid #e3e6f0; vertical-align: middle; }
+  .fin-table tr:hover td { background: #f8f9fc; }
+  .paid-badge   { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #d4f5e9; color: #0f6848; white-space: nowrap; }
+  .unpaid-badge { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #fce8e6; color: #e74a3b; white-space: nowrap; }
+  @media (max-width: 767px) { .kpi-grid { grid-template-columns: repeat(2,1fr); } .hide-mob { display: none !important; } }
+</style>
 
-    <style>
-        .filter-pill {
-    background: transparent;
-    color: var(--lp-muted);
-    border: 1px solid var(--lp-border);
-    border-radius: 20px;
-    padding: 4px 14px;
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: .72rem;
-    cursor: pointer;
-    transition: all .2s;
-    white-space: nowrap;
-}
-.filter-pill:hover  { border-color: var(--lp-yellow); color: var(--lp-yellow); }
-.filter-pill.active { background: var(--lp-yellow); color: var(--lp-dark); border-color: var(--lp-yellow); font-weight: 600; }
-        :root {
-            --lp-yellow:    #F5C400;
-            --lp-dark:      #1A1A1A;
-            --lp-mid:       #2D2D2D;
-            --lp-border:    #3A3A3A;
-            --lp-text:      #E8E8E8;
-            --lp-muted:     #888888;
-            --lp-green:     #2ECC71;
-            --lp-red:       #E74C3C;
-            --lp-orange:    #F39C12;
-            --lp-blue:      #3498DB;
-            --lp-purple:    #9B59B6;
-        }
+<!-- Gold accent bar -->
+<div style="height:3px;background:linear-gradient(90deg,#F5C400,#FFD700,#F5C400);background-size:200% 100%;animation:shimmerBar 3s linear infinite;flex-shrink:0;"></div>
 
-        body {
-            background: var(--lp-dark);
-            color: var(--lp-text);
-            font-family: 'IBM Plex Sans', sans-serif;
-        }
-
-        .accent-bar {
-            height: 4px;
-            background: linear-gradient(90deg, var(--lp-yellow) 0%, #FFD700 50%, var(--lp-yellow) 100%);
-            background-size: 200% 100%;
-            animation: shimmer 3s infinite linear;
-        }
-        @keyframes shimmer {
-            0%   { background-position: -200% 0; }
-            100% { background-position:  200% 0; }
-        }
-
-        .page-header {
-            background: var(--lp-mid);
-            border-bottom: 1px solid var(--lp-border);
-            padding: 24px 32px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 16px;
-        }
-        .page-header h1 {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 1.4rem;
-            font-weight: 600;
-            color: var(--lp-yellow);
-            margin: 0;
-            letter-spacing: 0.05em;
-        }
-        .page-header p {
-            margin: 4px 0 0;
-            color: var(--lp-muted);
-            font-size: .85rem;
-        }
-
-        .filter-bar {
-            background: var(--lp-mid);
-            border: 1px solid var(--lp-border);
-            border-radius: 8px;
-            padding: 20px 24px;
-            margin: 24px 32px;
-            display: flex;
-            align-items: flex-end;
-            gap: 16px;
-            flex-wrap: wrap;
-        }
-        .filter-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        .filter-group label {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .72rem;
-            color: var(--lp-muted);
-            text-transform: uppercase;
-            letter-spacing: .08em;
-        }
-        .filter-group input[type="date"] {
-            background: var(--lp-dark);
-            border: 1px solid var(--lp-border);
-            color: var(--lp-text);
-            border-radius: 6px;
-            padding: 8px 12px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .85rem;
-            outline: none;
-            transition: border-color .2s;
-        }
-        .filter-group input[type="date"]:focus {
-            border-color: var(--lp-yellow);
-        }
-
-        .btn-fetch {
-            background: var(--lp-yellow);
-            color: var(--lp-dark);
-            border: none;
-            border-radius: 6px;
-            padding: 9px 22px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-weight: 600;
-            font-size: .85rem;
-            cursor: pointer;
-            transition: opacity .2s, transform .1s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .btn-fetch:hover  { opacity: .88; }
-        .btn-fetch:active { transform: scale(.97); }
-        .btn-fetch:disabled { opacity: .45; cursor: not-allowed; }
-
-        .btn-export {
-            background: transparent;
-            color: var(--lp-yellow);
-            border: 1px solid var(--lp-yellow);
-            border-radius: 6px;
-            padding: 9px 18px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .82rem;
-            cursor: pointer;
-            transition: background .2s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .btn-export:hover { background: rgba(245,196,0,.1); }
-
-        .kpi-row {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-            gap: 16px;
-            margin: 0 32px 24px;
-        }
-        .kpi-card {
-            background: var(--lp-mid);
-            border: 1px solid var(--lp-border);
-            border-radius: 8px;
-            padding: 18px 20px;
-            position: relative;
-            overflow: hidden;
-        }
-        .kpi-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 3px;
-            background: var(--accent, var(--lp-yellow));
-        }
-        .kpi-card .kpi-label {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .68rem;
-            text-transform: uppercase;
-            letter-spacing: .1em;
-            color: var(--lp-muted);
-            margin-bottom: 8px;
-        }
-        .kpi-card .kpi-val {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 1.55rem;
-            font-weight: 600;
-            color: var(--lp-text);
-            line-height: 1;
-        }
-        .kpi-card .kpi-sub {
-            font-size: .75rem;
-            color: var(--lp-muted);
-            margin-top: 6px;
-        }
-        /* Amount sub-line inside the new cards */
-        .kpi-card .kpi-amt {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .85rem;
-            font-weight: 500;
-            margin-top: 6px;
-        }
-
-        .table-wrapper {
-            margin: 0 32px 40px;
-            background: var(--lp-mid);
-            border: 1px solid var(--lp-border);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .table-wrapper-header {
-            padding: 16px 20px;
-            border-bottom: 1px solid var(--lp-border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-        .table-wrapper-header h6 {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .82rem;
-            color: var(--lp-yellow);
-            margin: 0;
-            letter-spacing: .05em;
-        }
-
-        #payTable_wrapper .dataTables_filter input,
-        #payTable_wrapper .dataTables_length select {
-            background: var(--lp-dark);
-            border: 1px solid var(--lp-border);
-            color: var(--lp-text);
-            border-radius: 5px;
-            padding: 5px 10px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .8rem;
-            outline: none;
-        }
-        #payTable_wrapper .dataTables_filter input:focus {
-            border-color: var(--lp-yellow);
-        }
-        #payTable_wrapper .dataTables_filter label,
-        #payTable_wrapper .dataTables_length label,
-        #payTable_wrapper .dataTables_info {
-            color: var(--lp-muted);
-            font-size: .8rem;
-            font-family: 'IBM Plex Mono', monospace;
-        }
-        #payTable_wrapper .dataTables_paginate .paginate_button {
-            color: var(--lp-muted) !important;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .8rem;
-            border-radius: 5px !important;
-        }
-        #payTable_wrapper .dataTables_paginate .paginate_button.current,
-        #payTable_wrapper .dataTables_paginate .paginate_button.current:hover {
-            background: var(--lp-yellow) !important;
-            color: var(--lp-dark) !important;
-            border: none !important;
-        }
-        #payTable_wrapper .dataTables_paginate .paginate_button:hover {
-            background: var(--lp-border) !important;
-            color: var(--lp-text) !important;
-            border: none !important;
-        }
-
-        table#payTable {
-            border-collapse: collapse;
-            width: 100%;
-        }
-        table#payTable thead th {
-            background: var(--lp-dark);
-            color: var(--lp-yellow);
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .72rem;
-            text-transform: uppercase;
-            letter-spacing: .08em;
-            border-bottom: 1px solid var(--lp-border);
-            padding: 12px 14px;
-            white-space: nowrap;
-        }
-        table#payTable thead th::after,
-        table#payTable thead th::before { color: var(--lp-yellow) !important; }
-
-        table#payTable tbody tr {
-            border-bottom: 1px solid rgba(58,58,58,.5);
-            transition: background .15s;
-        }
-        table#payTable tbody tr:hover { background: rgba(255,255,255,.03); }
-
-        table#payTable tbody td {
-            padding: 11px 14px;
-            font-size: .82rem;
-            color: var(--lp-text);
-            vertical-align: middle;
-        }
-        table#payTable tbody td.mono {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .8rem;
-        }
-
-        .product-cell {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            max-width: 280px;
-            white-space: normal;
-        }
-        .product-img {
-            width: 36px;
-            height: 36px;
-            border-radius: 4px;
-            background: var(--lp-dark);
-            border: 1px solid var(--lp-border);
-            object-fit: cover;
-            flex-shrink: 0;
-        }
-        .product-info { flex: 1; }
-        .product-title { font-size: .8rem; color: var(--lp-text); margin: 0; }
-
-        .badge-pay {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .72rem;
-            font-weight: 500;
-            white-space: nowrap;
-        }
-        .badge-pay.paid    { background: rgba(46,204,113,.15); color: var(--lp-green); border: 1px solid rgba(46,204,113,.3); }
-        .badge-pay.pending { background: rgba(243,156,18,.15);  color: var(--lp-orange); border: 1px solid rgba(243,156,18,.3); }
-        .badge-pay.unpaid  { background: rgba(231,76,60,.15);   color: var(--lp-red);    border: 1px solid rgba(231,76,60,.3); }
-
-        .badge-status {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: .68rem;
-            font-weight: 500;
-            white-space: nowrap;
-        }
-        .badge-status.booked    { background: rgba(52,152,219,.15); color: var(--lp-blue); border: 1px solid rgba(52,152,219,.3); }
-        .badge-status.unbooked  { background: rgba(245,196,0,.15);  color: var(--lp-yellow); border: 1px solid rgba(245,196,0,.3); }
-        .badge-status.delivered { background: rgba(46,204,113,.15); color: var(--lp-green); border: 1px solid rgba(46,204,113,.3); }
-        .badge-status.returned  { background: rgba(231,76,60,.15);  color: var(--lp-red);   border: 1px solid rgba(231,76,60,.3); }
-
-        #loadingOverlay {
-            display: none;
-            position: fixed; inset: 0;
-            background: rgba(26,26,26,.85);
-            z-index: 9999;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            gap: 16px;
-        }
-        #loadingOverlay.active { display: flex; }
-        .spinner {
-            width: 44px; height: 44px;
-            border: 3px solid var(--lp-border);
-            border-top-color: var(--lp-yellow);
-            border-radius: 50%;
-            animation: spin .7s linear infinite;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .loading-text { font-family: 'IBM Plex Mono', monospace; color: var(--lp-muted); font-size: .85rem; }
-
-        #emptyState {
-            display: none;
-            text-align: center;
-            padding: 60px 20px;
-            color: var(--lp-muted);
-        }
-        #emptyState i { font-size: 2.5rem; margin-bottom: 16px; color: var(--lp-border); }
-        #emptyState p { font-family: 'IBM Plex Mono', monospace; font-size: .85rem; }
-
-        #errorToast {
-            position: fixed;
-            bottom: 28px; right: 28px;
-            background: var(--lp-mid);
-            border: 1px solid var(--lp-red);
-            border-left: 4px solid var(--lp-red);
-            border-radius: 8px;
-            padding: 14px 20px;
-            color: var(--lp-text);
-            font-size: .85rem;
-            max-width: 360px;
-            display: none;
-            z-index: 9999;
-            animation: slideUp .3s ease;
-        }
-        @keyframes slideUp { from { transform: translateY(20px); opacity:0; } }
-        #errorToast.show { display: block; }
-        #errorToast strong { color: var(--lp-red); font-family: 'IBM Plex Mono', monospace; }
-
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: var(--lp-dark); }
-        ::-webkit-scrollbar-thumb { background: var(--lp-border); border-radius: 3px; }
-    </style>
-</head>
-<body id="page-top">
-
-<div id="loadingOverlay">
-    <div class="spinner"></div>
-    <div class="loading-text" id="loadingText">Fetching payment data...</div>
-</div>
-
-<div id="errorToast">
-    <strong>Error</strong>
-    <div id="errorMsg" style="margin-top:4px; color: var(--lp-muted); font-size:.82rem;"></div>
-</div>
-
-<div id="wrapper">
-    {% include 'header.html' %}
-
-    <div id="content-wrapper" class="d-flex flex-column">
-        <div id="content">
-
-            <nav class="navbar navbar-expand navbar-light bg-white topbar mb-0 static-top shadow">
-                <form class="form-inline">
-                    <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
-                        <i class="fa fa-bars"></i>
-                    </button>
-                </form>
-                <ul class="navbar-nav ml-auto">
-                    <li class="nav-item dropdown no-arrow">
-                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button"
-                           data-toggle="dropdown">
-                            <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
-                            <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
-                        </a>
-                        <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in"
-                             aria-labelledby="userDropdown">
-                            <div class="dropdown-divider"></div>
-                            <a class="dropdown-item" href="#" data-toggle="modal" data-target="#logoutModal">
-                                <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i>Logout
-                            </a>
-                        </div>
-                    </li>
-                </ul>
-            </nav>
-
-            <div class="accent-bar"></div>
-
-            <div class="page-header">
-                <div>
-                    <h1><i class="fas fa-file-invoice-dollar mr-2" style="color:var(--lp-yellow)"></i>Payment Details</h1>
-                    <p>Leopards Courier — Account Settlement Overview</p>
-                </div>
-                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                    <span id="lastUpdated" style="font-family:'IBM Plex Mono',monospace;font-size:.75rem;color:var(--lp-muted);"></span>
-                    <button class="btn-export" id="btnExport" onclick="exportCSV()" style="display:none;">
-                        <i class="fas fa-download"></i> Export CSV
-                    </button>
-                </div>
-            </div>
-
-            <!-- Filter bar -->
-            <div class="filter-bar">
-                <div class="filter-group">
-                    <label>From Date</label>
-                    <input type="date" id="fromDate">
-                </div>
-                <div class="filter-group">
-                    <label>To Date</label>
-                    <input type="date" id="toDate">
-                </div>
-                <button class="btn-fetch" id="btnFetch" onclick="fetchPayments()">
-                    <i class="fas fa-search"></i> Fetch Payments
-                </button>
-                <button class="btn-fetch" id="btnFetchAll" onclick="fetchAllActive()"
-                        style="background:transparent;color:var(--lp-yellow);border:1px solid var(--lp-yellow);">
-                    <i class="fas fa-bolt"></i> Load From Orders
-                </button>
-            </div>
-
-            <!-- KPI cards -->
-            <div class="kpi-row" id="kpiRow" style="display:none;">
-
-                <!-- ── Merged: Total Orders + Total COD ── -->
-                <div class="kpi-card" style="--accent:var(--lp-yellow);">
-                    <div class="kpi-label">Total COD</div>
-                    <div class="kpi-val" id="kpiCOD">—</div>
-                    <div class="kpi-sub"><span id="kpiTotal">—</span> orders in selected range</div>
-                </div>
-                <div class="kpi-card" style="--accent:var(--lp-blue);">
-                    <div class="kpi-label">Shipping Charges</div>
-                    <div class="kpi-val" id="kpiCharges">—</div>
-                    <div class="kpi-sub">total billed</div>
-                </div>
-                <div class="kpi-card" style="--accent:var(--lp-red);">
-                    <div class="kpi-label">Unpaid Delivered</div>
-                    <div class="kpi-val" id="kpiUnpaidDelivered">—</div>
-                    <div class="kpi-sub">COD amount unsettled</div>
-                </div>
-                <div class="kpi-card" style="--accent:var(--lp-orange);">
-                    <div class="kpi-label">Unpaid Shipping</div>
-                    <div class="kpi-val" id="kpiUnpaidCharges">—</div>
-                    <div class="kpi-sub">charges pending</div>
-                </div>
-                <div class="kpi-card" style="--accent:var(--lp-purple);">
-                    <div class="kpi-label">Net Receivable</div>
-                    <div class="kpi-val" id="kpiReceivable">—</div>
-                    <div class="kpi-sub">(Unpaid COD × 96%) − Ship. Charges</div>
-                </div>
-
-                <!-- ── NEW: Delivered Orders ── -->
-                <div class="kpi-card" style="--accent:var(--lp-green);">
-                    <div class="kpi-label">Delivered Orders</div>
-                    <div class="kpi-val" id="kpiDeliveredAmt">—</div>
-                    <div class="kpi-sub"><span id="kpiDeliveredCount">—</span> orders</div>
-                </div>
-
-                <!-- ── NEW: Returned Orders ── -->
-                <div class="kpi-card" style="--accent:var(--lp-red);">
-                    <div class="kpi-label">Returned Orders</div>
-                    <div class="kpi-val" id="kpiReturnedAmt">—</div>
-                    <div class="kpi-sub"><span id="kpiReturnedCount">—</span> orders</div>
-                </div>
-
-                <!-- ── NEW: Pending Orders (neither delivered nor returned) ── -->
-                <div class="kpi-card" style="--accent:var(--lp-blue);">
-                    <div class="kpi-label">Pending Orders</div>
-                    <div class="kpi-val" id="kpiPendingAmt">—</div>
-                    <div class="kpi-sub"><span id="kpiPendingCount">—</span> orders</div>
-                </div>
-
-            </div>
-
-            <!-- Table -->
-            <div class="table-wrapper">
-                <div class="table-wrapper-header">
-<h6><i class="fas fa-table mr-2"></i>Payment Records</h6>
-<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-    <button class="filter-pill active" id="filterAll"            onclick="setFilter('all')">All</button>
-    <button class="filter-pill"        id="filterShipPaid"       onclick="setFilter('ship-paid')">Shipping Paid</button>
-    <button class="filter-pill"        id="filterDeliveredUnpaid" onclick="setFilter('delivered-unpaid')">Delivered &amp; COD Unpaid</button>
-</div>
-<span id="recordCount" style="font-family:'IBM Plex Mono',monospace;font-size:.75rem;color:var(--lp-muted);"></span>
-
-                </div>
-
-                <div id="emptyState">
-                    <i class="fas fa-receipt"></i>
-                    <p>Select a date range and click <strong>Fetch Payments</strong>,<br>or click <strong>Load From Orders</strong> to pull CN numbers from active orders.</p>
-                </div>
-
-                <div style="padding:0 16px 16px;" id="tableContainer" style="display:none;">
-                    <table id="payTable" class="table" style="width:100%;display:none;">
-                        <thead>
-                            <tr id="tableHeaderRow">
-                                <!-- Headers injected by JS based on fetch mode -->
-                            </tr>
-                        </thead>
-                        <tbody id="payTableBody"></tbody>
-                    </table>
-                </div>
-            </div>
-
-        </div>
-
-        <footer class="sticky-footer bg-white" style="background:var(--lp-mid)!important;border-top:1px solid var(--lp-border);">
-            <div class="container my-auto">
-                <div class="copyright text-center my-auto">
-                    <span style="color:var(--lp-muted);font-family:'IBM Plex Mono',monospace;font-size:.75rem;">
-                        Leopards Payment Dashboard &mdash; TickBags
-                    </span>
-                </div>
-            </div>
-        </footer>
+<div style="display:flex;flex-direction:column;height:calc(100% - 3px);overflow:hidden;">
+  <div class="topbar">
+    <span class="topbar-title">Finance</span>
+    <span style="font-size:12px;color:#858796;" class="hide-mob">— Leopards Settlements</span>
+    <div style="flex:1"></div>
+    <div class="search-box">
+      <span style="color:#858796;font-size:13px;">🔍</span>
+      <input id="finSearch" placeholder="Search…" style="width:170px;" oninput="filterTable()"/>
     </div>
-</div>
+    <button onclick="exportCSV()" class="btn btn-outline" style="color:#4e73df;">⬇ <span class="hide-mob">Export CSV</span></button>
+  </div>
 
-<div class="modal fade" id="logoutModal" tabindex="-1" role="dialog">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Ready to Leave?</h5>
-                <button class="close" type="button" data-dismiss="modal"><span>&times;</span></button>
-            </div>
-            <div class="modal-body">Select "Logout" below to end your current session.</div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-                <a class="btn btn-primary" href="login.html">Logout</a>
-            </div>
-        </div>
+  <div style="flex:1;overflow:auto;padding:16px;">
+
+    <!-- Date filter -->
+    <div class="section-card" style="padding:14px 16px;margin-bottom:16px;display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;">
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">From</label>
+        <input type="date" id="fromDate" style="background:#f8f9fc;border:1px solid #e3e6f0;color:#3a3b45;border-radius:7px;padding:6px 9px;font-size:12px;outline:none;cursor:pointer;font-family:'DM Sans',sans-serif;"/>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">To</label>
+        <input type="date" id="toDate" style="background:#f8f9fc;border:1px solid #e3e6f0;color:#3a3b45;border-radius:7px;padding:6px 9px;font-size:12px;outline:none;cursor:pointer;font-family:'DM Sans',sans-serif;"/>
+      </div>
+      <button onclick="fetchPayments()" id="fetchBtn" style="padding:8px 18px;border-radius:8px;border:none;background:#F5C400;color:#111;cursor:pointer;font-size:13px;font-weight:700;font-family:'DM Sans',sans-serif;">⚡ Fetch</button>
+      <button onclick="loadFromOrders()" style="padding:8px 16px;border-radius:8px;border:1.5px solid #e3e6f0;background:#fff;color:#4e73df;cursor:pointer;font-size:12px;font-weight:600;font-family:'DM Sans',sans-serif;">📦 Load From Orders</button>
     </div>
+
+    <!-- KPI grid -->
+    <div class="kpi-grid" id="kpiGrid">
+      <div class="kpi-card"><div class="kpi-bar" style="background:#d4a800;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Total COD</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiTotalCOD">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiTotalSub">0 orders</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#36b9cc;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Shipping Charges</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiShip">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">total billed</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#e74a3b;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Unpaid Delivered</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiUnpaidDeliv">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">COD unsettled</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#f6c23e;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Unpaid Shipping</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiUnpaidShip">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">charges pending</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#6f42c1;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Net Receivable</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiNet">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">(Unpaid COD×96%) − Ship.</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#1cc88a;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Delivered</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiDeliv">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiDelivSub">0 orders</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#e74a3b;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Returned</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiRet">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiRetSub">0 orders</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#f6c23e;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Pending</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiPend">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiPendSub">0 orders</div></div>
+    </div>
+
+    <!-- Table -->
+    <div class="section-card">
+      <div class="section-header" style="flex-wrap:wrap;">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Payment Records</span>
+        <span class="section-count" id="recCount">0</span>
+        <div style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap;">
+          <button class="filter-pill active" data-filt="all" onclick="setFilt(this)">All</button>
+          <button class="filter-pill" data-filt="ship-paid" onclick="setFilt(this)">Ship Paid</button>
+          <button class="filter-pill" data-filt="cod-unpaid" onclick="setFilt(this)">Delivered & COD Unpaid</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="fin-table" id="finTable">
+          <thead>
+            <tr><th>Order ID</th><th>CN #</th><th>Products</th><th>COD</th><th>Status</th><th>Ship.</th><th>Ship. Paid</th><th>COD Paid</th><th>Net</th><th>Invoice</th></tr>
+          </thead>
+          <tbody id="finBody">
+            <tr><td colspan="10" style="padding:36px;text-align:center;color:#858796;font-size:13px;">Fetch data using the date range above.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </div>
 
-<script src="static/assets/vendor/jquery/jquery.min.js"></script>
-<script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-<script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-<script src="static/assets/js/sb-admin-2.min.js"></script>
-<script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
-<script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
+<style>
+  .filter-pill { padding: 4px 11px; border-radius: 99px; border: none; cursor: pointer; font-size: 11px; font-weight: 500; background: #f8f9fc; color: #858796; transition: background 0.15s; font-family: 'DM Sans', sans-serif; }
+  .filter-pill.active { background: #4e73df; color: #fff; }
+</style>
+{% endblock %}
 
+{% block extra_js %}
 <script>
+let allRecords = [];
+let curFilt = 'all';
 
-    function parseBilledCharges(val) {
-    if (val === null || val === undefined || val === '') return NaN;
-    // May be comma-separated e.g. "-5280.00,5580.00" — sum all parts
-    const parts = String(val).split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
-    if (!parts.length) return NaN;
-    return parts.reduce((a, b) => a + b, 0);
-}
-
-/* =========================================================
-   Globals
-   ========================================================= */
-let dtInstance   = null;
-let allRows      = [];
-let hasProductData = false;
-
-/* =========================================================
-   Helpers
-   ========================================================= */
-function showLoading(msg) {
-    document.getElementById('loadingText').textContent = msg || 'Fetching data…';
-    document.getElementById('loadingOverlay').classList.add('active');
-}
-function hideLoading() {
-    document.getElementById('loadingOverlay').classList.remove('active');
-}
-function showError(msg) {
-    document.getElementById('errorMsg').textContent = msg;
-    const t = document.getElementById('errorToast');
-    t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 5000);
-}
-function fmtPKR(val) {
-    const n = parseFloat(val) || 0;
-    return 'Rs ' + n.toLocaleString('en-PK');
-}
-let activeFilter = 'all';
-function setFilter(name) {
-    activeFilter = name;
-    document.querySelectorAll('.filter-pill').forEach(el => el.classList.remove('active'));
-    const map = { 'all': 'filterAll', 'ship-paid': 'filterShipPaid', 'delivered-unpaid': 'filterDeliveredUnpaid' };
-    document.getElementById(map[name]).classList.add('active');
-    if (dtInstance) dtInstance.draw();
-}
-
-// Registered once — references activeFilter by closure
-$.fn.dataTable.ext.search.push(function(settings, data, dataIndex) {
-    if (settings.nTable.id !== 'payTable') return true;  // only apply to our table
-    if (activeFilter === 'all') return true;
-    const row = document.querySelector(`#payTable tbody tr:nth-child(${dataIndex + 1})`);
-    if (!row) return true;
-    if (activeFilter === 'ship-paid')        return row.dataset.shipPaid === 'true';
-    if (activeFilter === 'delivered-unpaid') return row.dataset.delivered === 'true' && row.dataset.codPaid === 'false';
-    return true;
-});
-
-function statusBadgeOrder(status) {
-    if (!status) return `<span class="badge-status unbooked"><i class="fas fa-box"></i> Un-Booked</span>`;
-    const s = status.toLowerCase();
-    if (s.includes('delivered')) return `<span class="badge-status delivered"><i class="fas fa-check-circle"></i> Delivered</span>`;
-    if (s.includes('booked'))    return `<span class="badge-status booked"><i class="fas fa-cube"></i> Booked</span>`;
-    if (s.includes('return'))    return `<span class="badge-status returned"><i class="fas fa-undo"></i> Returned</span>`;
-    return `<span class="badge-status unbooked">${status}</span>`;
-}
-
-function statusBadgePayment(status) {
-    if (!status || status === 'null' || status === '') {
-        return `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> Unpaid</span>`;
-    }
-    const s = status.toLowerCase();
-    if (s.includes('paid') || s.includes('settled') || s.includes('cleared')) {
-        return `<span class="badge-pay paid"><i class="fas fa-check-circle"></i> Paid</span>`;
-    }
-    if (s.includes('pending') || s.includes('process')) {
-        return `<span class="badge-pay pending"><i class="fas fa-clock"></i> Pending</span>`;
-    }
-    return `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> ${status}</span>`;
-}
-
-function shippingPaidBadge(oldInvoiceNo) {
-    const hasPaid = oldInvoiceNo && String(oldInvoiceNo).trim() !== '' && String(oldInvoiceNo).trim() !== 'null';
-    if (hasPaid) {
-        return {
-            badge: `<span class="badge-pay paid"><i class="fas fa-check-circle"></i> Paid</span>`,
-            isPaid: true
-        };
-    }
-    return {
-        badge: `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> Unpaid</span>`,
-        isPaid: false
-    };
-}
-
-/* =========================================================
-   Default dates (last 30 days)
-   ========================================================= */
-(function initDates() {
-    const today = new Date();
-    const prior = new Date();
-    prior.setDate(today.getDate() - 30);
-    const fmt = d => d.toISOString().split('T')[0];
-    document.getElementById('toDate').value   = fmt(today);
-    document.getElementById('fromDate').value = fmt(prior);
+// Init dates
+(function() {
+  const now = new Date();
+  const from = new Date(); from.setDate(from.getDate()-30);
+  document.getElementById('toDate').value = now.toISOString().split('T')[0];
+  document.getElementById('fromDate').value = from.toISOString().split('T')[0];
 })();
 
-/* =========================================================
-   STRATEGY 1 — Fetch by date range (Leopards API)
-   ========================================================= */
-async function fetchPayments() {
-    const from = document.getElementById('fromDate').value;
-    const to   = document.getElementById('toDate').value;
-    if (!from || !to) { showError('Please select both From and To dates.'); return; }
+function fPKR(n) { return 'Rs ' + Math.round(n).toLocaleString('en-PK'); }
 
-    hasProductData = true;   // ← always show product column now
-
-    showLoading('Fetching packets by date range…');
-    document.getElementById('btnFetch').disabled = true;
-
-    try {
-        const resp = await fetch(`/api/leopards/last-status?from_date=${from}&to_date=${to}`);
-        const data = await resp.json();
-
-        if (!data.status || data.status == 0) throw new Error(data.error || 'API returned an error');
-
-        const packets = data.packet_list || [];
-        if (!packets.length) {
-            showError('No packets found for this date range.');
-            renderTable([]);
-            return;
-        }
-
-        /* ── Fetch special_instructions from trackBookedPacket in batches of 20 ── */
-        showLoading(`Found ${packets.length} packets — fetching product names…`);
-        const cnNums = packets.map(p => p.tracking_number).filter(Boolean);
-        const trackMap = {};
-
-        const trackChunks = [];
-        for (let i = 0; i < cnNums.length; i += 20) trackChunks.push(cnNums.slice(i, i + 20));
-
-        for (const chunk of trackChunks) {
-            try {
-                const r = await fetch('/api/leopards/track-packets?track_numbers=' + chunk.join(','));
-                const d = await r.json();
-                if (d.status === 1 && Array.isArray(d.packet_list)) {
-                    d.packet_list.forEach(p => {
-                        trackMap[String(p.track_number)] = p.special_instructions || '—';
-                    });
-                }
-            } catch (_) {}
-        }
-
-        /* Inject product name into each packet */
-        packets.forEach(p => {
-            const cn = String(p.tracking_number || '');
-            p.products   = trackMap[cn] || '—';
-            p.item_image = '';   // no image from Leopards, leave blank
-        });
-
-        showLoading(`Fetching payment details…`);
-        await enrichAndRender(packets, cnNums);
-
-    } catch (e) {
-        showError(e.message);
-    } finally {
-        hideLoading();
-        document.getElementById('btnFetch').disabled = false;
-    }
+function fetchPayments() {
+  const from = document.getElementById('fromDate').value;
+  const to   = document.getElementById('toDate').value;
+  const btn  = document.getElementById('fetchBtn');
+  btn.textContent = '⏳ Loading…'; btn.disabled = true;
+  fetch(`/api/leopards/last-status?from_date=${from}&to_date=${to}`)
+    .then(r => r.json())
+    .then(data => {
+      btn.textContent = '⚡ Fetch'; btn.disabled = false;
+      const packets = data.packet_list || [];
+      allRecords = packets.map(p => ({
+        order_id: p.booked_packet_order_id || '—',
+        cn:       p.track_number || '—',
+        products: p.products || p.booked_packet_order_id || '—',
+        cod:      Number(p.booked_packet_collect_amount || 0),
+        status:   p.booked_packet_status || '—',
+        ship_charges: Number(p.booked_packet_weight_charges || 0),
+        ship_paid: false, cod_paid: false,
+        inv_date: '—',
+        net: 0,
+      }));
+      renderTable(); updateKPIs();
+    })
+    .catch(() => { btn.textContent='⚡ Fetch'; btn.disabled=false; showToast('Failed to fetch data'); });
 }
 
-
-/* =========================================================
-   STRATEGY 2 — Load from active Shopify orders
-   ========================================================= */
-async function fetchAllActive() {
-    hasProductData = true;
-
-    showLoading('Loading CN numbers from active orders…');
-    document.getElementById('btnFetchAll').disabled = true;
-
-    try {
-        const resp = await fetch('/api/leopards/active-cns');
-        const data = await resp.json();
-
-        if (!data.cn_numbers || !data.cn_numbers.length) {
-            showError('No active CN numbers found in current orders.');
-            return;
-        }
-
-        showLoading(`Found ${data.cn_numbers.length} active CN numbers — fetching payment info…`);
-        await enrichAndRender(data.order_map || [], data.cn_numbers);
-
-    } catch(e) {
-        showError(e.message);
-    } finally {
-        hideLoading();
-        document.getElementById('btnFetchAll').disabled = false;
-    }
+function loadFromOrders() {
+  fetch('/api/leopards/active-cns')
+    .then(r=>r.json())
+    .then(data => {
+      allRecords = (data.order_map||[]).map(p=>({
+        order_id: p.booked_packet_order_id||p.order_id||'—',
+        cn: p.tracking_number||'—',
+        products: p.products||p.product_title||'—',
+        cod: Number(p.booked_packet_collect_amount||0),
+        status: p.booked_packet_status||'—',
+        ship_charges: 0, ship_paid: false, cod_paid: false, inv_date:'—', net:0,
+      }));
+      renderTable(); updateKPIs();
+      showToast('Loaded '+allRecords.length+' records from active orders');
+    })
+    .catch(()=>showToast('Failed to load orders'));
 }
 
-/* =========================================================
-   Enrich with payment + shipping charges, then render
-   ========================================================= */
-async function enrichAndRender(packetList, cnNums) {
-    const chunks = [];
-    for (let i = 0; i < cnNums.length; i += 50) chunks.push(cnNums.slice(i, i + 50));
-
-    let payMap = {};
-    for (const chunk of chunks) {
-        try {
-            const r = await fetch('/api/leopards/payment-details?cn_numbers=' + chunk.join(','));
-            const d = await r.json();
-            if (d.payment_list) {
-                d.payment_list.forEach(p => { payMap[String(p.booked_packet_cn)] = p; });
-            }
-        } catch(_) {}
-    }
-
-    let chargesMap = {};
-    for (const chunk of chunks) {
-        try {
-            const r = await fetch('/api/leopards/shipping-charges?cn_numbers=' + chunk.join(','));
-            const d = await r.json();
-            if (d.data) {
-                d.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
-            }
-        } catch(_) {}
-    }
-
-    renderTable(packetList, payMap, chargesMap);
+function updateKPIs() {
+  const r = allRecords;
+  const totalCOD     = r.reduce((s,x)=>s+x.cod,0);
+  const totalShip    = r.reduce((s,x)=>s+x.ship_charges,0);
+  const delivRecs    = r.filter(x=>(x.status||'').toUpperCase().includes('DELIVERED'));
+  const retRecs      = r.filter(x=>(x.status||'').toLowerCase().includes('return'));
+  const pendRecs     = r.filter(x=>x.status==='Booked'||x.status==='Un-Booked');
+  const unpaidDeliv  = delivRecs.filter(x=>!x.cod_paid).reduce((s,x)=>s+x.cod,0);
+  const unpaidShip   = r.filter(x=>!x.ship_paid).reduce((s,x)=>s+x.ship_charges,0);
+  const net          = unpaidDeliv*0.96 - unpaidShip;
+  document.getElementById('kpiTotalCOD').textContent   = fPKR(totalCOD);
+  document.getElementById('kpiTotalSub').textContent   = r.length + ' orders';
+  document.getElementById('kpiShip').textContent       = fPKR(totalShip);
+  document.getElementById('kpiUnpaidDeliv').textContent= fPKR(unpaidDeliv);
+  document.getElementById('kpiUnpaidShip').textContent = fPKR(unpaidShip);
+  document.getElementById('kpiNet').textContent        = fPKR(net);
+  document.getElementById('kpiDeliv').textContent      = fPKR(delivRecs.reduce((s,x)=>s+x.cod,0));
+  document.getElementById('kpiDelivSub').textContent   = delivRecs.length + ' orders';
+  document.getElementById('kpiRet').textContent        = fPKR(retRecs.reduce((s,x)=>s+x.cod,0));
+  document.getElementById('kpiRetSub').textContent     = retRecs.length + ' orders';
+  document.getElementById('kpiPend').textContent       = fPKR(pendRecs.reduce((s,x)=>s+x.cod,0));
+  document.getElementById('kpiPendSub').textContent    = pendRecs.length + ' orders';
 }
 
-/* =========================================================
-   Render DataTable
-   ========================================================= */
-function renderTable(packets, payMap = {}, chargesMap = {}) {
-    if (dtInstance) { dtInstance.destroy(); dtInstance = null; }
-    
-    activeFilter = 'all';
-document.querySelectorAll('.filter-pill').forEach(el => el.classList.remove('active'));
-const allPill = document.getElementById('filterAll');
-if (allPill) allPill.classList.add('active');
-
-    const tbody = document.getElementById('payTableBody');
-    tbody.innerHTML = '';
-    allRows = [];
-
-    document.getElementById('emptyState').style.display = 'none';
-    document.getElementById('tableContainer').style.display = '';
-    document.getElementById('payTable').style.display = '';
-    document.getElementById('btnExport').style.display = '';
-
-    if (!packets || !packets.length) {
-        document.getElementById('emptyState').style.display = 'block';
-        document.getElementById('tableContainer').style.display = 'none';
-        document.getElementById('payTable').style.display = 'none';
-        document.getElementById('kpiRow').style.display = 'none';
-        return;
-    }
-
-    /* Build table header */
-    const headerRow = document.getElementById('tableHeaderRow');
-    if (hasProductData) {
-        headerRow.innerHTML = `
-    <th>Order ID</th><th>CN #</th><th>Products</th>
-    <th>Order Total</th><th>Status</th>
-    <th>Ship. Charges</th><th>Ship. Paid</th>
-    <th>COD Paid</th><th>Net Amount</th><th>Invoice Date</th>`;
-    } else {
-        headerRow.innerHTML = `
-    <th>Order ID</th><th>CN #</th>
-    <th>Order Total</th><th>Status</th>
-    <th>Ship. Charges</th><th>Ship. Paid</th>
-    <th>COD Paid</th><th>Net Amount</th><th>Invoice Date</th>`;
-    }
-
-    /* ---- Accumulators ---- */
-    let totalCOD            = 0;
-    let totalCharges        = 0;
-    let unpaidShippingTotal = 0;
-    let unpaidDeliveredCOD  = 0;
-
-    /* ---- NEW accumulators ---- */
-    let deliveredCount = 0, deliveredCOD = 0;
-    let returnedCount  = 0, returnedCOD  = 0;
-    let pendingCount   = 0, pendingCOD   = 0;
-
-    packets.forEach(p => {
-        const cn       = p.tracking_number || p.cn || '';
-        const oid      = p.booked_packet_order_id || p.order_id || '—';
-        const products = p.products || p.product_title || '—';
-        const cod      = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
-        totalCOD      += cod;
-
-        const pay     = payMap[cn]     || {};
-        const charges = chargesMap[cn] || {};
-
-        /* Shipping charge */
-        const totalCharged = parseBilledCharges(charges.billed_charges);
-        const billChg = !isNaN(totalCharged)
-            ? Math.round(totalCharged * 1.25 * 1.16)
-            : Math.round(charges.gross_charges || 0);
-        if (billChg) totalCharges += billChg;
-
-        /* Shipping PAID = billed_charges present */
-        const billedChargesVal = charges.billed_charges || '';
-        const shipPaid         = shippingPaidBadge(billedChargesVal);
-        if (!shipPaid.isPaid && billChg) unpaidShippingTotal += billChg;
-
-        /* COD PAID = invoice_cheque_date present */
-        const invChequeDate = charges.invoice_cheque_date || '';
-        const isCODPaid     = invChequeDate.trim() !== ''
-                           && invChequeDate.trim() !== 'null';
-        const codPayBadge   = isCODPaid
-            ? `<span class="badge-pay paid"><i class="fas fa-check-circle"></i> Paid</span>`
-            : `<span class="badge-pay unpaid"><i class="fas fa-times-circle"></i> Unpaid</span>`;
-
-        const invDate     = invChequeDate || pay.invoice_cheque_date || '—';
-        const orderStatus = p.booked_packet_status || '—';
-        const isDelivered = orderStatus.toLowerCase().includes('delivered');
-
-        if (isDelivered && !isCODPaid) unpaidDeliveredCOD += cod;
-
-        /* ---- NEW: classify order into Delivered / Returned / Pending ---- */
-        const isReturned = orderStatus.toLowerCase().includes('return');
-        const isPending  = !isDelivered && !isReturned;
-
-        if (isDelivered)      { deliveredCount++; deliveredCOD += cod; }
-        else if (isReturned)  { returnedCount++;  returnedCOD  += cod; }
-        else                  { pendingCount++;   pendingCOD   += cod; }
-
-        /* Net amount column */
-        const netAmount = isDelivered ? (cod * 0.96) - billChg : -billChg;
-        const netColor  = netAmount >= 0 ? 'var(--lp-green)' : 'var(--lp-red)';
-        const netCell   = `<span style="font-family:'IBM Plex Mono',monospace;color:${netColor}">${fmtPKR(netAmount)}</span>`;
-
-        /* Save for CSV */
-        const row = {
-            order_id: oid, cn_number: cn, products, order_total: cod,
-            order_status: orderStatus, ship_charges: billChg,
-            ship_paid: shipPaid.isPaid ? 'Paid' : 'Unpaid',
-            cod_pay_status: isCODPaid ? 'Paid' : 'Unpaid',
-            net_amount: netAmount, inv_date: invDate
-        };
-        allRows.push(row);
-
-        /* Product cell */
-        let productCell = '';
-        if (hasProductData) {
-    const imgHtml = p.item_image
-        ? `<img src="${p.item_image}" alt="Product" class="product-img"
-                onerror="this.style.display='none'">`
-        : '';
-    productCell = `<div class="product-cell">
-        ${imgHtml}
-        <div class="product-info"><p class="product-title">${products}</p></div>
-    </div>`;
+function getFiltered() {
+  const q = document.getElementById('finSearch').value.toLowerCase();
+  return allRecords.filter(r => {
+    const matchQ = !q || r.order_id.toLowerCase().includes(q) || r.cn.toLowerCase().includes(q) || r.products.toLowerCase().includes(q);
+    const matchF = curFilt==='all' ? true : curFilt==='ship-paid' ? r.ship_paid : ((r.status||'').toUpperCase().includes('DELIVERED') && !r.cod_paid);
+    return matchQ && matchF;
+  });
 }
 
-        /* Build <tr> */
-        const tr = document.createElement('tr');
-tr.dataset.shipPaid  = shipPaid.isPaid ? 'true' : 'false';
-tr.dataset.delivered = isDelivered ? 'true' : 'false';
-tr.dataset.codPaid   = isCODPaid   ? 'true' : 'false';
-
-
-const commonCells = `
-    <td class="mono" data-order="${cod}">${cod ? fmtPKR(cod) : '—'}</td>
-    <td data-order="${orderStatus}">${statusBadgeOrder(orderStatus)}</td>
-    <td class="mono" data-order="${billChg}">${billChg ? fmtPKR(billChg) : '—'}</td>
-    <td data-order="${shipPaid.isPaid ? 1 : 0}">${shipPaid.badge}</td>
-    <td data-order="${isCODPaid ? 1 : 0}">${codPayBadge}</td>
-    <td data-order="${netAmount}">${netCell}</td>
-    <td class="mono" data-order="${invDate}">${invDate}</td>
-`;
-
-tr.innerHTML = hasProductData
-    ? `<td class="mono" style="color:var(--lp-yellow)" data-order="${oid}">${oid}</td>
-       <td class="mono" data-order="${cn}">${cn || '—'}</td>
-       <td>${productCell}</td>${commonCells}`
-    : `<td class="mono" style="color:var(--lp-yellow)" data-order="${oid}">${oid}</td>
-       <td class="mono" data-order="${cn}">${cn || '—'}</td>${commonCells}`;
-
-tbody.appendChild(tr);
-
-    });
-
-    /* ---- Init DataTable ---- */
-dtInstance = $('#payTable').DataTable({
-    order: [[0, 'desc']],
-    pageLength: 25,
-    orderCellsTop: true,
-    dom: '<"d-flex justify-content-between align-items-center px-1 py-2"lf>t<"d-flex justify-content-between align-items-center px-1 py-2"ip>',
-    columnDefs: [
-        { type: 'num', targets: hasProductData ? [3, 5, 8] : [2, 4, 7] }   // numeric cols: COD, charges, net
-    ],
-    language: {
-        search: '',
-        searchPlaceholder: 'Search…',
-        lengthMenu: 'Show _MENU_'
-    }
-});
-
-
-    /* Net Receivable */
-    const netReceivable = (unpaidDeliveredCOD * 0.96) - unpaidShippingTotal;
-
-    /* ---- Update existing KPI cards ---- */
-    document.getElementById('kpiRow').style.display = '';
-    document.getElementById('kpiTotal').textContent           = packets.length;
-    document.getElementById('kpiCOD').textContent             = fmtPKR(Math.round(totalCOD));
-    document.getElementById('kpiCharges').textContent         = totalCharges ? fmtPKR(totalCharges) : '—';
-    document.getElementById('kpiUnpaidDelivered').textContent = unpaidDeliveredCOD ? fmtPKR(unpaidDeliveredCOD) : '—';
-    document.getElementById('kpiUnpaidCharges').textContent   = unpaidShippingTotal ? fmtPKR(unpaidShippingTotal) : '—';
-    document.getElementById('kpiReceivable').textContent      = fmtPKR(netReceivable);
-
-    /* ---- NEW: Delivered / Returned / Pending — amount in main, count in sub ---- */
-    document.getElementById('kpiDeliveredAmt').textContent   = fmtPKR(Math.round(deliveredCOD));
-    document.getElementById('kpiDeliveredCount').textContent = deliveredCount;
-
-    document.getElementById('kpiReturnedAmt').textContent    = fmtPKR(Math.round(returnedCOD));
-    document.getElementById('kpiReturnedCount').textContent  = returnedCount;
-
-    document.getElementById('kpiPendingAmt').textContent     = fmtPKR(Math.round(pendingCOD));
-    document.getElementById('kpiPendingCount').textContent   = pendingCount;
-
-    document.getElementById('recordCount').textContent  = `${packets.length} records`;
-    document.getElementById('lastUpdated').textContent  = 'Updated ' + new Date().toLocaleTimeString();
+function renderTable() {
+  const rows = getFiltered();
+  document.getElementById('recCount').textContent = rows.length;
+  if (!rows.length) {
+    document.getElementById('finBody').innerHTML = '<tr><td colspan="10" style="padding:36px;text-align:center;color:#858796;font-size:13px;">No records match your filters.</td></tr>';
+    return;
+  }
+  document.getElementById('finBody').innerHTML = rows.map(r => {
+    const net = r.net || (r.status&&r.status.toUpperCase().includes('DELIVERED') ? r.cod*0.96 - r.ship_charges : 0);
+    return `<tr>
+      <td style="font-family:'DM Mono',monospace;font-weight:700;color:#4e73df;font-size:11px;">${r.order_id}</td>
+      <td style="font-family:'DM Mono',monospace;color:#6f42c1;font-size:11px;">${r.cn}</td>
+      <td style="color:#3a3b45;max-width:180px;"><div style="font-size:11px;line-height:1.3;">${r.products}</div></td>
+      <td style="font-family:'DM Mono',monospace;font-weight:600;color:#3a3b45;white-space:nowrap;">${fPKR(r.cod)}</td>
+      <td><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;background:#e8f8fb;color:#0a5c6e;white-space:nowrap;">${r.status}</span></td>
+      <td style="font-family:'DM Mono',monospace;color:#3a3b45;white-space:nowrap;">${r.ship_charges ? fPKR(r.ship_charges) : '—'}</td>
+      <td><span class="${r.ship_paid?'paid-badge':'unpaid-badge'}">${r.ship_paid?'✓ Paid':'✕ Unpaid'}</span></td>
+      <td><span class="${r.cod_paid?'paid-badge':'unpaid-badge'}">${r.cod_paid?'✓ Paid':'✕ Unpaid'}</span></td>
+      <td style="font-family:'DM Mono',monospace;font-weight:700;color:${net>=0?'#1cc88a':'#e74a3b'};white-space:nowrap;">${fPKR(net)}</td>
+      <td style="font-size:11px;color:#858796;white-space:nowrap;">${r.inv_date}</td>
+    </tr>`;
+  }).join('');
 }
 
-/* =========================================================
-   CSV Export
-   ========================================================= */
+function filterTable() { renderTable(); }
+
+function setFilt(btn) {
+  document.querySelectorAll('.filter-pill').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active'); curFilt = btn.dataset.filt; renderTable();
+}
+
 function exportCSV() {
-    if (!allRows.length) return;
-
-    let headers, lines;
-    if (hasProductData) {
-        headers = ['Order ID','CN #','Products','Order Total','Order Status','Ship Charges','Ship Paid','COD Payment Status','Invoice Date'];
-        lines = [headers.join(',')];
-        allRows.forEach(r => {
-            lines.push([
-                `"${r.order_id}"`,
-                `"${r.cn_number}"`,
-                `"${String(r.products).replace(/"/g,'""')}"`,
-                r.order_total,
-                `"${r.order_status}"`,
-                r.ship_charges,
-                `"${r.ship_paid}"`,
-                `"${r.pay_status || 'Unpaid'}"`,
-                `"${r.inv_date}"`
-            ].join(','));
-        });
-    } else {
-        headers = ['Order ID','CN #','Order Total','Order Status','Ship Charges','Ship Paid','COD Payment Status','Invoice Date'];
-        lines = [headers.join(',')];
-        allRows.forEach(r => {
-            lines.push([
-                `"${r.order_id}"`,
-                `"${r.cn_number}"`,
-                r.order_total,
-                `"${r.order_status}"`,
-                r.ship_charges,
-                `"${r.ship_paid}"`,
-                `"${r.pay_status || 'Unpaid'}"`,
-                `"${r.inv_date}"`
-            ].join(','));
-        });
-    }
-
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-    const a    = document.createElement('a');
-    a.href     = URL.createObjectURL(blob);
-    a.download = `payments_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
+  const rows = getFiltered();
+  const lines = [['Order ID','CN #','Products','COD','Status','Ship Charges','Ship Paid','COD Paid','Net','Invoice Date']];
+  rows.forEach(r => {
+    const net = r.net || (r.status&&r.status.toUpperCase().includes('DELIVERED') ? r.cod*0.96 - r.ship_charges : 0);
+    lines.push([r.order_id, r.cn, `"${r.products}"`, r.cod, r.status, r.ship_charges, r.ship_paid?'Yes':'No', r.cod_paid?'Yes':'No', Math.round(net), r.inv_date]);
+  });
+  const blob = new Blob([lines.map(l=>l.join(',')).join('\n')], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `finance-${document.getElementById('toDate').value}.csv`;
+  a.click();
 }
-
-document.getElementById('emptyState').style.display = 'block';
 </script>
-
-</body>
-</html>
+{% endblock %}

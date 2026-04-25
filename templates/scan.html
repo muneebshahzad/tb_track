@@ -1,335 +1,221 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Tick Bags Scanner</title>
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css">
+{% extends 'base.html' %}
+{% block title %}TB Track – Scan Orders{% endblock %}
 
-  <style>
-    body { background-color: #f4f4f4; }
-    .hidden { display: none !important; }
-    .large-button { width: 100%; height: 100px; font-size: 1.5em; font-weight: bold; }
+{% block content %}
+<style>
+  .scan-mode-btn { display:flex; align-items:center; gap:14px; padding:18px 20px; border-radius:12px; border:1px solid #e3e6f0; background:#fff; cursor:pointer; text-align:left; transition:all 0.18s; box-shadow:0 1px 4px rgba(0,0,0,0.05); font-family:'DM Sans',sans-serif; width:100%; }
+  .scan-mode-btn:hover { box-shadow:0 4px 18px rgba(78,115,223,0.15); }
+  .scan-input-bar { background:#fff; border-radius:12px; border:1px solid #e3e6f0; padding:14px 16px; margin-bottom:14px; display:flex; gap:8px; align-items:center; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+  .scan-input-bar input { flex:1; border:none; outline:none; font-size:13px; color:#3a3b45; font-family:'DM Sans',sans-serif; background:transparent; }
+  .scan-list-item { background:#fff; border-radius:9px; border:1px solid #e3e6f0; padding:10px 14px; display:flex; align-items:center; gap:10px; }
+</style>
 
-    #scanner-container {
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background-color: rgba(0, 0, 0, 0.8); z-index: 999;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-    }
-    #reader {
-        width: 90%; max-width: 500px; background-color: white; border: 2px solid #ddd;
-    }
-    #close-scanner-btn {
-        position: absolute; top: 20px; right: 20px; font-size: 2em; color: white; cursor: pointer;
-    }
+<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+  <div class="topbar">
+    <button id="backBtn" onclick="goHome()" style="display:none;align-items:center;gap:5px;padding:5px 12px;border-radius:8px;border:1.5px solid #e3e6f0;background:none;cursor:pointer;font-size:12px;color:#858796;font-family:'DM Sans',sans-serif;">← Back</button>
+    <span class="topbar-title" id="topbarTitle">Scan Orders</span>
+    <span id="topbarSub" style="font-size:12px;color:#858796;display:none;"></span>
+  </div>
 
-    #scan-feedback {
-        position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%);
-        width: 90%; max-width: 400px; padding: 15px; border-radius: 8px;
-        text-align: center; font-size: 1.2em; font-weight: bold; color: white;
-        z-index: 1000; transition: bottom 0.3s ease-in-out;
-    }
-    #scan-feedback.show { bottom: 20px; }
-    #scan-feedback.success { background-color: #28a745; }
-    #scan-feedback.error { background-color: #dc3545; }
+  <div style="flex:1;overflow:auto;padding:20px;">
 
-    .order-item { display: flex; align-items: center; margin-bottom: 10px; }
-    .order-item img { width: 50px; height: 50px; margin-right: 15px; border-radius: 4px; }
+    <!-- Home -->
+    <div id="homeView" style="max-width:500px;margin:40px auto;display:flex;flex-direction:column;gap:12px;">
+      <div style="text-align:center;margin-bottom:16px;">
+        <div style="font-size:36px;margin-bottom:6px;">📱</div>
+        <div style="font-size:17px;font-weight:700;color:#3a3b45;">Order Scanner</div>
+        <div style="font-size:12px;color:#858796;margin-top:3px;">Select a mode to get started</div>
+      </div>
+      <button class="scan-mode-btn" onclick="startMode('Search','#4e73df')" id="btnSearch">
+        <div style="width:48px;height:48px;border-radius:12px;background:rgba(78,115,223,0.1);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">🔍</div>
+        <div><div style="font-size:14px;font-weight:700;color:#3a3b45;">Search Order</div><div style="font-size:12px;color:#858796;margin-top:2px;">Look up any order by ID or tracking number</div></div>
+        <div style="margin-left:auto;color:#858796;font-size:16px;">›</div>
+      </button>
+      <button class="scan-mode-btn" onclick="startMode('Dispatch','#1cc88a')" id="btnDispatch">
+        <div style="width:48px;height:48px;border-radius:12px;background:rgba(28,200,138,0.1);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">🚛</div>
+        <div><div style="font-size:14px;font-weight:700;color:#3a3b45;">Scan for Dispatch</div><div style="font-size:12px;color:#858796;margin-top:2px;">Build a dispatch list and generate loadsheet</div></div>
+        <div style="margin-left:auto;color:#858796;font-size:16px;">›</div>
+      </button>
+      <button class="scan-mode-btn" onclick="startMode('Return','#e74a3b')" id="btnReturn">
+        <div style="width:48px;height:48px;border-radius:12px;background:rgba(231,74,59,0.1);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">↩</div>
+        <div><div style="font-size:14px;font-weight:700;color:#3a3b45;">Scan for Return</div><div style="font-size:12px;color:#858796;margin-top:2px;">Build a return list and apply return tags</div></div>
+        <div style="margin-left:auto;color:#858796;font-size:16px;">›</div>
+      </button>
+    </div>
 
-    #search-modal-body .order-item img {
-        width: 100px;
-        height: 100px;
-        object-fit: cover;
-    }
-    #search-modal-body .order-item {
-        padding: 10px; border-bottom: 1px solid #eee;
-    }
-    #search-modal-body .order-item:last-child { border-bottom: none; }
-
-    .table-items-col img {
-        width: 40px;
-        height: 40px;
-        margin-right: 10px;
-        border-radius: 4px;
-    }
-    .table-items-col div {
-        display: flex;
-        align-items: center;
-        margin-bottom: 5px;
-    }
-  </style>
-  <script src="{{ url_for('static', filename='html5-qrcode.min.js') }}"></script>
-</head>
-<body>
-  <div class="container-fluid mt-4">
-    <div id="main-view">
-      <h2 id="view-title" class="text-center mb-4">Scan Orders</h2>
-      <div id="main-buttons" class="row justify-content-center">
-        <div class="col-md-8 col-lg-6">
-            <div class="col-12 mb-3"><button id="search-btn" class="btn btn-primary large-button"><i class="fas fa-search"></i><br>Search Order</button></div>
-            <div class="col-12 mb-3"><button id="dispatch-btn" class="btn btn-success large-button"><i class="fas fa-truck"></i><br>Scan for Dispatch</button></div>
-            <div class="col-12 mb-3"><button id="return-btn" class="btn btn-danger large-button"><i class="fas fa-undo"></i><br>Scan for Return</button></div>
-        </div>
+    <!-- Scanning view -->
+    <div id="scanView" style="display:none;max-width:760px;margin:0 auto;">
+      <div class="scan-input-bar">
+        <span style="font-size:18px;">📷</span>
+        <input id="scanInput" placeholder="Scan barcode or type order ID / tracking number…" onkeydown="if(event.key==='Enter')doScan()" autofocus/>
+        <button id="scanActionBtn" onclick="doScan()" class="btn btn-primary" style="flex-shrink:0;">+ Add</button>
       </div>
 
-      <div id="list-view" class="hidden">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <button id="back-btn" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back</button>
-          <h3 id="list-title"></h3>
-          <button id="generate-report-btn" class="btn btn-primary">Generate Report</button>
-        </div>
+      <!-- Search result -->
+      <div id="searchResult" style="display:none;background:#fff;border-radius:12px;border:2px solid #1cc88a;padding:14px 16px;margin-bottom:14px;"></div>
 
-        <div class="table-responsive">
-            <table class="table table-bordered table-striped bg-white">
-                <thead class="thead-dark">
-                    <tr>
-                        <th>Order #</th>
-                        <th>Items</th>
-                        <th class="text-center">Total Pieces</th>
-                        <th class="text-center">Source</th>
-                    </tr>
-                </thead>
-                <tbody id="order-list-body">
-                </tbody>
-            </table>
+      <!-- List mode -->
+      <div id="listSection" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:13px;font-weight:600;color:#3a3b45;" id="listTitle">Dispatch List (0)</div>
+          <button id="generateBtn" onclick="generateReport()" style="display:none;padding:7px 16px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:600;font-family:'DM Sans',sans-serif;color:#fff;">Generate Report</button>
         </div>
+        <div id="emptyListMsg" style="text-align:center;padding:36px 0;color:#858796;font-size:13px;background:#fff;border-radius:12px;border:1px dashed #e3e6f0;">Scan your first order to get started</div>
+        <div id="scanListEl" style="display:flex;flex-direction:column;gap:5px;"></div>
       </div>
     </div>
+
   </div>
+</div>
 
-  <div id="scanner-container" class="hidden">
-    <div id="reader"></div>
-    <span id="close-scanner-btn">&times;</span>
-  </div>
+<!-- Feedback toast (scan-specific) -->
+<div id="scanFeedback" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;box-shadow:0 8px 32px rgba(0,0,0,0.2);z-index:10000;"></div>
+{% endblock %}
 
-  <div id="scan-feedback"></div>
-
-  <div class="modal fade" id="search-result-modal" tabindex="-1" role="dialog">
-    <div class="modal-dialog modal-dialog-centered" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="search-modal-title">Order Details</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
-            </div>
-            <div class="modal-body" id="search-modal-body"></div>
-        </div>
-    </div>
-  </div>
-
-<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-
+{% block extra_js %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    let activeList = [];
-    let currentMode = '';
-    let html5QrCode = null;
+const ORDER_DATA = {{ order_details | tojson }};
 
-    const successSound = new Audio("{{ url_for('static', filename='success.mp3') }}");
-    const errorSound = new Audio("{{ url_for('static', filename='error.mp3') }}");
+let scanMode = '';
+let scanList = [];
+let modeColor = '#4e73df';
 
-    const mainButtons = document.getElementById('main-buttons');
-    const listView = document.getElementById('list-view');
-    const listTitle = document.getElementById('list-title');
-    const orderListBody = document.getElementById('order-list-body');
-    const scannerContainer = document.getElementById('scanner-container');
-    const feedbackPanel = document.getElementById('scan-feedback');
-    const generateReportBtn = document.getElementById('generate-report-btn');
+function startMode(mode, color) {
+  scanMode = mode; modeColor = color; scanList = [];
+  document.getElementById('homeView').style.display = 'none';
+  document.getElementById('scanView').style.display = 'block';
+  document.getElementById('backBtn').style.display = 'flex';
+  document.getElementById('topbarTitle').textContent = mode + ' Mode';
+  document.getElementById('topbarSub').style.display = 'inline';
+  document.getElementById('topbarSub').textContent = '— 0 scanned';
 
-    function showMainView() {
-        listView.classList.add('hidden');
-        mainButtons.classList.remove('hidden');
-        document.getElementById('view-title').classList.remove('hidden');
-    }
+  const actionBtn = document.getElementById('scanActionBtn');
+  if (mode === 'Search') {
+    actionBtn.textContent = '🔍 Search';
+    document.getElementById('listSection').style.display = 'none';
+    document.getElementById('searchResult').style.display = 'none';
+  } else {
+    actionBtn.textContent = '+ Add';
+    document.getElementById('listSection').style.display = 'block';
+    document.getElementById('searchResult').style.display = 'none';
+    const genBtn = document.getElementById('generateBtn');
+    genBtn.style.background = color;
+    genBtn.textContent = 'Generate ' + mode + ' Report';
+    renderList();
+  }
+  setTimeout(() => document.getElementById('scanInput').focus(), 200);
+}
 
-    function showListView(mode) {
-        currentMode = mode;
-        activeList = [];
-        mainButtons.classList.add('hidden');
-        document.getElementById('view-title').classList.add('hidden');
-        listView.classList.remove('hidden');
-        listTitle.textContent = `${mode} List (0)`;
-        orderListBody.innerHTML = '<tr><td colspan="4" class="text-center">Scan your first order.</td></tr>';
-        generateReportBtn.className = `btn ${mode === 'Dispatch' ? 'btn-success' : 'btn-danger'}`;
-        generateReportBtn.textContent = `Generate ${mode} Report`;
-        startScanner(); // <<< THE FIX IS HERE
-    }
+function goHome() {
+  document.getElementById('homeView').style.display = 'flex';
+  document.getElementById('scanView').style.display = 'none';
+  document.getElementById('backBtn').style.display = 'none';
+  document.getElementById('topbarTitle').textContent = 'Scan Orders';
+  document.getElementById('topbarSub').style.display = 'none';
+  scanList = []; scanMode = '';
+}
 
-    function showFeedback(message, type) {
-        feedbackPanel.textContent = message;
-        feedbackPanel.className = ``;
-        feedbackPanel.classList.add(type, 'show');
+function findOrder(term) {
+  const t = term.trim().toLowerCase().replace('#','');
+  return ORDER_DATA.find(o =>
+    o.order_id === t || o.order_id.toLowerCase().endsWith(t) ||
+    (o.line_items||[]).some(i => (i.tracking_number||'').toLowerCase() === t)
+  ) || null;
+}
 
-        const soundToPlay = (type === 'success') ? successSound : errorSound;
-        soundToPlay.play().catch(error => {
-            console.error(`Audio playback failed for ${type}.mp3:`, error);
-        });
+function doScan() {
+  const input = document.getElementById('scanInput');
+  const term = input.value.trim();
+  if (!term) return;
+  input.value = '';
 
-        setTimeout(() => { feedbackPanel.classList.remove('show'); }, 2000);
-    }
+  if (scanMode === 'Search') {
+    const o = findOrder(term);
+    if (!o) { showScanFeedback('Order not found!', false); return; }
+    const sr = document.getElementById('searchResult');
+    sr.style.display = 'block';
+    const totalPcs = (o.line_items||[]).reduce((s,i)=>s+i.quantity,0);
+    sr.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-size:14px;font-weight:700;color:#4e73df;font-family:'DM Mono',monospace;">#${o.order_id}</span>
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;background:#dde4fb;color:#2346a8;">${o.status}</span>
+        <span style="margin-left:auto;font-size:13px;font-weight:700;color:#3a3b45;">Rs ${Number(o.total_price||0).toLocaleString('en-PK')}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        ${(o.line_items||[]).map(item=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#f8f9fc;border-radius:7px;">
+            <div style="width:34px;height:34px;border-radius:5px;background:#e3e6f0;display:flex;align-items:center;justify-content:center;font-size:9px;color:#858796;overflow:hidden;flex-shrink:0;">
+              ${item.image_src && item.image_src!=='None' ? `<img src="${item.image_src}" style="width:100%;height:100%;object-fit:cover;">` : 'IMG'}
+            </div>
+            <div><div style="font-size:12px;font-weight:600;color:#3a3b45;">${item.product_title}</div><div style="font-size:11px;color:#858796;">Qty: ${item.quantity}</div></div>
+          </div>`).join('')}
+      </div>`;
+    return;
+  }
 
-    function onScanSuccess(decodedText) {
-        if (currentMode === 'Search') {
-            closeScanner();
-            handleSingleSearch(decodedText);
-        } else {
-            handleOrderAddition(decodedText);
-        }
-    }
+  const o = findOrder(term);
+  if (!o) { showScanFeedback('Order not found!', false); return; }
+  if (scanList.some(x => x.order_id === o.order_id)) { showScanFeedback('Duplicate order!', false); return; }
+  scanList.unshift(o);
+  showScanFeedback('Added: #' + o.order_id, true);
+  renderList();
+  setTimeout(() => document.getElementById('scanInput').focus(), 100);
+}
 
-    function startScanner() {
-        if (!html5QrCode) {
-            html5QrCode = new Html5Qrcode('reader');
-        }
-        scannerContainer.classList.remove('hidden');
-        html5QrCode.start(
-            { facingMode: "environment" },
-            { fps: 10, qrbox: { width: 250, height: 250 } },
-            onScanSuccess
-        ).catch(err => {
-            alert('Could not start camera. Please grant permission and try again.');
-            closeScanner();
-        });
-    }
+function renderList() {
+  const el = document.getElementById('scanListEl');
+  const empty = document.getElementById('emptyListMsg');
+  const genBtn = document.getElementById('generateBtn');
+  const title = document.getElementById('listTitle');
+  title.textContent = scanMode + ' List (' + scanList.length + ')';
+  document.getElementById('topbarSub').textContent = '— ' + scanList.length + ' scanned';
+  genBtn.style.display = scanList.length > 0 ? 'block' : 'none';
+  empty.style.display = scanList.length === 0 ? 'block' : 'none';
+  el.innerHTML = scanList.map((o, i) => {
+    const totalPcs = (o.line_items||[]).reduce((s,it)=>s+it.quantity,0);
+    return `<div class="scan-list-item">
+      <div style="width:26px;height:26px;border-radius:6px;background:rgba(78,115,223,0.1);color:#4e73df;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">${i+1}</div>
+      <span style="font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:#4e73df;">#${o.order_id}</span>
+      <span style="flex:1;font-size:11px;color:#858796;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(o.line_items||[]).map(it=>it.product_title).join(', ')}</span>
+      <span style="font-size:12px;font-weight:600;color:#3a3b45;">${totalPcs} pcs</span>
+      <button onclick="removeFromList('${o.order_id}')" style="width:20px;height:20px;border-radius:50%;border:none;background:#fce8e6;color:#e74a3b;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">×</button>
+    </div>`;
+  }).join('');
+}
 
-    function closeScanner() {
-        if (html5QrCode && html5QrCode.isScanning) {
-            html5QrCode.stop().catch(err => console.error("Error stopping scanner:", err));
-        }
-        scannerContainer.classList.add('hidden');
-    }
+function removeFromList(orderId) {
+  scanList = scanList.filter(o => o.order_id !== orderId);
+  renderList();
+}
 
-    async function handleSingleSearch(searchTerm) {
-        const order = await findOrder(searchTerm);
-        if (order) {
-            const modalTitle = document.getElementById('search-modal-title');
-            const modalBody = document.getElementById('search-modal-body');
+function generateReport() {
+  if (scanList.length === 0) return;
+  if (scanMode === 'Dispatch') {
+    const cnNumbers = scanList.flatMap(o => (o.line_items||[]).map(i=>i.tracking_number).filter(cn=>cn&&cn!=='N/A'));
+    if (!cnNumbers.length) { showToast('No tracking numbers found'); return; }
+    fetch('/generate_loadsheet', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ cn_numbers: cnNumbers })
+    }).then(r=>r.json()).then(d=>{
+      if (d.error) showToast('Error: '+d.error);
+      else { showToast('Loadsheet generated for '+scanList.length+' orders'); scanList=[]; renderList(); }
+    }).catch(()=>showToast('Failed to generate loadsheet'));
+  } else {
+    scanList.forEach(o => {
+      fetch('/apply_tag',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:o.id,tag:'Returned'})}).catch(()=>{});
+    });
+    showToast('Applied Return tag to '+scanList.length+' orders');
+    scanList=[]; renderList();
+  }
+}
 
-            modalTitle.textContent = `Order #${order.order_id}`;
-            modalBody.innerHTML = order.line_items.map(item => `
-                <div class="order-item">
-                    <img src="${item.image_src || ''}" alt="Product Image">
-                    <div class="flex-grow-1">
-                        <strong>${item.product_title}</strong>
-                        <p class="mb-0">Quantity: ${item.quantity}</p>
-                    </div>
-                </div>
-            `).join('');
-
-            $('#search-result-modal').modal('show');
-        } else {
-            alert('Order not found!');
-        }
-    }
-
-    async function handleOrderAddition(searchTerm) {
-        if (!searchTerm) return;
-
-        const order = await findOrder(searchTerm);
-
-        if (!order) {
-            showFeedback('Order not found!', 'error');
-            return;
-        }
-
-        if (activeList.some(existingOrder => existingOrder.order_id === order.order_id)) {
-            showFeedback('Duplicate order!', 'error');
-            return;
-        }
-
-        activeList.unshift(order);
-        populateOrderList();
-        showFeedback(`Added: ${order.order_id}`, 'success');
-    }
-
-    async function findOrder(searchTerm) {
-        try {
-            const response = await fetch(`/scan?term=${encodeURIComponent(searchTerm)}`);
-            if (!response.ok) return null;
-            return await response.json();
-        } catch (error) {
-            return null;
-        }
-    }
-
-    function populateOrderList() {
-        listTitle.textContent = `${currentMode} List (${activeList.length})`;
-        if (activeList.length === 0) {
-            orderListBody.innerHTML = '<tr><td colspan="4" class="text-center">Scan your first order.</td></tr>';
-            return;
-        }
-
-        orderListBody.innerHTML = activeList.map(order => {
-            const totalPieces = order.line_items.reduce((sum, item) => sum + item.quantity, 0);
-            const itemsHtml = order.line_items.map(item => `
-                <div>
-                    <img src="${item.image_src || ''}" alt="Item Image">
-                    <span>${item.product_title} (x${item.quantity})</span>
-                </div>
-            `).join('');
-
-            return `
-                <tr>
-                    <td><strong>#${order.order_id}</strong></td>
-                    <td class="table-items-col">${itemsHtml}</td>
-                    <td class="text-center align-middle"><strong>${totalPieces}</strong></td>
-                    <td class="text-center align-middle"><span class="badge badge-info p-2">${order.source.toUpperCase()}</span></td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    async function generateReport() {
-        if (activeList.length === 0) return alert(`No orders to generate ${currentMode} report.`);
-
-        const shopifyOrders = activeList.filter(o => o.source === 'shopify' && o.id);
-        const tag = currentMode;
-
-        if (shopifyOrders.length > 0) {
-            try {
-                await Promise.all(shopifyOrders.map(order => fetch("/apply_tag", {
-                    method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ order_id: order.id, tag: tag })
-                })));
-            } catch (error) { return alert("Error applying tags."); }
-        }
-
-        if (currentMode === "Dispatch") {
-            const cnNumbers = [...new Set(activeList.flatMap(o => o.line_items.map(item => item.tracking_number)).filter(Boolean))];
-            if (cnNumbers.length > 0) {
-                 try {
-                    const response = await fetch("/generate_loadsheet", {
-                        method: "POST", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ cn_numbers: cnNumbers })
-                    });
-                    const data = await response.json();
-                    if (!response.ok || data.status !== 1) throw new Error(data.error_message || 'Failed to generate loadsheet.');
-                } catch (error) { return alert(`Error generating loadsheet: ${error.message}`); }
-            }
-        }
-
-        alert(`${currentMode} report generated successfully for ${activeList.length} orders!`);
-        activeList = [];
-        populateOrderList();
-        showMainView();
-    }
-
-    function initializeScanMode(mode, action) {
-        successSound.play().catch(()=>{});
-        successSound.pause();
-        errorSound.play().catch(()=>{});
-        errorSound.pause();
-        action(mode);
-    }
-
-    document.getElementById('search-btn').addEventListener('click', () => initializeScanMode('Search', (m) => { currentMode = m; startScanner(); }));
-    document.getElementById('dispatch-btn').addEventListener('click', () => initializeScanMode('Dispatch', showListView));
-    document.getElementById('return-btn').addEventListener('click', () => initializeScanMode('Return', showListView));
-    document.getElementById('close-scanner-btn').addEventListener('click', closeScanner);
-    document.getElementById('back-btn').addEventListener('click', () => { closeScanner(); showMainView(); });
-    generateReportBtn.addEventListener('click', generateReport);
-});
+function showScanFeedback(msg, success) {
+  const el = document.getElementById('scanFeedback');
+  el.style.background = success ? '#1cc88a' : '#e74a3b';
+  el.textContent = (success?'✓ ':'✕ ') + msg;
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>el.style.display='none', 2000);
+}
 </script>
-</body>
-</html>
+{% endblock %}

@@ -25,6 +25,7 @@ import ssl
 import certifi
 
 from db import init_db, load_order_statuses, upsert_order_status
+from markupsafe import Markup
 
 os.environ['SSL_CERT_FILE'] = certifi.where()
 os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
@@ -35,6 +36,61 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 app.debug = False
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
+
+# ── Jinja2 helpers ────────────────────────────────────────────────────────────
+
+_TAG_STYLES = {
+    'Leopards':           'background:#ede7f6;color:#4527a0',
+    'Order Confirmed':    'background:#e8f5e9;color:#1b5e20',
+    'Fulfilment Not Set': 'background:#fff8e1;color:#e65100',
+    'No Throw':           'background:#fce4ec;color:#880e4f',
+}
+
+@app.template_global()
+def tag_style(label):
+    return _TAG_STYLES.get(label, 'background:#e8eaf6;color:#283593')
+
+@app.template_global()
+def status_badge(s):
+    s = s or ''
+    u = s.upper()
+    if 'DELIVERED' in u:  bg, color, dot = '#d4f5e9', '#0f6848', '#1cc88a'
+    elif 'RETURN' in u:   bg, color, dot = '#fce8e6', '#8b1a10', '#e74a3b'
+    elif 'CANCELLED' in u: bg, color, dot = '#fce8e6', '#8b1a10', '#e74a3b'
+    elif s == 'Booked':   bg, color, dot = '#dde4fb', '#2346a8', '#4e73df'
+    elif s == 'Un-Booked': bg, color, dot = '#ebebed', '#4a4b55', '#858796'
+    elif 'OUT FOR' in u or 'DISPATCH' in u or 'TRANSIT' in u: bg, color, dot = '#fef8e4', '#7a5c00', '#f6c23e'
+    elif 'CONFIRMED' in u: bg, color, dot = '#d4f5e9', '#0f6848', '#1cc88a'
+    elif 'CALL NOT' in u: bg, color, dot = '#e8f8fb', '#0a5c6e', '#36b9cc'
+    else:                  bg, color, dot = '#e8f8fb', '#0a5c6e', '#36b9cc'
+    return Markup(
+        f'<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;'
+        f'border-radius:99px;font-size:11px;font-weight:600;background:{bg};color:{color};white-space:nowrap;">'
+        f'<span style="width:6px;height:6px;border-radius:50%;background:{dot};flex-shrink:0;"></span>'
+        f'{s or "—"}</span>'
+    )
+
+@app.template_filter('format_number')
+def format_number(value):
+    try:
+        return f'{int(value):,}'
+    except (ValueError, TypeError):
+        return str(value)
+
+@app.template_filter('parse_date')
+def parse_date_filter(value):
+    if not value:
+        return dt.datetime.now()
+    for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S %z', '%Y-%m-%d'):
+        try:
+            return dt.datetime.strptime(str(value)[:19], fmt)
+        except ValueError:
+            continue
+    return dt.datetime.now()
+
+@app.context_processor
+def inject_now():
+    return {'now': dt.datetime.now()}
 
 order_details = []
 daraz_orders = []

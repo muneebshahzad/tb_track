@@ -1,443 +1,462 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>TB Track - Order Tracking</title>
+{% extends 'base.html' %}
+{% block title %}TB Track – Order Tracking{% endblock %}
 
-    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css?family=Nunito:400,600,700,800" rel="stylesheet">
-    <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
-    <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
+{% block content %}
+<style>
+  /* ── Order card ── */
+  .order-card { background: #fff; border-radius: 10px; overflow: hidden; border: 1px solid #e3e6f0; box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: border-color 0.18s, box-shadow 0.18s; }
+  .order-card:hover { border-color: rgba(78,115,223,0.33); box-shadow: 0 4px 18px rgba(78,115,223,0.10); }
+  .order-header { display: grid; grid-template-columns: 110px 1fr 1fr 70px 90px 120px 160px; align-items: start; gap: 12px; padding: 12px 16px; }
+  .order-items-section { border-top: 1px solid #e3e6f0; padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; }
+  .item-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f8f9fc; border-radius: 7px; border: 1px solid #e3e6f0; }
+  .item-img { width: 36px; height: 36px; border-radius: 5px; flex-shrink: 0; overflow: hidden; background: #e3e6f0; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #858796; }
+  .item-img img { width: 100%; height: 100%; object-fit: cover; }
+  .item-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: #3a3b45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-qty { font-size: 11px; color: #858796; margin-top: 1px; }
+  .item-cn { font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500; color: #4e73df; background: #dde4fb; padding: 2px 8px; border-radius: 5px; text-decoration: none; flex-shrink: 0; white-space: nowrap; }
+  .item-no-cn { font-size: 11px; color: #b7b9cc; font-style: italic; flex-shrink: 0; }
 
-    <style>
-        /* ── Status badge colours ── */
-        .badge-status { font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; display: inline-block; }
-        .status-delivered    { background: #1cc88a; color: #fff; }
-        .status-booked       { background: #4e73df; color: #fff; }
-        .status-unbooked     { background: #858796; color: #fff; }
-        .status-return       { background: #e74a3b; color: #fff; }
-        .status-transit      { background: #f6c23e; color: #333; }
-        .status-other        { background: #36b9cc; color: #fff; }
+  /* ── Filter pills ── */
+  .filter-pill { padding: 4px 11px; border-radius: 99px; border: none; cursor: pointer; font-size: 11px; font-weight: 500; background: #f8f9fc; color: #858796; transition: background 0.15s; font-family: 'DM Sans', sans-serif; }
+  .filter-pill.active { background: #4e73df; color: #fff; }
 
-        /* ── Actions dropdown ── */
-        .status-buttons { display: none; margin-top: 8px; }
-        .status-buttons .btn { margin: 2px; }
+  /* ── Stats grid ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 12px; margin-bottom: 20px; }
 
-        /* ── Auto-refresh indicator ── */
-        #refresh-indicator {
-            position: fixed; bottom: 16px; right: 16px;
-            background: #4e73df; color: #fff;
-            padding: 6px 12px; border-radius: 20px;
-            font-size: 12px; display: none; z-index: 9999;
-        }
+  /* ── Daraz row ── */
+  .daraz-row { display: grid; grid-template-columns: 120px 220px 100px 90px 90px 1fr; gap: 12px; padding: 12px 16px; background: #fff; border-radius: 8px; border: 1px solid #e3e6f0; align-items: start; }
 
-        /* ── Mobile: hide less-important columns ── */
-        @media (max-width: 768px) {
-            .hide-mobile { display: none !important; }
-            .table td, .table th { font-size: 12px; padding: 4px 6px; }
-            .btn-sm { font-size: 11px; padding: 2px 6px; }
-        }
+  /* ── Mobile card header ── */
+  .order-header-mobile { padding: 10px 12px; }
+  .order-header-mobile .row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .order-header-mobile .row2 { display: flex; align-items: center; gap: 6px; }
 
-        /* ── Nested item table ── */
-        .item-table { min-width: 400px; }
-        .item-table td { vertical-align: middle; }
+  /* ── Token banner ── */
+  #token-banner { display: none; padding: 7px 16px; font-size: 12px; font-weight: 500; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 
-        /* ── Daraz token banner ── */
-        #token-banner {
-            display: none; padding: 8px 20px; text-align: center;
-            font-weight: 500; font-size: 13px;
-            position: sticky; top: 0; z-index: 999;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-    </style>
-</head>
+  @media (max-width: 767px) {
+    .stats-grid { grid-template-columns: repeat(2,1fr); }
+    .order-header { display: none; }
+    .col-headers-track { display: none !important; }
+    .item-title { white-space: normal; }
+    .daraz-row { grid-template-columns: 1fr 1fr; }
+  }
+  @media (min-width: 768px) {
+    .order-header-mobile { display: none; }
+  }
+</style>
 
-<body id="page-top">
-<div id="wrapper">
+<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
 
-    {% include 'header.html' %}
+  <!-- Topbar -->
+  <div class="topbar">
+    <span class="topbar-title">Order Tracking</span>
+    <div style="flex:1"></div>
+    <div class="search-box">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#858796" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="orderSearch" placeholder="Search orders, customers, tracking…" style="width:220px;" oninput="filterOrders()"/>
+      <button id="searchClear" onclick="document.getElementById('orderSearch').value='';filterOrders()" style="display:none;border:none;background:none;cursor:pointer;color:#858796;font-size:15px;line-height:1;padding:0;">×</button>
+    </div>
+    <span style="font-size:11px;color:#858796;">Last refreshed: <span id="lastRefreshTime"></span></span>
+  </div>
 
-    <div id="content-wrapper" class="d-flex flex-column">
-    <div id="content">
+  <!-- Scrollable -->
+  <div style="flex:1;overflow:auto;padding:20px;">
 
-        <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
-            <form class="form-inline">
-                <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
-                    <i class="fa fa-bars"></i>
-                </button>
-            </form>
-            <ul class="navbar-nav ml-auto">
-                <li class="nav-item">
-                    <span id="last-refresh-time" class="nav-link text-muted small d-none d-sm-inline"></span>
-                </li>
-            </ul>
-        </nav>
+    <!-- Stats -->
+    <div class="stats-grid" id="statsGrid">
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,0.1)">📦</div><div><div class="stat-label">Total Orders</div><div class="stat-value" style="color:#4e73df" id="statTotal">0</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,0.1)">🏷️</div><div><div class="stat-label">Booked</div><div class="stat-value" style="color:#4e73df" id="statBooked">0</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(133,135,150,0.1)">⏳</div><div><div class="stat-label">Un-Booked</div><div class="stat-value" style="color:#858796" id="statUnbooked">0</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(28,200,138,0.1)">✅</div><div><div class="stat-label">Delivered</div><div class="stat-value" style="color:#1cc88a" id="statDelivered">0</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(231,74,59,0.1)">↩</div><div><div class="stat-label">Returned</div><div class="stat-value" style="color:#e74a3b" id="statReturned">0</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(212,168,0,0.1)">💰</div><div><div class="stat-label">Total Value</div><div class="stat-value" style="color:#d4a800;font-size:15px;" id="statValue">Rs 0</div></div></div>
+    </div>
 
-        <!-- Daraz token banner -->
-        <div id="token-banner">
-            <span id="token-message"></span>
-            <a id="reauth-btn"
-               href="https://api.daraz.pk/oauth/authorize?response_type=code&redirect_uri=https://admin.tickbags.com/daraz&client_id=501554"
-               style="margin-left:12px; padding:4px 14px; background:#e63946; color:#fff; border-radius:4px; text-decoration:none; font-size:12px; display:none;">
-                Re-authenticate Daraz
-            </a>
+    <!-- ── Shopify Section ── -->
+    <div class="section-card" style="margin-bottom:20px;">
+      <div class="section-header">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:28px;height:28px;border-radius:7px;background:#96bf48;display:flex;align-items:center;justify-content:center;font-size:14px;">🛍</div>
+          <span style="font-size:14px;font-weight:700;color:#3a3b45;">Shopify Orders</span>
+          <span class="section-count" id="shopifyCount">0</span>
         </div>
-
-        <div class="container-fluid">
-            <h1 class="h3 mb-3 text-gray-800">Order Tracking</h1>
-
-            <!-- ── Shopify Orders ── -->
-            <div class="card shadow mb-4">
-                <div class="card-header py-3 d-flex align-items-center justify-content-between">
-                    <h6 class="m-0 font-weight-bold text-primary">Shopify Orders</h6>
-                    <div>
-                        <button id="applyDeliveredBtn" class="btn btn-success btn-sm mr-2" onclick="applyDeliveredToAll()">
-                            Apply Delivered to All
-                        </button>
-                        <button id="refreshTrackingBtn" class="btn btn-info btn-sm" onclick="refreshTracking()">
-                            Refresh Tracking
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-bordered table-hover" id="dataTable" width="100%" cellspacing="0">
-                            <thead class="thead-light">
-                                <tr>
-                                    <th>Order</th>
-                                    <th>Customer</th>
-                                    <th class="hide-mobile">Tags</th>
-                                    <th class="hide-mobile">Payment</th>
-                                    <th class="hide-mobile">Date</th>
-                                    <th class="hide-mobile">Price</th>
-                                    <th>Items</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for order in order_details %}
-                                <tr>
-                                    <td>
-                                        <a href="{{ order.order_link }}" target="_blank">
-                                            <strong>{{ order.order_id }}</strong>
-                                        </a>
-                                    </td>
-                                    <td style="min-width:130px;">
-                                        {% set item0 = order.line_items[0] if order.line_items else {} %}
-                                        <div style="font-weight:600;">{{ item0.get('name', order.customer_details.name) }}</div>
-                                        <div class="text-muted small">{{ item0.get('city', order.customer_details.city) }}</div>
-                                        <div class="text-muted small">{{ item0.get('phone', order.customer_details.phone) }}</div>
-                                        {% if item0.get('phone') %}
-                                        <div class="mt-1 d-flex flex-wrap" style="gap:3px;">
-                                            <a href="tel:{{ item0.phone }}" class="btn btn-primary btn-sm">
-                                                <i class="fas fa-phone fa-xs"></i>
-                                            </a>
-                                            <div class="btn-group">
-                                                <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown">
-                                                    <i class="fab fa-whatsapp fa-xs"></i>
-                                                </button>
-                                                <div class="dropdown-menu">
-                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days." target="_blank">Dispatch Message</a>
-                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20Your%20order%23{{ order.order_id }}%20has%20been%20delayed.%20We%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest." target="_blank">Delay Message</a>
-                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20Logistics%20attempted%20delivery%20of%20order%23{{ order.order_id }}%20but%20address%20was%20closed.%20Please%20advise%20re-delivery." target="_blank">Address Closed</a>
-                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20You%20refused%20delivery%20of%20order%23{{ order.order_id }}.%20Let%20us%20know%20if%20you%27re%20still%20interested." target="_blank">Refused Message</a>
-                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20Your%20order%23{{ order.order_id }}%20was%20delivered.%20Please%20share%20your%20feedback!" target="_blank">Feedback</a>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        {% endif %}
-                                    </td>
-                                    <td class="hide-mobile">
-                                        {% for tag in order.tags %}
-                                            <span class="badge badge-secondary" style="font-size:11px;">{{ tag }}</span><br>
-                                        {% endfor %}
-                                    </td>
-                                    <td class="hide-mobile">{{ order.financial_status }}</td>
-                                    <td class="hide-mobile" style="white-space:nowrap;">{{ order.created_at[:10] }}</td>
-                                    <td class="hide-mobile">Rs {{ order.total_price }}</td>
-                                    <td>
-                                        <div class="table-responsive">
-                                        <table class="table table-sm item-table mb-0">
-                                            <tbody>
-                                                {% for item in order.line_items %}
-                                                <tr>
-                                                    <td style="width:50px;"><img src="{{ item.image_src }}" width="45" height="45" style="object-fit:cover;border-radius:4px;"></td>
-                                                    <td>
-                                                        <div style="font-size:12px;">{{ item.product_title }}</div>
-                                                        <div class="text-muted" style="font-size:11px;">Qty: {{ item.quantity }}</div>
-                                                    </td>
-                                                    <td style="white-space:nowrap;">
-                                                        <a href="/track/{{ item.tracking_number }}" target="_blank" style="font-size:11px;">{{ item.tracking_number }}</a>
-                                                    </td>
-                                                    <td>
-                                                        <div class="btn-group">
-                                                            <button type="button" class="btn btn-info btn-sm dropdown-toggle" data-toggle="dropdown" style="font-size:11px;">
-                                                                Email
-                                                            </button>
-                                                            <div class="dropdown-menu">
-                                                                <a class="dropdown-item small" href="#" onclick="sendEmail('delay', '{{ item.tracking_number }}')">Delay</a>
-                                                                <a class="dropdown-item small" href="#" onclick="sendEmail('incomplete', '{{ item.tracking_number }}')">Incomplete Address</a>
-                                                                <a class="dropdown-item small" href="#" onclick="sendEmail('refusal', '{{ item.tracking_number }}')">Fake Refusal</a>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                                {% endfor %}
-                                            </tbody>
-                                        </table>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        {% set s = order.status %}
-                                        {% if 'Delivered' in s or 'DELIVERED' in s %}
-                                            <span class="badge-status status-delivered">{{ s }}</span>
-                                        {% elif 'Return' in s %}
-                                            <span class="badge-status status-return">{{ s }}</span>
-                                        {% elif s == 'Booked' %}
-                                            <span class="badge-status status-booked">{{ s }}</span>
-                                        {% elif s == 'Un-Booked' %}
-                                            <span class="badge-status status-unbooked">{{ s }}</span>
-                                        {% elif 'Out For' in s or 'Dispatch' in s %}
-                                            <span class="badge-status status-transit">{{ s }}</span>
-                                        {% else %}
-                                            <span class="badge-status status-other">{{ s }}</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
-                                        <div class="status-buttons">
-                                            <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
-                                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
-                                            <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
-                                            <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
-                                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ── Daraz Orders ── -->
-            <div class="card shadow mb-4">
-                <div class="card-header py-3">
-                    <h6 class="m-0 font-weight-bold text-primary">Daraz Orders</h6>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-bordered table-hover" id="darazTable" width="100%" cellspacing="0">
-                            <thead class="thead-light">
-                                <tr>
-                                    <th>Order ID</th>
-                                    <th>Customer</th>
-                                    <th class="hide-mobile">Status</th>
-                                    <th class="hide-mobile">Date</th>
-                                    <th class="hide-mobile">Price</th>
-                                    <th>Items</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for order in darazOrders %}
-                                <tr>
-                                    <td><strong>{{ order.order_id }}</strong></td>
-                                    <td>
-                                        <div style="font-weight:600;">{{ order.customer.name }}</div>
-                                        <div class="text-muted small">{{ order.customer.address }}</div>
-                                        <div class="text-muted small">{{ order.customer.phone }}</div>
-                                    </td>
-                                    <td class="hide-mobile">{{ order.status }}</td>
-                                    <td class="hide-mobile" style="white-space:nowrap;">{{ order.date[:10] }}</td>
-                                    <td class="hide-mobile">Rs {{ order.total_price }}</td>
-                                    <td>
-                                        <div class="table-responsive">
-                                        <table class="table table-sm item-table mb-0">
-                                            <tbody>
-                                                {% for item in order.items_list %}
-                                                <tr>
-                                                    <td style="width:50px;"><img src="{{ item.item_image }}" width="45" height="45" style="object-fit:cover;border-radius:4px;"></td>
-                                                    <td>
-                                                        <div style="font-size:12px;">{{ item.item_title }}</div>
-                                                        <div class="text-muted" style="font-size:11px;">Qty: {{ item.quantity }}</div>
-                                                    </td>
-                                                    <td style="white-space:nowrap;font-size:11px;">
-                                                        <a href="/track/{{ item.tracking_number }}" target="_blank">{{ item.tracking_number }}</a>
-                                                    </td>
-                                                    <td style="font-size:11px;">{{ item.status }}</td>
-                                                </tr>
-                                                {% endfor %}
-                                            </tbody>
-                                        </table>
-                                        </div>
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr><td colspan="6" class="text-center text-muted">No Daraz orders.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div><!-- container-fluid -->
-
-    </div><!-- content -->
-
-    <footer class="sticky-footer bg-white">
-        <div class="container my-auto">
-            <div class="copyright text-center my-auto">
-                <span>Tick Bags &copy; {{ 2025 }}</span>
-            </div>
+        <div style="flex:1"></div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;" id="filterPills">
+          {% for f in ['All','Booked','Un-Booked','Delivered','Out For Delivery','Being Return','RETURNED TO SHIPPER'] %}
+          <button class="filter-pill {% if loop.first %}active{% endif %}" data-filter="{{ f }}" onclick="setFilter(this)">{{ f }}</button>
+          {% endfor %}
         </div>
-    </footer>
-    </div><!-- content-wrapper -->
-</div><!-- wrapper -->
+        <button id="applyDeliveredBtn" class="btn btn-success" onclick="applyDeliveredToAll()">✅ Apply Delivered to All</button>
+        <button id="applyReturnedBtn" class="btn btn-danger" onclick="applyReturnedToAll()">↩ Apply Returned to All</button>
+        <button id="refreshTrackingBtn" class="btn btn-outline" onclick="refreshTracking()">
+          <span id="refreshIcon">🔄</span> Refresh Tracking
+        </button>
+      </div>
 
-<div id="refresh-indicator">Refreshing tracking data...</div>
+      <!-- Column headers (desktop only) -->
+      <div class="col-headers col-headers-track" style="grid-template-columns:110px 1fr 1fr 70px 90px 120px 160px;">
+        <div>Order</div><div>Customer + Address</div><div>Tags</div>
+        <div>Payment</div><div style="text-align:right">Total</div><div>Status</div><div>Actions</div>
+      </div>
 
-<a class="scroll-to-top rounded" href="#page-top"><i class="fas fa-angle-up"></i></a>
+      <div class="order-list" id="shopifyOrderList">
+        {% for order in order_details %}
+        {% set item0 = order.line_items[0] if order.line_items else {} %}
+        {% set name  = item0.get('name') or order.customer_details.get('name') or '' %}
+        {% set city  = item0.get('city') or order.customer_details.get('city') or '' %}
+        {% set phone = item0.get('phone') or order.customer_details.get('phone') or '' %}
+        {% set addr  = order.customer_details.get('address') or item0.get('address') or '' %}
+        {% set s = order.status or '' %}
 
-<!-- Scripts -->
-<script src="static/assets/vendor/jquery/jquery.min.js"></script>
-<script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-<script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-<script src="static/assets/js/sb-admin-2.min.js"></script>
-<script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
-<script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
-<script src="static/assets/js/track.js"></script>
+        <div class="order-card" data-status="{{ s }}"
+             data-search="{{ order.order_id }} {{ name }} {{ city }} {% for i in order.line_items %}{{ i.product_title }} {{ i.tracking_number }} {% endfor %}">
 
+          <!-- Desktop header -->
+          <div class="order-header">
+            <!-- Order ID + date -->
+            <div>
+              <a href="{{ order.order_link }}" target="_blank" style="font-size:13px;font-weight:700;font-family:'DM Mono',monospace;color:#4e73df;text-decoration:none;">#{{ order.order_id }}</a>
+              <div style="font-size:10px;color:#858796;margin-top:1px;">{{ order.created_at[:10] }}</div>
+            </div>
+            <!-- Customer -->
+            <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;">
+              <div class="tb-avatar" data-name="{{ name }}" style="width:30px;height:30px;font-size:11px;"></div>
+              <div style="min-width:0;">
+                <div style="font-size:12px;font-weight:600;color:#3a3b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ name or '<span style="color:#b7b9cc;font-style:italic">No name</span>' }}</div>
+                <div style="font-size:11px;color:#858796;">{{ city or '—' }}</div>
+                {% if phone %}<div style="font-size:11px;font-family:'DM Mono',monospace;color:#4e73df;margin-top:1px;">{{ phone }}</div>{% endif %}
+                {% if addr %}<div style="font-size:10px;color:#858796;margin-top:2px;line-height:1.4;max-width:220px;">📍 {{ addr }}</div>{% endif %}
+              </div>
+            </div>
+            <!-- Tags -->
+            <div style="display:flex;flex-wrap:wrap;gap:3px;padding-top:3px;">
+              {% for tag in order.tags %}<span class="tag-badge" style="{{ tag_style(tag) }}">{{ tag }}</span>{% endfor %}
+            </div>
+            <!-- Payment -->
+            <div style="padding-top:3px;">
+              <span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;background:#fef8e4;color:#7a5c00;">{{ order.financial_status or 'Pending' }}</span>
+            </div>
+            <!-- Total -->
+            <div style="text-align:right;padding-top:3px;">
+              <div style="font-size:13px;font-weight:700;color:#3a3b45;">{{ order.total_price|int|format_number }}</div>
+              <div style="font-size:9px;color:#858796;">PKR</div>
+            </div>
+            <!-- Status -->
+            <div style="padding-top:3px;">{{ status_badge(s) }}</div>
+            <!-- Actions -->
+            <div style="display:flex;gap:4px;align-items:center;padding-top:3px;">
+              {% if phone %}
+              <a href="tel:{{ phone }}" title="Call" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;color:#4e73df;text-decoration:none;font-size:11px;">📞</a>
+              <div class="tb-dd">
+                <button data-dd-trigger style="width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;background:none;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;">💬</button>
+                <div class="tb-dd-menu">
+                  {% set wa = 'https://wa.me/' ~ phone|replace('+','') %}
+                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' from TickBags.com has been dispatched and is expected to be delivered in 3-7 working days.' | urlencode }}" target="_blank">📦 Dispatch Message</a>
+                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' has been delayed. We are trying our best to deliver it at earliest.' | urlencode }}" target="_blank">⏳ Delay Message</a>
+                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', Logistics attempted delivery of order#' ~ order.order_id ~ ' but address was closed. Please advise re-delivery.' | urlencode }}" target="_blank">🏠 Address Closed</a>
+                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', You refused delivery of order#' ~ order.order_id ~ '. Let us know if you\'re still interested.' | urlencode }}" target="_blank">🚫 Refused Message</a>
+                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' was delivered. Please share your feedback!' | urlencode }}" target="_blank">⭐ Feedback</a>
+                </div>
+              </div>
+              {% endif %}
+              <div class="tb-dd">
+                <button data-dd-trigger class="btn btn-primary" style="font-size:11px;padding:5px 10px;">Mark As <span style="font-size:9px;">▾</span></button>
+                <div class="tb-dd-menu">
+                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Delivered')">✅ Delivered</button>
+                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Returned')">↩ Returned</button>
+                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Cancelled')">✕ Cancelled</button>
+                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Confirmed')">✓ Confirmed</button>
+                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Call Not Attended')">📵 Call Not Attended</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mobile header -->
+          <div class="order-header-mobile">
+            <div class="row1">
+              <a href="{{ order.order_link }}" target="_blank" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:#4e73df;text-decoration:none;">#{{ order.order_id }}</a>
+              {{ status_badge(s) }}
+              <div style="flex:1"></div>
+              <span style="font-size:12px;font-weight:700;color:#3a3b45;">{{ order.total_price|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
+              <div class="tb-dd">
+                <button data-dd-trigger class="btn btn-primary" style="font-size:11px;padding:5px 10px;">Mark ▾</button>
+                <div class="tb-dd-menu">
+                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Delivered')">✅ Delivered</button>
+                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Returned')">↩ Returned</button>
+                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Cancelled')">✕ Cancelled</button>
+                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Confirmed')">✓ Confirmed</button>
+                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Call Not Attended')">📵 Call Not Attended</button>
+                </div>
+              </div>
+            </div>
+            <div class="row2">
+              <div class="tb-avatar" data-name="{{ name }}" style="width:24px;height:24px;font-size:9px;"></div>
+              <div>
+                <div style="font-size:12px;font-weight:600;color:#3a3b45;">{{ name or '—' }}</div>
+                <div style="font-size:11px;color:#858796;">{{ city or '—' }}{% if phone %} · {{ phone }}{% endif %}</div>
+              </div>
+            </div>
+            {% if order.tags %}
+            <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;">
+              {% for tag in order.tags %}<span class="tag-badge" style="{{ tag_style(tag) }}">{{ tag }}</span>{% endfor %}
+            </div>
+            {% endif %}
+            {% if addr %}<div style="font-size:10px;color:#858796;margin-top:5px;display:flex;gap:4px;">📍 <span>{{ addr }}</span></div>{% endif %}
+          </div>
+
+          <!-- Items — always visible -->
+          {% if order.line_items %}
+          <div class="order-items-section">
+            {% for item in order.line_items %}
+            <div class="item-row">
+              <div class="item-img">
+                {% if item.image_src and item.image_src != 'None' %}<img src="{{ item.image_src }}" alt="">{% else %}IMG{% endif %}
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div class="item-title" title="{{ item.product_title }}">{{ item.product_title }}</div>
+                <div class="item-qty">Qty: <strong>{{ item.quantity }}</strong></div>
+              </div>
+              {% if item.tracking_number and item.tracking_number != 'N/A' %}
+              <a href="#" class="item-cn">{{ item.tracking_number }}</a>
+              {% else %}
+              <span class="item-no-cn">No tracking</span>
+              {% endif %}
+              {{ status_badge(item.status) }}
+              <div class="tb-dd">
+                <button data-dd-trigger style="padding:3px 8px;border-radius:5px;border:1.5px solid #e3e6f0;background:white;color:#36b9cc;cursor:pointer;font-size:11px;font-weight:600;display:flex;align-items:center;gap:3px;font-family:'DM Sans',sans-serif;flex-shrink:0;">✉ <span style="font-size:9px;">▾</span></button>
+                <div class="tb-dd-menu">
+                  <button class="tb-dd-item" onclick="sendEmail('delay','{{ item.tracking_number }}')">📧 Delay Notice</button>
+                  <button class="tb-dd-item" onclick="sendEmail('incomplete','{{ item.tracking_number }}')">📧 Incomplete Address</button>
+                  <button class="tb-dd-item" onclick="sendEmail('refusal','{{ item.tracking_number }}')">📧 Fake Refusal</button>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% else %}
+        <div style="text-align:center;padding:40px 0;color:#858796;font-size:13px;">No orders loaded yet. Data refreshes 30 seconds after startup.</div>
+        {% endfor %}
+      </div>
+    </div><!-- /shopify section -->
+
+    <!-- ── Daraz Section ── -->
+    <div class="section-card">
+      <div class="section-header">
+        <div style="width:28px;height:28px;border-radius:7px;background:#f85c2c;display:flex;align-items:center;justify-content:center;font-size:14px;">🛒</div>
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Daraz Orders</span>
+        <span style="background:rgba(248,92,44,0.1);color:#f85c2c;font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;">{{ darazOrders|length }}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:120px 220px 100px 90px 90px 1fr;gap:12px;padding:8px 16px;border-bottom:1px solid #e3e6f0;font-size:10px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.05em;background:#f8f9fc;" class="daraz-col-headers">
+        <div>Order ID</div><div>Customer</div><div>Status</div><div>Date</div><div>Total</div><div>Items</div>
+      </div>
+      <div class="order-list">
+        {% for order in darazOrders %}
+        <div class="daraz-row">
+          <div style="font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:#f85c2c;">{{ order.order_id }}</div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:#3a3b45;">{{ order.customer.name }}</div>
+            <div style="font-size:11px;color:#858796;margin-top:1px;">{{ order.customer.phone }}</div>
+            <div style="font-size:10px;color:#858796;margin-top:1px;">{{ order.customer.address }}</div>
+          </div>
+          <div>{{ status_badge(order.status) }}</div>
+          <div style="font-size:12px;color:#858796;">{{ order.date[:10] }}</div>
+          <div style="font-size:13px;font-weight:700;color:#3a3b45;">Rs {{ order.total_price|int|format_number }}</div>
+          <div style="display:flex;flex-direction:column;gap:5px;">
+            {% for item in order.items_list %}
+            <div class="item-row">
+              <div class="item-img">
+                {% if item.item_image and item.item_image != 'N/A' %}<img src="{{ item.item_image }}" alt="">{% else %}IMG{% endif %}
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div class="item-title">{{ item.item_title }}</div>
+                <div class="item-qty">Qty: <strong>{{ item.quantity }}</strong></div>
+              </div>
+              {{ status_badge(item.status) }}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% else %}
+        <div style="text-align:center;padding:40px 0;color:#858796;font-size:13px;">No Daraz orders.</div>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div><!-- /scrollable -->
+
+  <!-- Token banner -->
+  <div id="token-banner">
+    <span id="token-icon"></span>
+    <span id="token-message"></span>
+    <a id="reauth-btn" href="https://api.daraz.pk/oauth/authorize?response_type=code&redirect_uri=https://admin.tickbags.com/daraz&client_id=501554"
+       style="display:none;margin-left:4px;padding:2px 10px;background:#e74a3b;color:#fff;border-radius:4px;text-decoration:none;font-size:11px;">
+      Re-authenticate Daraz
+    </a>
+  </div>
+
+</div><!-- /main column -->
+{% endblock %}
+
+{% block extra_js %}
 <script>
-$(document).ready(function () {
-    // Shopify table
-    if ($.fn.DataTable.isDataTable('#dataTable')) $('#dataTable').DataTable().destroy();
-    $('#dataTable').DataTable({
-        order: [[0, 'desc']],
-        columnDefs: [{ searchable: false, targets: [-1, -2] }],
-        responsive: true,
-        pageLength: 25,
-    });
+// ── Inject order data for JS use ──
+const ORDER_DATA = {{ order_details | tojson }};
 
-    // Daraz table
-    if ($.fn.DataTable.isDataTable('#darazTable')) $('#darazTable').DataTable().destroy();
-    $('#darazTable').DataTable({
-        order: [[0, 'desc']],
-        responsive: true,
-        pageLength: 25,
-    });
+// ── Stats ──
+(function() {
+  const orders = ORDER_DATA;
+  let booked=0, unbooked=0, delivered=0, returned=0, total=0;
+  orders.forEach(o => {
+    const s = (o.status||'').toUpperCase();
+    if (s === 'BOOKED') booked++;
+    else if (s === 'UN-BOOKED') unbooked++;
+    if (s.includes('DELIVERED')) delivered++;
+    if (s.includes('RETURN')) returned++;
+    total += Number(o.total_price||0);
+  });
+  document.getElementById('statTotal').textContent = orders.length;
+  document.getElementById('statBooked').textContent = booked;
+  document.getElementById('statUnbooked').textContent = unbooked;
+  document.getElementById('statDelivered').textContent = delivered;
+  document.getElementById('statReturned').textContent = returned;
+  document.getElementById('statValue').textContent = 'Rs ' + Math.round(total).toLocaleString('en-PK');
+  document.getElementById('shopifyCount').textContent = orders.length;
+  document.getElementById('lastRefreshTime').textContent = new Date().toLocaleTimeString();
+})();
 
-    // Highlight active nav link
-    var currentUrl = window.location.pathname;
-    $('.nav-item a').each(function () {
-        if (currentUrl === '/' + $(this).attr('href')) {
-            $(this).parent().addClass('active');
-        }
-    });
+// ── Filter + Search ──
+let currentFilter = 'All';
 
-    // Update last-refresh time display
-    document.getElementById('last-refresh-time').textContent =
-        'Last refreshed: ' + new Date().toLocaleTimeString();
-});
+function setFilter(btn) {
+  document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = btn.dataset.filter;
+  applyFilterSearch();
+}
 
-// ── Apply Delivered to All — sequential with 600ms delay between calls ──
+function filterOrders() {
+  const val = document.getElementById('orderSearch').value;
+  document.getElementById('searchClear').style.display = val ? 'block' : 'none';
+  applyFilterSearch();
+}
+
+function applyFilterSearch() {
+  const q = document.getElementById('orderSearch').value.toLowerCase();
+  let visible = 0;
+  document.querySelectorAll('#shopifyOrderList .order-card').forEach(card => {
+    const status = card.dataset.status || '';
+    const search = card.dataset.search || '';
+    const matchFilter = currentFilter === 'All' || status === currentFilter || status.includes(currentFilter);
+    const matchSearch = !q || search.toLowerCase().includes(q);
+    const show = matchFilter && matchSearch;
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  document.getElementById('shopifyCount').textContent = visible;
+}
+
+// ── Mark As ──
+function markOrder(orderId, tag) {
+  fetch('/apply_tag', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order_id: orderId, tag })
+  })
+  .then(r => r.json())
+  .then(d => showToast(d.success ? `Marked as "${tag}"` : 'Failed: ' + (d.error || '')))
+  .catch(() => showToast('Request failed'));
+}
+
+// ── Apply Delivered to All ──
 async function applyDeliveredToAll() {
-    const btn = document.getElementById('applyDeliveredBtn');
-    const orders = {{ order_details|tojson }};
-    const delivered = orders.filter(o =>
-        o.status && (o.status.toUpperCase().includes('DELIVERED') || o.status === 'Delivered')
-    );
-
-    if (delivered.length === 0) {
-        alert('No delivered orders found.');
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = `Applying (0/${delivered.length})...`;
-
-    let done = 0;
-    for (const order of delivered) {
-        try {
-            await applyTag(order.id, 'Delivered');
-        } catch (e) {
-            console.error('Failed for order', order.order_id, e);
-        }
-        done++;
-        btn.textContent = `Applying (${done}/${delivered.length})...`;
-        await new Promise(r => setTimeout(r, 600));
-    }
-
-    btn.textContent = `Done (${done}/${delivered.length})`;
-    setTimeout(() => {
-        btn.disabled = false;
-        btn.textContent = 'Apply Delivered to All';
-    }, 3000);
+  const btn = document.getElementById('applyDeliveredBtn');
+  const delivered = ORDER_DATA.filter(o => (o.status||'').toUpperCase().includes('DELIVERED'));
+  if (!delivered.length) { showToast('No delivered orders found'); return; }
+  btn.disabled = true;
+  for (let i = 0; i < delivered.length; i++) {
+    btn.textContent = `Applying ${i+1}/${delivered.length}…`;
+    try { await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: delivered[i].id, tag:'Delivered'}) }); }
+    catch(e) {}
+    await new Promise(r => setTimeout(r, 600));
+  }
+  btn.textContent = `Done (${delivered.length})`;
+  showToast(`Applied "Delivered" to ${delivered.length} orders`);
+  setTimeout(() => { btn.disabled = false; btn.textContent = '✅ Apply Delivered to All'; }, 3000);
 }
 
-// ── Lightweight auto-refresh: re-fetch Leopards tracking every 8 minutes ──
+// ── Apply Returned to All ──
+async function applyReturnedToAll() {
+  const btn = document.getElementById('applyReturnedBtn');
+  const returned = ORDER_DATA.filter(o => (o.status||'').toUpperCase().includes('RETURN'));
+  if (!returned.length) { showToast('No returned orders found'); return; }
+  btn.disabled = true;
+  for (let i = 0; i < returned.length; i++) {
+    btn.textContent = `Applying ${i+1}/${returned.length}…`;
+    try { await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: returned[i].id, tag:'Returned'}) }); }
+    catch(e) {}
+    await new Promise(r => setTimeout(r, 600));
+  }
+  btn.textContent = `Done (${returned.length})`;
+  showToast(`Applied "Returned" to ${returned.length} orders`);
+  setTimeout(() => { btn.disabled = false; btn.textContent = '↩ Apply Returned to All'; }, 3000);
+}
+
+// ── Refresh Tracking ──
 function refreshTracking() {
-    const btn = document.getElementById('refreshTrackingBtn');
-    const indicator = document.getElementById('refresh-indicator');
-    btn.disabled = true;
-    indicator.style.display = 'block';
-
-    fetch('/api/refresh-tracking', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            indicator.style.display = 'none';
-            btn.disabled = false;
-            if (data.updated > 0) {
-                // Reload the page to show updated statuses
-                location.reload();
-            } else {
-                alert('Tracking is up to date.');
-            }
-        })
-        .catch(() => {
-            indicator.style.display = 'none';
-            btn.disabled = false;
-            console.error('Tracking refresh failed');
-        });
+  const btn = document.getElementById('refreshTrackingBtn');
+  const icon = document.getElementById('refreshIcon');
+  btn.disabled = true;
+  icon.style.animation = 'spin 1s linear infinite';
+  icon.style.display = 'inline-block';
+  fetch('/api/refresh-tracking', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      icon.style.animation = '';
+      btn.disabled = false;
+      if (d.updated > 0) location.reload();
+      else showToast('Tracking is up to date.');
+    })
+    .catch(() => { icon.style.animation = ''; btn.disabled = false; showToast('Refresh failed'); });
 }
 
-// Auto-refresh every 8 minutes (480000ms)
-setInterval(function () {
-    fetch('/api/refresh-tracking', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.updated > 0) location.reload();
-        })
-        .catch(() => {});
-}, 480000);
-</script>
-
-<!-- Daraz token status banner -->
-<script>
-fetch('/daraz/token-status')
-    .then(r => r.json())
-    .then(data => {
-        const banner = document.getElementById('token-banner');
-        const msg = document.getElementById('token-message');
-        const btn = document.getElementById('reauth-btn');
-
-        if (data.status === 'missing') {
-            banner.style.display = 'block';
-            banner.style.background = '#ffcccc';
-            msg.textContent = 'Daraz not authenticated.';
-            btn.style.display = 'inline-block';
-        } else if (data.days_left <= 3) {
-            banner.style.display = 'block';
-            banner.style.background = '#fff3cd';
-            msg.textContent = `Daraz token expires in ${data.days_left} day(s).`;
-            btn.style.display = 'inline-block';
-        }
-    })
+// Auto-refresh every 8 minutes
+setInterval(() => {
+  fetch('/api/refresh-tracking', { method:'POST' })
+    .then(r => r.json()).then(d => { if (d.updated > 0) location.reload(); })
     .catch(() => {});
-</script>
+}, 480000);
 
-</body>
-</html>
+// ── Email ──
+function sendEmail(type, trackingNumber) {
+  const templates = {
+    delay: { subject: 'Delay in Delivery', body: `Dear Team,\n\nPlease note that there has been significant delay in delivery of CN# ${trackingNumber}, Please arrange urgent delivery.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com` },
+    incomplete: { subject: 'FAKE DELIVERY REASON', body: `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says incomplete address even though the address is 100% accurate and phone number is completely accessible. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com` },
+    refusal: { subject: 'URGENT - FAKE ORDER REFUSAL', body: `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says that customer has refused the delivery. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com` },
+  };
+  const t = templates[type];
+  fetch('/send-email', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ to: ['Cod.lhe@leopardscourier.com','Cod.lhe1@leopardscourier.com','Cod.lhe5@leopardscourier.com','Codproject.lhe@leopardscourier.com'], cc: ['ahmad.aslam@leopardscourier.com','muneeb.shahzad@hotmail.com'], subject: t.subject, body: t.body })
+  }).then(r => showToast(r.ok ? 'Email sent' : 'Email failed')).catch(() => showToast('Email error'));
+}
+
+// ── Daraz token banner ──
+fetch('/daraz/token-status').then(r => r.json()).then(d => {
+  const banner = document.getElementById('token-banner');
+  const icon = document.getElementById('token-icon');
+  const msg  = document.getElementById('token-message');
+  const btn  = document.getElementById('reauth-btn');
+  if (d.status === 'missing') {
+    banner.style.display = 'flex'; banner.style.background = '#fce4ec'; banner.style.borderTop = '1px solid #e74a3b'; banner.style.color = '#8b1a10';
+    icon.textContent = '🔴'; msg.textContent = 'Daraz not authenticated.'; btn.style.display = 'inline-block';
+  } else if (d.days_left <= 3) {
+    banner.style.display = 'flex'; banner.style.background = '#fff8e1'; banner.style.borderTop = '1px solid #f6c23e'; banner.style.color = '#7a5c00';
+    icon.textContent = '⚠️'; msg.textContent = `Daraz token expires in ${d.days_left} day(s).`; btn.style.display = 'inline-block';
+  }
+}).catch(() => {});
+</script>
+{% endblock %}

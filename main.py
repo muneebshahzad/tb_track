@@ -29,6 +29,9 @@ from db import init_db, load_order_statuses, upsert_order_status
 os.environ['SSL_CERT_FILE'] = certifi.where()
 os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
 
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 app = Flask(__name__)
 app.debug = False
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
@@ -1147,9 +1150,18 @@ shopify.ShopifyResource.set_password(password)
 # ── Background refresh ────────────────────────────────────────────────────────
 
 def background_refresh():
-    """Refresh Daraz orders + Leopards tracking every 120 minutes."""
+    """Refresh all data every 120 minutes. On first run, does full Shopify fetch."""
     global daraz_orders, order_details
     print(f"BACKGROUND REFRESH: Starting at {dt.datetime.now()}")
+
+    # Full Shopify fetch when order_details is empty (first startup)
+    if not order_details:
+        print("BACKGROUND REFRESH: order_details empty — doing full Shopify fetch.")
+        try:
+            order_details = asyncio.run(getShopifyOrders())
+            print(f"BACKGROUND REFRESH: Shopify fetch complete ({len(order_details)} orders).")
+        except Exception as e:
+            print(f"BACKGROUND REFRESH ERROR (Shopify full fetch): {e}")
 
     try:
         daraz_statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
@@ -1229,17 +1241,11 @@ with app.app_context():
 # Start background scheduler at module level so Gunicorn picks it up
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(background_refresh, 'interval', minutes=120)
+# Also run once 30 seconds after startup (after health check passes)
+scheduler.add_job(background_refresh, 'date',
+                  run_date=dt.datetime.now() + dt.timedelta(seconds=30))
 scheduler.start()
-print("Background scheduler started.")
-
-# Load initial data in a background thread so gunicorn starts immediately
-# and passes Railway's health check without waiting 5-10 min for API calls
-def _startup_loader():
-    with app.app_context():
-        load_initial_data()
-
-threading.Thread(target=_startup_loader, daemon=True).start()
-print("Initial data loading in background...")
+print("Background scheduler started. Initial data load in 30s.")
 
 
 if __name__ == "__main__":

@@ -1222,16 +1222,24 @@ def load_initial_data():
     print("Initial data loaded.")
 
 
-# Initialize DB and start scheduler at module level (works with Gunicorn)
+# Initialize DB at module level (fast — just creates table if not exists)
 with app.app_context():
     init_db()
-    load_initial_data()
 
-# Start background scheduler (module level so Gunicorn picks it up)
+# Start background scheduler at module level so Gunicorn picks it up
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(background_refresh, 'interval', minutes=120)
 scheduler.start()
 print("Background scheduler started.")
+
+# Load initial data in a background thread so gunicorn starts immediately
+# and passes Railway's health check without waiting 5-10 min for API calls
+def _startup_loader():
+    with app.app_context():
+        load_initial_data()
+
+threading.Thread(target=_startup_loader, daemon=True).start()
+print("Initial data loading in background...")
 
 
 if __name__ == "__main__":

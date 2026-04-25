@@ -1,458 +1,443 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description" content="">
-    <meta name="author" content="">
+    <title>TB Track - Order Tracking</title>
 
-    <title>Daily Tasker - Tracking</title>
-
-    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
-    <link
-        href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
-        rel="stylesheet">
-
+    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Nunito:400,600,700,800" rel="stylesheet">
     <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
-
     <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
- <style>
-        .status-buttons {
-            display: none;
-            margin-top: 10px;
+
+    <style>
+        /* ── Status badge colours ── */
+        .badge-status { font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; display: inline-block; }
+        .status-delivered    { background: #1cc88a; color: #fff; }
+        .status-booked       { background: #4e73df; color: #fff; }
+        .status-unbooked     { background: #858796; color: #fff; }
+        .status-return       { background: #e74a3b; color: #fff; }
+        .status-transit      { background: #f6c23e; color: #333; }
+        .status-other        { background: #36b9cc; color: #fff; }
+
+        /* ── Actions dropdown ── */
+        .status-buttons { display: none; margin-top: 8px; }
+        .status-buttons .btn { margin: 2px; }
+
+        /* ── Auto-refresh indicator ── */
+        #refresh-indicator {
+            position: fixed; bottom: 16px; right: 16px;
+            background: #4e73df; color: #fff;
+            padding: 6px 12px; border-radius: 20px;
+            font-size: 12px; display: none; z-index: 9999;
         }
-        .status-buttons .btn {
-            margin-right: 5px;
-            margin-bottom: 5px;
+
+        /* ── Mobile: hide less-important columns ── */
+        @media (max-width: 768px) {
+            .hide-mobile { display: none !important; }
+            .table td, .table th { font-size: 12px; padding: 4px 6px; }
+            .btn-sm { font-size: 11px; padding: 2px 6px; }
+        }
+
+        /* ── Nested item table ── */
+        .item-table { min-width: 400px; }
+        .item-table td { vertical-align: middle; }
+
+        /* ── Daraz token banner ── */
+        #token-banner {
+            display: none; padding: 8px 20px; text-align: center;
+            font-weight: 500; font-size: 13px;
+            position: sticky; top: 0; z-index: 999;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
     </style>
 </head>
 
 <body id="page-top">
+<div id="wrapper">
 
-    <div id="wrapper">
+    {% include 'header.html' %}
 
-        {% include 'header.html' %}
-        <div id="content-wrapper" class="d-flex flex-column">
+    <div id="content-wrapper" class="d-flex flex-column">
+    <div id="content">
 
-            <div id="content">
+        <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
+            <form class="form-inline">
+                <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
+                    <i class="fa fa-bars"></i>
+                </button>
+            </form>
+            <ul class="navbar-nav ml-auto">
+                <li class="nav-item">
+                    <span id="last-refresh-time" class="nav-link text-muted small d-none d-sm-inline"></span>
+                </li>
+            </ul>
+        </nav>
 
+        <!-- Daraz token banner -->
+        <div id="token-banner">
+            <span id="token-message"></span>
+            <a id="reauth-btn"
+               href="https://api.daraz.pk/oauth/authorize?response_type=code&redirect_uri=https://admin.tickbags.com/daraz&client_id=501554"
+               style="margin-left:12px; padding:4px 14px; background:#e63946; color:#fff; border-radius:4px; text-decoration:none; font-size:12px; display:none;">
+                Re-authenticate Daraz
+            </a>
+        </div>
 
-                <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
-                    <form class="form-inline">
-                        <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
-                            <i class="fa fa-bars"></i>
+        <div class="container-fluid">
+            <h1 class="h3 mb-3 text-gray-800">Order Tracking</h1>
+
+            <!-- ── Shopify Orders ── -->
+            <div class="card shadow mb-4">
+                <div class="card-header py-3 d-flex align-items-center justify-content-between">
+                    <h6 class="m-0 font-weight-bold text-primary">Shopify Orders</h6>
+                    <div>
+                        <button id="applyDeliveredBtn" class="btn btn-success btn-sm mr-2" onclick="applyDeliveredToAll()">
+                            Apply Delivered to All
                         </button>
-                    </form>
-
-                    <ul class="navbar-nav ml-auto">
-                        <li class="nav-item dropdown no-arrow d-sm-none">
-                            <a class="nav-link dropdown-toggle" href="#" id="searchDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <i class="fas fa-search fa-fw"></i>
-                            </a>
-                            <div class="dropdown-menu dropdown-menu-right p-3 shadow animated--grow-in" aria-labelledby="searchDropdown">
-                                <form class="form-inline mr-auto w-100 navbar-search">
-                                    <div class="input-group">
-                                        <input type="text" class="form-control bg-light border-0 small" placeholder="Search for..." aria-label="Search" aria-describedby="basic-addon2">
-                                        <div class="input-group-append">
-                                            <button class="btn btn-primary" type="button">
-                                                <i class="fas fa-search fa-sm"></i>
-                                            </button>
+                        <button id="refreshTrackingBtn" class="btn btn-info btn-sm" onclick="refreshTracking()">
+                            Refresh Tracking
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-hover" id="dataTable" width="100%" cellspacing="0">
+                            <thead class="thead-light">
+                                <tr>
+                                    <th>Order</th>
+                                    <th>Customer</th>
+                                    <th class="hide-mobile">Tags</th>
+                                    <th class="hide-mobile">Payment</th>
+                                    <th class="hide-mobile">Date</th>
+                                    <th class="hide-mobile">Price</th>
+                                    <th>Items</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for order in order_details %}
+                                <tr>
+                                    <td>
+                                        <a href="{{ order.order_link }}" target="_blank">
+                                            <strong>{{ order.order_id }}</strong>
+                                        </a>
+                                    </td>
+                                    <td style="min-width:130px;">
+                                        {% set item0 = order.line_items[0] if order.line_items else {} %}
+                                        <div style="font-weight:600;">{{ item0.get('name', order.customer_details.name) }}</div>
+                                        <div class="text-muted small">{{ item0.get('city', order.customer_details.city) }}</div>
+                                        <div class="text-muted small">{{ item0.get('phone', order.customer_details.phone) }}</div>
+                                        {% if item0.get('phone') %}
+                                        <div class="mt-1 d-flex flex-wrap" style="gap:3px;">
+                                            <a href="tel:{{ item0.phone }}" class="btn btn-primary btn-sm">
+                                                <i class="fas fa-phone fa-xs"></i>
+                                            </a>
+                                            <div class="btn-group">
+                                                <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown">
+                                                    <i class="fab fa-whatsapp fa-xs"></i>
+                                                </button>
+                                                <div class="dropdown-menu">
+                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days." target="_blank">Dispatch Message</a>
+                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20Your%20order%23{{ order.order_id }}%20has%20been%20delayed.%20We%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest." target="_blank">Delay Message</a>
+                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20Logistics%20attempted%20delivery%20of%20order%23{{ order.order_id }}%20but%20address%20was%20closed.%20Please%20advise%20re-delivery." target="_blank">Address Closed</a>
+                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20You%20refused%20delivery%20of%20order%23{{ order.order_id }}.%20Let%20us%20know%20if%20you%27re%20still%20interested." target="_blank">Refused Message</a>
+                                                    <a class="dropdown-item small" href="https://wa.me/{{ item0.phone }}?text=Hello%20{{ item0.name }},%20Your%20order%23{{ order.order_id }}%20was%20delivered.%20Please%20share%20your%20feedback!" target="_blank">Feedback</a>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                </form>
-                            </div>
-                        </li>
-
-                         <div class="topbar-divider d-none d-sm-block"></div>
-
-                        <li class="nav-item dropdown no-arrow">
-                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
-                                <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
-                            </a>
-                            <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in" aria-labelledby="userDropdown">
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-user fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Profile
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-cogs fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Settings
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-list fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Activity Log
-                                </a>
-                                <div class="dropdown-divider"></div>
-                                <a class="dropdown-item" href="#" data-toggle="modal" data-target="#logoutModal">
-                                    <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Logout
-                                </a>
-                            </div>
-                        </li>
-                    </ul>
-                </nav>
-                <div class="container-fluid">
-
-                    <h1 class="h3 mb-2 text-gray-800">Order Tracking</h1>
-
-                    <div class="card shadow mb-4">
-                        <div class="card-header py-3">
-                            <h6 class="m-0 font-weight-bold text-primary">Shopify - Pending </h6>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
-                                    <thead>
-                                        <tr>
-                                            <th>Order ID</th>
-                                            <th style="width: 15%;">Customer</th>
-                                            <th>City</th>
-                                            <th>Tags</th>
-                                            <th>Payment</th>
-                                            <th>Date</th>
-                                            <th>Total Price</th>
-                                            <th>Items</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tfoot>
-                                        <tr>
-                                            <th>Order ID</th>
-                                            <th style="width: 15%;">Customer</th>
-                                            <th>City</th>
-                                            <th>Tags</th>
-                                            <th>Payment</th>
-                                            <th>Date</th>
-                                            <th>Total Price</th>
-                                            <th>Items</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </tfoot>
-                                    <tbody>
-                                        {% for order in order_details %}
-                                            <tr>
-                                                <td>
-                                                    <a href="{{order.order_link}}"><p>{{ order.order_id }}</p></a>
-                                                </td>
-                                                <td>
-                                                    {{ order.line_items[0].name }}<br>
-                                                    {{ order.line_items[0].address }}<br>
-                                                    {{ order.line_items[0].city }}<br>
-                                                    {{ order.line_items[0].phone }}<br>
-                                                    <a href="tel:{{ order.line_items[0].phone }}" class="btn btn-primary btn-sm">Call</a>
-                                                    <div class="btn-group">
-                                                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                                            WhatsApp
-                                                        </button>
-                                                        <div class="dropdown-menu">
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Dispatch Message</a>
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20delayed,%20please%20be%20assured%20that%20we%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Delay Message</a>
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20TickBags.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%27re%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
-                                                            <a class="dropdown-item" href="https://wa.me/{{ order.line_items[0].phone }}?text=Hello%20{{ order.line_items[0].name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20was%20delivered%20recently.%20Please%20let%20us%20know%20about%20your%20experience%20with%20us.%20Your%20feedback%20will%20surely%20help%20us%20improve.%20Thank%20You!" target="_blank">Send Feedback Message</a>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td>{{ order.line_items[0].city }}</td>
-
-                                                <td>{% for tag in order.tags %}
-                                                     <span class="badge badge-secondary">{{ tag }}</span><br>
-                                                {% endfor %}</td>
-                                                <td>{{ order.financial_status }}</td>
-                                                <td>{{ order.created_at }}</td>
-                                                <td>{{ order.total_price }}</td>
-                                                <td>
-                                                    <table class="table table-sm">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>Image</th>
-                                                                <th style="width: 30%;">Title</th>
-                                                                <th>Pcs</th>
-                                                                <th>Tracking Number</th>
-                                                                <th style="width: 20%;">Status</th>
-                                                                <th>Email</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {% for item in order.line_items %}
-                                                                <tr>
-                                                                    <td><img src="{{ item.image_src }}" width="50" height="50"></td>
-                                                                    <td>{{ item.product_title }}</td>
-                                                                    <td>{{ item.quantity }}</td>
-                                                                    <td><a href=track/{{item.tracking_number}} target=”_blank”> {{ item.tracking_number }} </a> </td>
-                                                                    <td>{{ item.status }}</td>
-
-                                                                    <td>
-                                                                       <div class="btn-group">
-                                    <button type="button" class="btn btn-info btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                        Email
-                                    </button>
-                                    <div class="dropdown-menu">
-                                        <a class="dropdown-item" href="#" onclick="sendEmail('delay', '{{ item.tracking_number }}')">Send Email for Delay</a>
-                                        <a class="dropdown-item" href="#" onclick="sendEmail('incomplete', '{{ item.tracking_number }}')">Send Email for Incomplete Address</a>
-                                        <a class="dropdown-item" href="#" onclick="sendEmail('refusal', '{{ item.tracking_number }}')">Send Email for Fake Refusal</a>
-                                    </div>
-                                </div>
-                                                                    </td>
-                                                                </tr>
-                                                            {% endfor %}
-                                                        </tbody>
-                                                    </table>
-                                                </td>
-                                                 <td> {{ order.status}}</td>
-                                                 <td>
-                                                        <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
-                                                        <div class="status-buttons">
-                                                             <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
-                                                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
-                                                            <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
-                                                            <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
-                                                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
+                                        {% endif %}
+                                    </td>
+                                    <td class="hide-mobile">
+                                        {% for tag in order.tags %}
+                                            <span class="badge badge-secondary" style="font-size:11px;">{{ tag }}</span><br>
+                                        {% endfor %}
+                                    </td>
+                                    <td class="hide-mobile">{{ order.financial_status }}</td>
+                                    <td class="hide-mobile" style="white-space:nowrap;">{{ order.created_at[:10] }}</td>
+                                    <td class="hide-mobile">Rs {{ order.total_price }}</td>
+                                    <td>
+                                        <div class="table-responsive">
+                                        <table class="table table-sm item-table mb-0">
+                                            <tbody>
+                                                {% for item in order.line_items %}
+                                                <tr>
+                                                    <td style="width:50px;"><img src="{{ item.image_src }}" width="45" height="45" style="object-fit:cover;border-radius:4px;"></td>
+                                                    <td>
+                                                        <div style="font-size:12px;">{{ item.product_title }}</div>
+                                                        <div class="text-muted" style="font-size:11px;">Qty: {{ item.quantity }}</div>
+                                                    </td>
+                                                    <td style="white-space:nowrap;">
+                                                        <a href="/track/{{ item.tracking_number }}" target="_blank" style="font-size:11px;">{{ item.tracking_number }}</a>
+                                                    </td>
+                                                    <td>
+                                                        <div class="btn-group">
+                                                            <button type="button" class="btn btn-info btn-sm dropdown-toggle" data-toggle="dropdown" style="font-size:11px;">
+                                                                Email
+                                                            </button>
+                                                            <div class="dropdown-menu">
+                                                                <a class="dropdown-item small" href="#" onclick="sendEmail('delay', '{{ item.tracking_number }}')">Delay</a>
+                                                                <a class="dropdown-item small" href="#" onclick="sendEmail('incomplete', '{{ item.tracking_number }}')">Incomplete Address</a>
+                                                                <a class="dropdown-item small" href="#" onclick="sendEmail('refusal', '{{ item.tracking_number }}')">Fake Refusal</a>
+                                                            </div>
                                                         </div>
                                                     </td>
-                                            </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                                 <button class="btn btn-primary btn-sm" onclick="applyDeliveredToAll()">Apply 'Delivered' to All Delivered Orders</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    ---
-
-                     <!-- Daraz Token Banner -->
-    <div id="token-banner" style="
-        display:none;
-        padding: 10px 20px;
-        text-align: center;
-        font-weight: 500;
-        font-size: 14px;
-        position: sticky;
-        top: 0;
-        z-index: 999;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-        <span id="token-message"></span>
-        <a id="reauth-btn"
-           href="https://api.daraz.pk/oauth/authorize?response_type=code&redirect_uri=https://admin.tickbags.com/daraz&client_id=501554"
-           style="margin-left:12px; padding:4px 14px; background:#e63946; color:white;
-                  border-radius:4px; text-decoration:none; font-size:13px; display:none;">
-            🔑 Re-authenticate Daraz
-        </a>
-    </div>
-
-
-                    <div class="card shadow mb-4">
-                        <div class="card-header py-3">
-                            <h6 class="m-0 font-weight-bold text-primary">Daraz Orders</h6>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-                                <table class="table table-bordered" id="darazTable" width="100%" cellspacing="0">
-                                    <thead>
-                                        <tr>
-                                            <th>Order ID</th>
-                                            <th style="width: 15%;">Customer</th>
-                                            <th>Status</th>
-                                            <th>Date</th>
-                                            <th>Total Price</th>
-                                            <th>Items</th>
-                                        </tr>
-                                    </thead>
-                                    <tfoot>
-                                        <tr>
-                                            <th>Order ID</th>
-                                            <th style="width: 15%;">Customer</th>
-                                            <th>Status</th>
-                                            <th>Date</th>
-                                            <th>Total Price</th>
-                                            <th>Items</th>
-                                        </tr>
-                                    </tfoot>
-                                    <tbody>
-                                        {% for order in darazOrders %}
-                                            <tr>
-                                                <td>{{ order.order_id }}</td>
-                                                <td>
-                                                    {{ order.customer.name }}<br>
-                                                    {{ order.customer.address }}<br>
-                                                    {{ order.customer.phone }}
-                                                </td>
-                                                <td>{{ order.status }}</td>
-                                                <td>{{ order.date }}</td>
-                                                <td>{{ order.total_price }}</td>
-                                                <td>
-                                                    <table class="table table-sm">
-                                                        <thead>
-                                                            <tr>
-                                                                <th>Image</th>
-                                                                <th style="width: 30%;">Title</th>
-                                                                <th>Qty</th>
-                                                                <th>Tracking Number</th>
-                                                                <th>Status</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody>
-                                                            {% for item in order.items_list %}
-                                                                <tr>
-                                                                    <td><img src="{{ item.item_image }}" width="50" height="50"></td>
-                                                                    <td>{{ item.item_title }}</td>
-                                                                    <td>{{ item.quantity }}</td>
-                                                                    <td><a href="/track/{{ item.tracking_number }}" target="_blank">{{ item.tracking_number }}</a></td>
-                                                                    <td>{{ item.status }}</td>
-                                                                </tr>
-                                                            {% endfor %}
-                                                        </tbody>
-                                                    </table>
-                                                </td>
-                                            </tr>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        {% set s = order.status %}
+                                        {% if 'Delivered' in s or 'DELIVERED' in s %}
+                                            <span class="badge-status status-delivered">{{ s }}</span>
+                                        {% elif 'Return' in s %}
+                                            <span class="badge-status status-return">{{ s }}</span>
+                                        {% elif s == 'Booked' %}
+                                            <span class="badge-status status-booked">{{ s }}</span>
+                                        {% elif s == 'Un-Booked' %}
+                                            <span class="badge-status status-unbooked">{{ s }}</span>
+                                        {% elif 'Out For' in s or 'Dispatch' in s %}
+                                            <span class="badge-status status-transit">{{ s }}</span>
                                         {% else %}
-                                            <tr>
-                                                <td colspan="6">No Daraz orders to display.</td>
-                                            </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+                                            <span class="badge-status status-other">{{ s }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
+                                        <div class="status-buttons">
+                                            <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
+                                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
+                                            <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
+                                            <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
+                                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-                </div>
+            </div>
 
-            <footer class="sticky-footer bg-white">
-                <div class="container my-auto">
-                    <div class="copyright text-center my-auto">
-                        <span>Copyright &copy; Your Website 2020</span>
+            <!-- ── Daraz Orders ── -->
+            <div class="card shadow mb-4">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Daraz Orders</h6>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-hover" id="darazTable" width="100%" cellspacing="0">
+                            <thead class="thead-light">
+                                <tr>
+                                    <th>Order ID</th>
+                                    <th>Customer</th>
+                                    <th class="hide-mobile">Status</th>
+                                    <th class="hide-mobile">Date</th>
+                                    <th class="hide-mobile">Price</th>
+                                    <th>Items</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for order in darazOrders %}
+                                <tr>
+                                    <td><strong>{{ order.order_id }}</strong></td>
+                                    <td>
+                                        <div style="font-weight:600;">{{ order.customer.name }}</div>
+                                        <div class="text-muted small">{{ order.customer.address }}</div>
+                                        <div class="text-muted small">{{ order.customer.phone }}</div>
+                                    </td>
+                                    <td class="hide-mobile">{{ order.status }}</td>
+                                    <td class="hide-mobile" style="white-space:nowrap;">{{ order.date[:10] }}</td>
+                                    <td class="hide-mobile">Rs {{ order.total_price }}</td>
+                                    <td>
+                                        <div class="table-responsive">
+                                        <table class="table table-sm item-table mb-0">
+                                            <tbody>
+                                                {% for item in order.items_list %}
+                                                <tr>
+                                                    <td style="width:50px;"><img src="{{ item.item_image }}" width="45" height="45" style="object-fit:cover;border-radius:4px;"></td>
+                                                    <td>
+                                                        <div style="font-size:12px;">{{ item.item_title }}</div>
+                                                        <div class="text-muted" style="font-size:11px;">Qty: {{ item.quantity }}</div>
+                                                    </td>
+                                                    <td style="white-space:nowrap;font-size:11px;">
+                                                        <a href="/track/{{ item.tracking_number }}" target="_blank">{{ item.tracking_number }}</a>
+                                                    </td>
+                                                    <td style="font-size:11px;">{{ item.status }}</td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="6" class="text-center text-muted">No Daraz orders.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            </footer>
+            </div>
+        </div><!-- container-fluid -->
+
+    </div><!-- content -->
+
+    <footer class="sticky-footer bg-white">
+        <div class="container my-auto">
+            <div class="copyright text-center my-auto">
+                <span>Tick Bags &copy; {{ 2025 }}</span>
             </div>
         </div>
-    <a class="scroll-to-top rounded" href="#page-top">
-        <i class="fas fa-angle-up"></i>
-    </a>
+    </footer>
+    </div><!-- content-wrapper -->
+</div><!-- wrapper -->
 
-    <div class="modal fade" id="logoutModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel"
-        aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="exampleModalLabel">Ready to Leave?</h5>
-                    <button class="close" type="button" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">×</span>
-                    </button>
-                </div>
-                <div class="modal-body">Select "Logout" below if you are ready to end your current session.</div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" type="button" data-dismiss="modal">Cancel</button>
-                    <a class="btn btn-primary" href="login.html">Logout</a>
-                </div>
-            </div>
-        </div>
-    </div>
+<div id="refresh-indicator">Refreshing tracking data...</div>
 
-    <script src="static/assets/vendor/jquery/jquery.min.js"></script>
-    <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+<a class="scroll-to-top rounded" href="#page-top"><i class="fas fa-angle-up"></i></a>
 
-    <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-
-    <script src="static/assets/js/sb-admin-2.min.js"></script>
-
-    <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
-    <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
-
-    <script src="static/assets/js/track.js"></script>
+<!-- Scripts -->
+<script src="static/assets/vendor/jquery/jquery.min.js"></script>
+<script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
+<script src="static/assets/js/sb-admin-2.min.js"></script>
+<script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
+<script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
+<script src="static/assets/js/track.js"></script>
 
 <script>
-    $(document).ready(function() {
-        // Initialize Shopify DataTable
-        // Check if the table is already a DataTable and destroy it if necessary
-        if ($.fn.DataTable.isDataTable('#dataTable')) {
-            $('#dataTable').DataTable().destroy();
-        }
-        $('#dataTable').DataTable({
-            "order": [[0, "desc"]],
-            "columnDefs": [
-                { "searchable": false, "targets": [-1, 4] }
-            ]
-        });
-
-        // Initialize Daraz DataTable
-        // Check if the table is already a DataTable and destroy it if necessary
-        if ($.fn.DataTable.isDataTable('#darazTable')) {
-            $('#darazTable').DataTable().destroy();
-        }
-        $('#darazTable').DataTable({
-            "order": [[0, "desc"]],
-            // Add column definitions for Daraz table if needed, e.g., for searchable columns
-            // "columnDefs": [
-            //     { "searchable": false, "targets": [0, 1] } // Example: make first two columns non-searchable
-            // ]
-        });
+$(document).ready(function () {
+    // Shopify table
+    if ($.fn.DataTable.isDataTable('#dataTable')) $('#dataTable').DataTable().destroy();
+    $('#dataTable').DataTable({
+        order: [[0, 'desc']],
+        columnDefs: [{ searchable: false, targets: [-1, -2] }],
+        responsive: true,
+        pageLength: 25,
     });
-</script>
-<script>
-        $(document).ready(function() {
-            var currentUrl = window.location.pathname;
-            $('.nav-item a').each(function() {
-                var linkUrl = $(this).attr('href');
-                if (currentUrl === '/' + linkUrl) {
-                    $(this).parent().addClass('active');
-                }
-            });
-        });
 
- function applyDeliveredToAll() {
+    // Daraz table
+    if ($.fn.DataTable.isDataTable('#darazTable')) $('#darazTable').DataTable().destroy();
+    $('#darazTable').DataTable({
+        order: [[0, 'desc']],
+        responsive: true,
+        pageLength: 25,
+    });
+
+    // Highlight active nav link
+    var currentUrl = window.location.pathname;
+    $('.nav-item a').each(function () {
+        if (currentUrl === '/' + $(this).attr('href')) {
+            $(this).parent().addClass('active');
+        }
+    });
+
+    // Update last-refresh time display
+    document.getElementById('last-refresh-time').textContent =
+        'Last refreshed: ' + new Date().toLocaleTimeString();
+});
+
+// ── Apply Delivered to All — sequential with 600ms delay between calls ──
+async function applyDeliveredToAll() {
+    const btn = document.getElementById('applyDeliveredBtn');
     const orders = {{ order_details|tojson }};
+    const delivered = orders.filter(o =>
+        o.status && (o.status.toUpperCase().includes('DELIVERED') || o.status === 'Delivered')
+    );
 
-    orders.forEach(order => {
-        if (order.status === 'DELIVERED') {
-            applyTag(order.order_id, 'Delivered');
+    if (delivered.length === 0) {
+        alert('No delivered orders found.');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = `Applying (0/${delivered.length})...`;
+
+    let done = 0;
+    for (const order of delivered) {
+        try {
+            await applyTag(order.id, 'Delivered');
+        } catch (e) {
+            console.error('Failed for order', order.order_id, e);
         }
-    });
+        done++;
+        btn.textContent = `Applying (${done}/${delivered.length})...`;
+        await new Promise(r => setTimeout(r, 600));
+    }
+
+    btn.textContent = `Done (${done}/${delivered.length})`;
+    setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = 'Apply Delivered to All';
+    }, 3000);
 }
+
+// ── Lightweight auto-refresh: re-fetch Leopards tracking every 8 minutes ──
+function refreshTracking() {
+    const btn = document.getElementById('refreshTrackingBtn');
+    const indicator = document.getElementById('refresh-indicator');
+    btn.disabled = true;
+    indicator.style.display = 'block';
+
+    fetch('/api/refresh-tracking', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            indicator.style.display = 'none';
+            btn.disabled = false;
+            if (data.updated > 0) {
+                // Reload the page to show updated statuses
+                location.reload();
+            } else {
+                alert('Tracking is up to date.');
+            }
+        })
+        .catch(() => {
+            indicator.style.display = 'none';
+            btn.disabled = false;
+            console.error('Tracking refresh failed');
+        });
+}
+
+// Auto-refresh every 8 minutes (480000ms)
+setInterval(function () {
+    fetch('/api/refresh-tracking', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.updated > 0) location.reload();
+        })
+        .catch(() => {});
+}, 480000);
 </script>
+
+<!-- Daraz token status banner -->
 <script>
 fetch('/daraz/token-status')
     .then(r => r.json())
     .then(data => {
-        console.log('Token status:', data);  // Check browser console first
-
         const banner = document.getElementById('token-banner');
         const msg = document.getElementById('token-message');
         const btn = document.getElementById('reauth-btn');
 
-        // Force show regardless of status for debugging
-        banner.style.display = 'block';
-
         if (data.status === 'missing') {
+            banner.style.display = 'block';
             banner.style.background = '#ffcccc';
-            msg.textContent = '❌ Daraz not authenticated.';
+            msg.textContent = 'Daraz not authenticated.';
             btn.style.display = 'inline-block';
         } else if (data.days_left <= 3) {
+            banner.style.display = 'block';
             banner.style.background = '#fff3cd';
-            msg.textContent = `⚠️ Daraz token expires in ${data.days_left} day(s).`;
+            msg.textContent = `Daraz token expires in ${data.days_left} day(s).`;
             btn.style.display = 'inline-block';
-        } else {
-            banner.style.background = '#d4edda';
-            msg.textContent = `✅ Daraz token valid for ${data.days_left} more days.`;
         }
     })
-    .catch(err => {
-        console.error('Token fetch failed:', err);
-        const banner = document.getElementById('token-banner');
-        banner.style.display = 'block';
-        banner.style.background = '#ffcccc';
-        document.getElementById('token-message').textContent = '❌ Could not reach /daraz/token-status';
-    });
+    .catch(() => {});
 </script>
 
 </body>
-
 </html>

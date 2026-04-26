@@ -1024,8 +1024,9 @@ def leopards_webhook():
 
 @app.route('/scan', methods=['GET', 'POST'])
 def search():
+    global order_details, daraz_orders
     if request.method == 'GET' and 'term' not in request.args:
-        return render_template('scan.html')
+        return render_template('scan.html', order_details=order_details)
 
     search_term = (request.args.get('term') or request.form.get('search_term') or "").split(',')[0].strip()
     if not search_term:
@@ -1064,11 +1065,11 @@ def search():
             formatted_order['source'] = 'shopify'
 
         if request.method == 'POST':
-            return render_template('scan.html', search_term=search_term, order_found=formatted_order)
+            return render_template('scan.html', order_details=order_details, search_term=search_term, order_found=formatted_order)
         return jsonify(formatted_order)
 
     if request.method == 'POST':
-        return render_template('scan.html', search_term=search_term, order_found=None)
+        return render_template('scan.html', order_details=order_details, search_term=search_term, order_found=None)
     return jsonify({"error": "Order not found"}), 404
 
 

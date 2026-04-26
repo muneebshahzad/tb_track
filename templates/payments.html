@@ -119,18 +119,10 @@ let sortDir = 1;
 
 function fPKR(n) { return 'Rs ' + Math.round(n).toLocaleString('en-PK'); }
 
-// Handles comma-separated billed_charges like "-5280.00,5580.00"
-function parseBilledCharges(val) {
-  if (val === null || val === undefined || val === '') return NaN;
-  const parts = String(val).split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
-  if (!parts.length) return NaN;
-  return parts.reduce((a, b) => a + b, 0);
-}
-
-// Ship paid = billed_charges is present and non-null
-function shippingPaidBadge(billedChargesVal) {
-  const hasPaid = billedChargesVal && String(billedChargesVal).trim() !== '' && String(billedChargesVal).trim() !== 'null';
-  return { isPaid: !!hasPaid };
+// Returns array of numeric parts from billed_charges (0, 1, or 2 values)
+function getBilledParts(val) {
+  if (!val) return [];
+  return String(val).split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
 }
 
 // Fetch one chunk with a timeout, returning null on failure
@@ -227,17 +219,16 @@ async function enrichAndRender(packetList, cnNums) {
     const charges = chargesMap[cn] || {};
     const cod     = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
 
-    // Shipping charge: parseBilledCharges handles comma-separated like "-5280.00,5580.00"
-    const totalCharged = parseBilledCharges(charges.billed_charges);
-    const billChg      = !isNaN(totalCharged)
-      ? Math.round(totalCharged * 1.25 * 1.16)
+    // Ship paid = billed_charges has ≥1 value; unpaid = null/empty
+    const billedParts = getBilledParts(charges.billed_charges);
+    const shipPaid    = billedParts.length > 0;
+    // Paid: each part × 1.34 × 1.16 summed; Unpaid: show gross_charges
+    const billChg = shipPaid
+      ? Math.round(billedParts.reduce((a, b) => a + b, 0) * 1.34 * 1.16)
       : Math.round(parseFloat(charges.gross_charges || 0));
 
-    // Ship paid = invoice_cheque_date present in shipping-charges response
-    const shipPaid = !!(charges.invoice_cheque_date && String(charges.invoice_cheque_date).trim() !== '' && String(charges.invoice_cheque_date).trim() !== 'null');
-
-    // COD paid = payment-details status === "Paid"
-    const codPaid = (pay.status || '').toLowerCase() === 'paid';
+    // COD paid = status "Paid" or "Pending"; only null = Unpaid
+    const codPaid = pay.status === 'Paid' || pay.status === 'Pending';
 
     // Invoice number (not date) e.g. "IBLE3124134"
     const invNum = pay.invoice_cheque_no || charges.invoice_cheque_no || '—';

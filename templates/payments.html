@@ -203,7 +203,8 @@ async function loadFromOrders() {
 }
 
 async function enrichAndRender(packetList, cnNums) {
-  const chunks = makeChunks(cnNums, 50);
+  // Use smaller chunks (10) to avoid Leopards API timeouts with large batches
+  const chunks = makeChunks(cnNums, 10);
 
   // Payment details + shipping charges — run all chunks in parallel
   const [payResults, chargeResults] = await Promise.all([
@@ -216,34 +217,36 @@ async function enrichAndRender(packetList, cnNums) {
     if (d && d.payment_list) d.payment_list.forEach(p => { payMap[String(p.booked_packet_cn)] = p; });
   });
 
+  // getShippingCharges returns flat objects: {cn_number, billed_charges, invoice_cheque_date, ...}
   const chargesMap = {};
   chargeResults.forEach(d => {
-    if (d && d.data) d.data.forEach(c => { chargesMap[String(c.cn_number)] = c.charges || c; });
+    if (d && d.data) d.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
   });
 
   allRecords = packetList.map(p => {
-    // CN field: last-status uses "tracking_number"; active-cns uses "tracking_number" too
-    const cn          = p.tracking_number || p.cn || '';
-    const pay         = payMap[cn]     || {};
-    const charges     = chargesMap[cn] || {};
-    const cod         = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
+    const cn      = p.tracking_number || p.cn || '';
+    const pay     = payMap[cn]     || {};
+    const charges = chargesMap[cn] || {};
+    const cod     = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
 
-    // Shipping charge: use parseBilledCharges (handles comma-separated) × 1.25 × 1.16, fallback to gross_charges
+    // Shipping charge: parseBilledCharges handles comma-separated like "-5280.00,5580.00"
     const totalCharged = parseBilledCharges(charges.billed_charges);
     const billChg      = !isNaN(totalCharged)
       ? Math.round(totalCharged * 1.25 * 1.16)
       : Math.round(parseFloat(charges.gross_charges || 0));
 
-    // Ship paid = billed_charges field is present & non-empty
-    const shipPaid    = shippingPaidBadge(charges.billed_charges || '').isPaid;
+    // Ship paid = invoice_cheque_date present in shipping-charges response
+    const shipPaid = !!(charges.invoice_cheque_date && String(charges.invoice_cheque_date).trim() !== '' && String(charges.invoice_cheque_date).trim() !== 'null');
 
-    // COD paid = invoice_cheque_date is present & non-null
-    const invChequeDate = charges.invoice_cheque_date || '';
-    const codPaid       = invChequeDate.trim() !== '' && invChequeDate.trim() !== 'null';
-    const invDate       = invChequeDate || pay.invoice_cheque_date || '—';
+    // COD paid = payment-details status === "Paid"
+    const codPaid = (pay.status || '').toLowerCase() === 'paid';
+
+    // Invoice number (not date) e.g. "IBLE3124134"
+    const invNum = pay.invoice_cheque_no || charges.invoice_cheque_no || '—';
 
     const status      = p.booked_packet_status || '—';
-    const isDelivered = status.toLowerCase().includes('delivered');
+    // Use anchored check: "Undelivered" must NOT be treated as delivered
+    const isDelivered = /^delivered/i.test(status);
     const net         = isDelivered ? cod * 0.96 - billChg : -billChg;
 
     return {
@@ -255,7 +258,7 @@ async function enrichAndRender(packetList, cnNums) {
       ship_charges: billChg,
       ship_paid:    shipPaid,
       cod_paid:     codPaid,
-      inv_date:     invDate,
+      inv_date:     invNum,
       net,
     };
   });
@@ -269,8 +272,8 @@ function updateKPIs() {
     totalCOD += x.cod;
     if (x.ship_charges) totalCharges += x.ship_charges;
     if (!x.ship_paid && x.ship_charges) unpaidShippingTotal += x.ship_charges;
-    const isDelivered = (x.status||'').toLowerCase().includes('delivered');
-    const isReturned  = (x.status||'').toLowerCase().includes('return');
+    const isDelivered = /^delivered/i.test(x.status || '');
+    const isReturned  = /return/i.test(x.status || '');
     if (isDelivered && !x.cod_paid) unpaidDeliveredCOD += x.cod;
     if (isDelivered)     { deliveredCount++; deliveredCOD += x.cod; }
     else if (isReturned) { returnedCount++;  returnedCOD  += x.cod; }
@@ -331,7 +334,7 @@ function renderTable() {
     return;
   }
   document.getElementById('finBody').innerHTML = rows.map(r => {
-    const net = r.net || (r.status&&r.status.toUpperCase().includes('DELIVERED') ? r.cod*0.96 - r.ship_charges : 0);
+    const net = r.net || (/^delivered/i.test(r.status||'') ? r.cod*0.96 - r.ship_charges : 0);
     return `<tr>
       <td style="font-family:'DM Mono',monospace;font-weight:700;color:#4e73df;font-size:11px;">${r.order_id}</td>
       <td style="font-family:'DM Mono',monospace;color:#6f42c1;font-size:11px;">${r.cn}</td>
@@ -358,7 +361,7 @@ function exportCSV() {
   const rows = getFiltered();
   const lines = [['Order ID','CN #','Products','COD','Status','Ship Charges','Ship Paid','COD Paid','Net','Invoice Date']];
   rows.forEach(r => {
-    const net = r.net || (r.status&&r.status.toUpperCase().includes('DELIVERED') ? r.cod*0.96 - r.ship_charges : 0);
+    const net = r.net || (/^delivered/i.test(r.status||'') ? r.cod*0.96 - r.ship_charges : 0);
     lines.push([r.order_id, r.cn, `"${r.products}"`, r.cod, r.status, r.ship_charges, r.ship_paid?'Yes':'No', r.cod_paid?'Yes':'No', Math.round(net), r.inv_date]);
   });
   const blob = new Blob([lines.map(l=>l.join(',')).join('\n')], {type:'text/csv'});

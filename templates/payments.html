@@ -203,25 +203,23 @@ async function loadFromOrders() {
 }
 
 async function enrichAndRender(packetList, cnNums) {
-  // Use smaller chunks (10) to avoid Leopards API timeouts with large batches
-  const chunks = makeChunks(cnNums, 10);
-
-  // Payment details + shipping charges — run all chunks in parallel
-  const [payResults, chargeResults] = await Promise.all([
-    Promise.all(chunks.map(chunk => fetchChunk('/api/leopards/payment-details?cn_numbers=' + chunk.join(',')))),
-    Promise.all(chunks.map(chunk => fetchChunk('/api/leopards/shipping-charges?cn_numbers=' + chunk.join(','))))
+  // Server handles batching internally — send all CNs in one request each
+  const allCNs = cnNums.join(',');
+  const [payResult, chargesResult] = await Promise.all([
+    fetchChunk('/api/leopards/payment-details?cn_numbers=' + allCNs, 120000),
+    fetchChunk('/api/leopards/shipping-charges?cn_numbers=' + allCNs, 120000)
   ]);
 
   const payMap = {};
-  payResults.forEach(d => {
-    if (d && d.payment_list) d.payment_list.forEach(p => { payMap[String(p.booked_packet_cn)] = p; });
-  });
+  if (payResult && payResult.payment_list) {
+    payResult.payment_list.forEach(p => { payMap[String(p.booked_packet_cn)] = p; });
+  }
 
   // getShippingCharges returns flat objects: {cn_number, billed_charges, invoice_cheque_date, ...}
   const chargesMap = {};
-  chargeResults.forEach(d => {
-    if (d && d.data) d.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
-  });
+  if (chargesResult && chargesResult.data) {
+    chargesResult.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
+  }
 
   allRecords = packetList.map(p => {
     const cn      = p.tracking_number || p.cn || '';

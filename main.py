@@ -1111,33 +1111,47 @@ def leopards_last_status():
 @app.route('/api/leopards/payment-details')
 def leopards_payment_details():
     cn_numbers = request.args.get('cn_numbers', '')
+    cn_list = [cn.strip() for cn in cn_numbers.split(',') if cn.strip()]
     api_key = os.getenv('LEOPARD_API_KEY')
     api_password = os.getenv('LEOPARD_PASSWORD')
-    url = (
-        f"https://merchantapi.leopardscourier.com/api/getPaymentDetails/format/json/"
-        f"?api_key={api_key}&api_password={api_password}&cn_numbers={cn_numbers}"
-    )
-    try:
-        r = _req.get(url, verify=False, timeout=30)
-        return jsonify(r.json())
-    except Exception as e:
-        return jsonify({"status": 0, "error": str(e)}), 500
+    all_payments = []
+    for i in range(0, len(cn_list), 20):
+        chunk = ','.join(cn_list[i:i+20])
+        url = (
+            f"https://merchantapi.leopardscourier.com/api/getPaymentDetails/format/json/"
+            f"?api_key={api_key}&api_password={api_password}&cn_numbers={chunk}"
+        )
+        try:
+            r = _req.get(url, verify=False, timeout=30)
+            d = r.json()
+            if d.get('payment_list'):
+                all_payments.extend(d['payment_list'])
+        except Exception:
+            pass
+    return jsonify({"status": 1, "payment_list": all_payments})
 
 
 @app.route('/api/leopards/shipping-charges')
 def leopards_shipping_charges():
     cn_numbers = request.args.get('cn_numbers', '')
+    cn_list = [cn.strip() for cn in cn_numbers.split(',') if cn.strip()]
     api_key = os.getenv('LEOPARD_API_KEY')
     api_password = os.getenv('LEOPARD_PASSWORD')
-    url = (
-        f"https://merchantapi.leopardscourier.com/api/getShippingCharges/format/json/"
-        f"?api_key={api_key}&api_password={api_password}&cn_numbers={cn_numbers}"
-    )
-    try:
-        r = _req.get(url, verify=False, timeout=30)
-        return jsonify(r.json())
-    except Exception as e:
-        return jsonify({"status": 0, "error": str(e)}), 500
+    all_data = []
+    for i in range(0, len(cn_list), 20):
+        chunk = ','.join(cn_list[i:i+20])
+        url = (
+            f"https://merchantapi.leopardscourier.com/api/getShippingCharges/format/json/"
+            f"?api_key={api_key}&api_password={api_password}&cn_numbers={chunk}"
+        )
+        try:
+            r = _req.get(url, verify=False, timeout=30)
+            d = r.json()
+            if d.get('data'):
+                all_data.extend(d['data'])
+        except Exception:
+            pass
+    return jsonify({"status": 1, "data": all_data})
 
 
 @app.route('/api/leopards/track-packets')

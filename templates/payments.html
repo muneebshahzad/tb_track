@@ -7,7 +7,9 @@
   .kpi-card { background: #fff; border-radius: 10px; padding: 13px 16px; border: 1px solid #e3e6f0; position: relative; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
   .kpi-bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; }
   .fin-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .fin-table th { padding: 8px 11px; text-align: left; font-size: 10px; font-weight: 700; color: #858796; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; white-space: nowrap; background: #f8f9fc; }
+  .fin-table th { padding: 8px 11px; text-align: left; font-size: 10px; font-weight: 700; color: #858796; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; white-space: nowrap; background: #f8f9fc; cursor: pointer; user-select: none; }
+  .fin-table th:hover { background: #eef0f9; color: #4e73df; }
+  .sort-arrow { font-size: 9px; opacity: 0.5; }
   .fin-table td { padding: 9px 11px; border-bottom: 1px solid #e3e6f0; vertical-align: middle; }
   .fin-table tr:hover td { background: #f8f9fc; }
   .paid-badge   { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #d4f5e9; color: #0f6848; white-space: nowrap; }
@@ -72,7 +74,18 @@
       <div style="overflow-x:auto;">
         <table class="fin-table" id="finTable">
           <thead>
-            <tr><th>Order ID</th><th>CN #</th><th>Products</th><th>COD</th><th>Status</th><th>Ship.</th><th>Ship. Paid</th><th>COD Paid</th><th>Net</th><th>Invoice</th></tr>
+            <tr>
+              <th data-sort="order_id" onclick="sortBy('order_id')">Order ID <span class="sort-arrow" id="sa-order_id">↕</span></th>
+              <th data-sort="cn" onclick="sortBy('cn')">CN # <span class="sort-arrow" id="sa-cn">↕</span></th>
+              <th data-sort="products" onclick="sortBy('products')">Products <span class="sort-arrow" id="sa-products">↕</span></th>
+              <th data-sort="cod" onclick="sortBy('cod')">COD <span class="sort-arrow" id="sa-cod">↕</span></th>
+              <th data-sort="status" onclick="sortBy('status')">Status <span class="sort-arrow" id="sa-status">↕</span></th>
+              <th data-sort="ship_charges" onclick="sortBy('ship_charges')">Ship. <span class="sort-arrow" id="sa-ship_charges">↕</span></th>
+              <th data-sort="ship_paid" onclick="sortBy('ship_paid')">Ship. Paid <span class="sort-arrow" id="sa-ship_paid">↕</span></th>
+              <th data-sort="cod_paid" onclick="sortBy('cod_paid')">COD Paid <span class="sort-arrow" id="sa-cod_paid">↕</span></th>
+              <th data-sort="net" onclick="sortBy('net')">Net <span class="sort-arrow" id="sa-net">↕</span></th>
+              <th data-sort="inv_date" onclick="sortBy('inv_date')">Invoice <span class="sort-arrow" id="sa-inv_date">↕</span></th>
+            </tr>
           </thead>
           <tbody id="finBody">
             <tr><td colspan="10" style="padding:36px;text-align:center;color:#858796;font-size:13px;">Fetch data using the date range above.</td></tr>
@@ -93,6 +106,8 @@
 <script>
 let allRecords = [];
 let curFilt = 'all';
+let sortCol = null;
+let sortDir = 1;
 
 // Init dates
 (function() {
@@ -276,13 +291,36 @@ function updateKPIs() {
   document.getElementById('kpiPendSub').textContent     = pendingCount + ' orders';
 }
 
+function sortBy(col) {
+  if (sortCol === col) sortDir = -sortDir;
+  else { sortCol = col; sortDir = 1; }
+  document.querySelectorAll('th[data-sort]').forEach(th => {
+    const el = document.getElementById('sa-' + th.dataset.sort);
+    if (!el) return;
+    el.textContent = th.dataset.sort === sortCol ? (sortDir === 1 ? '▲' : '▼') : '↕';
+    el.style.opacity = th.dataset.sort === sortCol ? '1' : '0.5';
+  });
+  renderTable();
+}
+
 function getFiltered() {
   const q = document.getElementById('finSearch').value.toLowerCase();
-  return allRecords.filter(r => {
+  let rows = allRecords.filter(r => {
     const matchQ = !q || r.order_id.toLowerCase().includes(q) || r.cn.toLowerCase().includes(q) || r.products.toLowerCase().includes(q);
     const matchF = curFilt==='all' ? true : curFilt==='ship-paid' ? r.ship_paid : ((r.status||'').toUpperCase().includes('DELIVERED') && !r.cod_paid);
     return matchQ && matchF;
   });
+  if (sortCol) {
+    rows = rows.slice().sort((a, b) => {
+      let av = a[sortCol], bv = b[sortCol];
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      if (av < bv) return -sortDir;
+      if (av > bv) return sortDir;
+      return 0;
+    });
+  }
+  return rows;
 }
 
 function renderTable() {

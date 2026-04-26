@@ -1154,6 +1154,24 @@ def leopards_shipping_charges():
     return jsonify({"status": 1, "data": all_data})
 
 
+@app.route('/api/debug/finance')
+def debug_finance():
+    cn = 'LE7523036243'
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+    results = {}
+    for name, url in [
+        ('shipping_charges', f"https://merchantapi.leopardscourier.com/api/getShippingCharges/format/json/?api_key={api_key}&api_password={api_password}&cn_numbers={cn}"),
+        ('payment_details',  f"https://merchantapi.leopardscourier.com/api/getPaymentDetails/format/json/?api_key={api_key}&api_password={api_password}&cn_numbers={cn}"),
+    ]:
+        try:
+            r = _req.get(url, verify=False, timeout=30)
+            results[name] = {'http_status': r.status_code, 'body': r.json()}
+        except Exception as e:
+            results[name] = {'error': str(e)}
+    return jsonify(results)
+
+
 @app.route('/api/leopards/track-packets')
 def leopards_track_packets():
     track_numbers = request.args.get('track_numbers', '')

@@ -6,7 +6,7 @@
   /* ── Order card ── */
   .order-card { background: #fff; border-radius: 10px; overflow: hidden; border: 1px solid #e3e6f0; box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: border-color 0.18s, box-shadow 0.18s; }
   .order-card:hover { border-color: rgba(78,115,223,0.33); box-shadow: 0 4px 18px rgba(78,115,223,0.10); }
-  .order-header { display: grid; grid-template-columns: 110px 1fr 1fr 70px 90px 120px 160px; align-items: start; gap: 12px; padding: 12px 16px; }
+  .order-header { display: grid; grid-template-columns: 110px 1fr 1fr 70px 90px 120px 160px; align-items: start; gap: 12px; padding: 12px 4px; }
   .order-items-section { border-top: 1px solid #e3e6f0; padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; }
   .item-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f8f9fc; border-radius: 7px; border: 1px solid #e3e6f0; }
   .item-img { width: 36px; height: 36px; border-radius: 5px; flex-shrink: 0; overflow: hidden; background: #e3e6f0; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #858796; }
@@ -24,7 +24,7 @@
   .stats-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 12px; margin-bottom: 20px; }
 
   /* ── Daraz row ── */
-  .daraz-row { display: grid; grid-template-columns: 120px 220px 100px 90px 90px 1fr; gap: 12px; padding: 12px 16px; background: #fff; border-radius: 8px; border: 1px solid #e3e6f0; align-items: start; }
+  .daraz-row { display: grid; grid-template-columns: 120px 220px 100px 90px 90px 1fr; gap: 12px; padding: 12px 4px; background: #fff; border-radius: 8px; border: 1px solid #e3e6f0; align-items: start; }
 
   /* ── Mobile card header ── */
   .order-header-mobile { padding: 10px 12px; }
@@ -123,7 +123,7 @@
             <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;">
               <div class="tb-avatar" data-name="{{ name }}" style="width:30px;height:30px;font-size:11px;"></div>
               <div style="min-width:0;">
-                <div style="font-size:12px;font-weight:600;color:#3a3b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ name or '<span style="color:#b7b9cc;font-style:italic">No name</span>' }}</div>
+                <div style="font-size:12px;font-weight:600;color:#3a3b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ name }}</div>
                 <div style="font-size:11px;color:#858796;">{{ city or '—' }}</div>
                 {% if phone %}<div style="font-size:11px;font-family:'DM Mono',monospace;color:#4e73df;margin-top:1px;">{{ phone }}</div>{% endif %}
                 {% if addr %}<div style="font-size:10px;color:#858796;margin-top:2px;line-height:1.4;max-width:220px;">📍 {{ addr }}</div>{% endif %}
@@ -139,7 +139,7 @@
             </div>
             <!-- Total -->
             <div style="text-align:right;padding-top:3px;">
-              <div style="font-size:13px;font-weight:700;color:#3a3b45;">{{ order.total_price|int|format_number }}</div>
+              <div style="font-size:13px;font-weight:700;color:#3a3b45;">{{ order.total_price|float|int|format_number }}</div>
               <div style="font-size:9px;color:#858796;">PKR</div>
             </div>
             <!-- Status -->
@@ -179,7 +179,7 @@
               <a href="{{ order.order_link }}" target="_blank" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:#4e73df;text-decoration:none;">#{{ order.order_id }}</a>
               {{ status_badge(s) }}
               <div style="flex:1"></div>
-              <span style="font-size:12px;font-weight:700;color:#3a3b45;">{{ order.total_price|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
+              <span style="font-size:12px;font-weight:700;color:#3a3b45;">{{ order.total_price|float|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
               <div class="tb-dd">
                 <button data-dd-trigger class="btn btn-primary" style="font-size:11px;padding:5px 10px;">Mark ▾</button>
                 <div class="tb-dd-menu">
@@ -264,7 +264,7 @@
           </div>
           <div>{{ status_badge(order.status) }}</div>
           <div style="font-size:12px;color:#858796;">{{ order.date[:10] }}</div>
-          <div style="font-size:13px;font-weight:700;color:#3a3b45;">Rs {{ order.total_price|int|format_number }}</div>
+          <div style="font-size:13px;font-weight:700;color:#3a3b45;">Rs {{ order.total_price|float|int|format_number }}</div>
           <div style="display:flex;flex-direction:column;gap:5px;">
             {% for item in order.items_list %}
             <div class="item-row">

@@ -66,7 +66,7 @@
               {% for tag in (order.tags or []) %}<span class="tag-badge" style="{{ tag_style(tag) }}">{{ tag }}</span>{% endfor %}
             </div>
             {{ status_badge(order.status) }}
-            <span class="hide-mob" style="font-size:13px;font-weight:700;color:#3a3b45;flex-shrink:0;">{{ order.total_price|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
+            <span class="hide-mob" style="font-size:13px;font-weight:700;color:#3a3b45;flex-shrink:0;">{{ order.total_price|float|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
             <div style="display:flex;gap:4px;flex-shrink:0;" onclick="event.stopPropagation()">
               {% if phone %}
               <a href="tel:{{ phone }}" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;color:#4e73df;text-decoration:none;font-size:11px;">📞</a>
@@ -135,7 +135,7 @@
               <div style="font-size:11px;color:#858796;">🛒 Daraz · {{ order.order_id }}</div>
             </div>
             {{ status_badge(order.status) }}
-            <span class="hide-mob" style="font-size:13px;font-weight:700;color:#3a3b45;flex-shrink:0;">{{ order.total_price|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
+            <span class="hide-mob" style="font-size:13px;font-weight:700;color:#3a3b45;flex-shrink:0;">{{ order.total_price|float|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
             {% if phone %}
             <div style="display:flex;gap:4px;flex-shrink:0;" onclick="event.stopPropagation()">
               <a href="tel:{{ phone }}" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;color:#4e73df;text-decoration:none;font-size:11px;">📞</a>

@@ -140,6 +140,11 @@
       <a href="#" class="sb-item" id="refreshDataBtn" onclick="triggerRefresh(event)"><span class="sb-icon">🔄</span><span class="sb-item-label">Refresh Data</span></a>
       <a href="/payments" class="sb-item {% if request.path == '/payments' %}active{% endif %}"><span class="sb-icon">💰</span><span class="sb-item-label">Finance</span></a>
     </nav>
+    <!-- Sidebar toggle button -->
+    <button onclick="toggleSidebar()" class="sb-item" id="sidebarToggleBtn" style="border-top:1px solid rgba(255,255,255,0.1);flex-shrink:0;">
+      <span class="sb-icon" id="sidebarToggleIcon">◀</span>
+      <span class="sb-item-label" id="sidebarToggleLabel">Collapse</span>
+    </button>
     <div class="sb-user">
       <div class="sb-avatar">U</div>
       <span class="sb-user-label">User</span>
@@ -157,7 +162,13 @@
 <script>
 function toggleSidebar() {
   if (window.innerWidth < 768) return;
-  document.getElementById('sidebar').classList.toggle('collapsed');
+  const sidebar = document.getElementById('sidebar');
+  sidebar.classList.toggle('collapsed');
+  const collapsed = sidebar.classList.contains('collapsed');
+  const icon  = document.getElementById('sidebarToggleIcon');
+  const label = document.getElementById('sidebarToggleLabel');
+  if (icon)  icon.textContent  = collapsed ? '▶' : '◀';
+  if (label) label.textContent = collapsed ? 'Expand' : 'Collapse';
 }
 
 function showToast(msg, dur) {

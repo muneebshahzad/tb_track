@@ -37,10 +37,12 @@
   <div style="flex:1;overflow:auto;padding:20px;">
 
     <!-- Stats -->
+    {% set ns = namespace(total=0) %}
+    {% for o in all_orders %}{% set ns.total = ns.total + (o.total_price|float) %}{% endfor %}
     <div class="stats-grid3">
       <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,0.1)">📦</div><div><div class="stat-label">Items to Pack</div><div class="stat-value" style="color:#4e73df" id="statItems">{{ pending_items|length }}</div></div></div>
       <div class="stat-card"><div class="stat-icon" style="background:rgba(246,194,62,0.1)">🔢</div><div><div class="stat-label">Total Qty</div><div class="stat-value" style="color:#f6c23e" id="statQty">{{ pending_items|sum(attribute='quantity') }}</div></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(28,200,138,0.1)">💰</div><div><div class="stat-label">Orders Value</div><div class="stat-value" style="color:#1cc88a;font-size:15px;" id="statVal">Rs {{ all_orders|sum(attribute='total_price')|int|format_number }}</div></div></div>
+      <div class="stat-card"><div class="stat-icon" style="background:rgba(28,200,138,0.1)">💰</div><div><div class="stat-label">Orders Value</div><div class="stat-value" style="color:#1cc88a;font-size:15px;" id="statVal">Rs {{ ns.total|int|format_number }}</div></div></div>
     </div>
 
     <!-- Items to Pack -->
@@ -79,7 +81,7 @@
       <div style="padding:8px 20px 12px;border-top:1px solid #e3e6f0;display:flex;gap:24px;">
         <span style="font-size:12px;color:#858796;">Total Items: <strong style="color:#3a3b45;" id="footerItems">{{ pending_items|length }}</strong></span>
         <span style="font-size:12px;color:#858796;">Total Qty: <strong style="color:#3a3b45;" id="footerQty">{{ pending_items|sum(attribute='quantity') }}</strong></span>
-        <span style="font-size:12px;color:#858796;">Total Value: <strong style="color:#1cc88a;">Rs {{ all_orders|sum(attribute='total_price')|int|format_number }}</strong></span>
+        <span style="font-size:12px;color:#858796;">Total Value: <strong style="color:#1cc88a;">Rs {{ ns.total|int|format_number }}</strong></span>
       </div>
     </div>
 
@@ -102,7 +104,7 @@
               </td>
               <td style="font-family:'DM Mono',monospace;font-weight:700;color:#4e73df;">#{{ order.order_id }}</td>
               <td style="color:#858796;">{{ order.order_via }}</td>
-              <td style="font-weight:600;color:#3a3b45;">Rs {{ order.total_price|int|format_number }}</td>
+              <td style="font-weight:600;color:#3a3b45;">Rs {{ order.total_price|float|int|format_number }}</td>
               <td>
                 <div style="display:flex;flex-direction:column;gap:2px;">
                   {% for item in order.items_list %}

@@ -248,27 +248,32 @@ async function enrichAndRender(packetList, cnNums) {
 }
 
 function updateKPIs() {
-  const r = allRecords;
-  const totalCOD     = r.reduce((s,x)=>s+x.cod,0);
-  const totalShip    = r.reduce((s,x)=>s+x.ship_charges,0);
-  const delivRecs    = r.filter(x=>(x.status||'').toUpperCase().includes('DELIVERED'));
-  const retRecs      = r.filter(x=>(x.status||'').toLowerCase().includes('return'));
-  const pendRecs     = r.filter(x=>x.status==='Booked'||x.status==='Un-Booked');
-  const unpaidDeliv  = delivRecs.filter(x=>!x.cod_paid).reduce((s,x)=>s+x.cod,0);
-  const unpaidShip   = r.filter(x=>!x.ship_paid).reduce((s,x)=>s+x.ship_charges,0);
-  const net          = unpaidDeliv*0.96 - unpaidShip;
-  document.getElementById('kpiTotalCOD').textContent   = fPKR(totalCOD);
-  document.getElementById('kpiTotalSub').textContent   = r.length + ' orders';
-  document.getElementById('kpiShip').textContent       = fPKR(totalShip);
-  document.getElementById('kpiUnpaidDeliv').textContent= fPKR(unpaidDeliv);
-  document.getElementById('kpiUnpaidShip').textContent = fPKR(unpaidShip);
-  document.getElementById('kpiNet').textContent        = fPKR(net);
-  document.getElementById('kpiDeliv').textContent      = fPKR(delivRecs.reduce((s,x)=>s+x.cod,0));
-  document.getElementById('kpiDelivSub').textContent   = delivRecs.length + ' orders';
-  document.getElementById('kpiRet').textContent        = fPKR(retRecs.reduce((s,x)=>s+x.cod,0));
-  document.getElementById('kpiRetSub').textContent     = retRecs.length + ' orders';
-  document.getElementById('kpiPend').textContent       = fPKR(pendRecs.reduce((s,x)=>s+x.cod,0));
-  document.getElementById('kpiPendSub').textContent    = pendRecs.length + ' orders';
+  let totalCOD=0, totalCharges=0, unpaidShippingTotal=0, unpaidDeliveredCOD=0;
+  let deliveredCount=0, deliveredCOD=0, returnedCount=0, returnedCOD=0, pendingCount=0, pendingCOD=0;
+  allRecords.forEach(x => {
+    totalCOD += x.cod;
+    if (x.ship_charges) totalCharges += x.ship_charges;
+    if (!x.ship_paid && x.ship_charges) unpaidShippingTotal += x.ship_charges;
+    const isDelivered = (x.status||'').toLowerCase().includes('delivered');
+    const isReturned  = (x.status||'').toLowerCase().includes('return');
+    if (isDelivered && !x.cod_paid) unpaidDeliveredCOD += x.cod;
+    if (isDelivered)     { deliveredCount++; deliveredCOD += x.cod; }
+    else if (isReturned) { returnedCount++;  returnedCOD  += x.cod; }
+    else                 { pendingCount++;   pendingCOD   += x.cod; }
+  });
+  const netReceivable = (unpaidDeliveredCOD * 0.96) - unpaidShippingTotal;
+  document.getElementById('kpiTotalCOD').textContent    = fPKR(totalCOD);
+  document.getElementById('kpiTotalSub').textContent    = allRecords.length + ' orders';
+  document.getElementById('kpiShip').textContent        = totalCharges ? fPKR(totalCharges) : '—';
+  document.getElementById('kpiUnpaidDeliv').textContent = unpaidDeliveredCOD ? fPKR(unpaidDeliveredCOD) : '—';
+  document.getElementById('kpiUnpaidShip').textContent  = unpaidShippingTotal ? fPKR(unpaidShippingTotal) : '—';
+  document.getElementById('kpiNet').textContent         = fPKR(netReceivable);
+  document.getElementById('kpiDeliv').textContent       = fPKR(deliveredCOD);
+  document.getElementById('kpiDelivSub').textContent    = deliveredCount + ' orders';
+  document.getElementById('kpiRet').textContent         = fPKR(returnedCOD);
+  document.getElementById('kpiRetSub').textContent      = returnedCount + ' orders';
+  document.getElementById('kpiPend').textContent        = fPKR(pendingCOD);
+  document.getElementById('kpiPendSub').textContent     = pendingCount + ' orders';
 }
 
 function getFiltered() {

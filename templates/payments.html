@@ -203,7 +203,7 @@ async function enrichAndRender(packetList, cnNums) {
 
   const chargesMap = {};
   chargeResults.forEach(d => {
-    if (d && d.data) d.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
+    if (d && d.data) d.data.forEach(c => { chargesMap[String(c.cn_number)] = c.charges || c; });
   });
 
   allRecords = packetList.map(p => {

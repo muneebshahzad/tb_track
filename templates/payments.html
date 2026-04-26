@@ -104,48 +104,108 @@ let curFilt = 'all';
 
 function fPKR(n) { return 'Rs ' + Math.round(n).toLocaleString('en-PK'); }
 
-function fetchPayments() {
+async function fetchPayments() {
   const from = document.getElementById('fromDate').value;
   const to   = document.getElementById('toDate').value;
   const btn  = document.getElementById('fetchBtn');
   btn.textContent = '⏳ Loading…'; btn.disabled = true;
-  fetch(`/api/leopards/last-status?from_date=${from}&to_date=${to}`)
-    .then(r => r.json())
-    .then(data => {
-      btn.textContent = '⚡ Fetch'; btn.disabled = false;
-      const packets = data.packet_list || [];
-      allRecords = packets.map(p => ({
-        order_id: p.booked_packet_order_id || '—',
-        cn:       p.track_number || '—',
-        products: p.products || p.booked_packet_order_id || '—',
-        cod:      Number(p.booked_packet_collect_amount || 0),
-        status:   p.booked_packet_status || '—',
-        ship_charges: Number(p.booked_packet_weight_charges || 0),
-        ship_paid: false, cod_paid: false,
-        inv_date: '—',
-        net: 0,
-      }));
-      renderTable(); updateKPIs();
-    })
-    .catch(() => { btn.textContent='⚡ Fetch'; btn.disabled=false; showToast('Failed to fetch data'); });
+  try {
+    const r    = await fetch(`/api/leopards/last-status?from_date=${from}&to_date=${to}`);
+    const data = await r.json();
+    const packets = data.packet_list || [];
+    if (!packets.length) { showToast('No packets found for this date range.'); return; }
+
+    // Enrich product names via track-packets (special_instructions field)
+    const cnNums = packets.map(p => p.cn || p.track_number || '').filter(Boolean);
+    const trackMap = {};
+    const chunks = [];
+    for (let i = 0; i < cnNums.length; i += 50) chunks.push(cnNums.slice(i, i + 50));
+    for (const chunk of chunks) {
+      try {
+        const tr = await fetch('/api/leopards/track-packets?track_numbers=' + chunk.join(','));
+        const td = await tr.json();
+        if (td.status === 1 && Array.isArray(td.packet_list)) {
+          td.packet_list.forEach(p => { trackMap[String(p.track_number)] = p.special_instructions || ''; });
+        }
+      } catch(_) {}
+    }
+    packets.forEach(p => {
+      const cn = p.cn || p.track_number || '';
+      p.products   = trackMap[cn] || p.products || '—';
+      p.cn         = cn;
+    });
+
+    await enrichAndRender(packets, cnNums);
+  } catch(e) {
+    showToast('Failed to fetch data');
+  } finally {
+    btn.textContent = '⚡ Fetch'; btn.disabled = false;
+  }
 }
 
-function loadFromOrders() {
-  fetch('/api/leopards/active-cns')
-    .then(r=>r.json())
-    .then(data => {
-      allRecords = (data.order_map||[]).map(p=>({
-        order_id: p.booked_packet_order_id||p.order_id||'—',
-        cn: p.tracking_number||'—',
-        products: p.products||p.product_title||'—',
-        cod: Number(p.booked_packet_collect_amount||0),
-        status: p.booked_packet_status||'—',
-        ship_charges: 0, ship_paid: false, cod_paid: false, inv_date:'—', net:0,
-      }));
-      renderTable(); updateKPIs();
-      showToast('Loaded '+allRecords.length+' records from active orders');
-    })
-    .catch(()=>showToast('Failed to load orders'));
+async function loadFromOrders() {
+  try {
+    const r    = await fetch('/api/leopards/active-cns');
+    const data = await r.json();
+    if (!data.cn_numbers || !data.cn_numbers.length) { showToast('No active CN numbers found.'); return; }
+    await enrichAndRender(data.order_map || [], data.cn_numbers);
+    showToast('Loaded ' + (data.order_map||[]).length + ' records from active orders');
+  } catch(e) {
+    showToast('Failed to load orders');
+  }
+}
+
+async function enrichAndRender(packetList, cnNums) {
+  const chunks = [];
+  for (let i = 0; i < cnNums.length; i += 50) chunks.push(cnNums.slice(i, i + 50));
+
+  // Payment details → ship_paid, cod_paid, invoice date
+  const payMap = {};
+  for (const chunk of chunks) {
+    try {
+      const r = await fetch('/api/leopards/payment-details?cn_numbers=' + chunk.join(','));
+      const d = await r.json();
+      if (d.payment_list) d.payment_list.forEach(p => { payMap[String(p.booked_packet_cn)] = p; });
+    } catch(_) {}
+  }
+
+  // Shipping charges → actual billed amount + invoice_cheque_date
+  const chargesMap = {};
+  for (const chunk of chunks) {
+    try {
+      const r = await fetch('/api/leopards/shipping-charges?cn_numbers=' + chunk.join(','));
+      const d = await r.json();
+      if (d.data) d.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
+    } catch(_) {}
+  }
+
+  allRecords = packetList.map(p => {
+    const cn          = p.cn || p.tracking_number || p.track_number || '—';
+    const pay         = payMap[cn]     || {};
+    const charges     = chargesMap[cn] || {};
+    const cod         = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
+    const grossCharge = parseFloat(charges.gross_charges || 0);
+    const billChg     = charges.billed_charges ? Math.round(parseFloat(charges.billed_charges) * 1.25 * 1.16) : Math.round(grossCharge);
+    const shipPaid    = !!(charges.billed_charges && String(charges.billed_charges).trim());
+    const invDate     = charges.invoice_cheque_date || pay.invoice_cheque_date || '—';
+    const codPaid     = !!(invDate && invDate.trim() && invDate.trim() !== 'null' && invDate !== '—');
+    const status      = p.booked_packet_status || '—';
+    const isDelivered = status.toLowerCase().includes('delivered');
+    const net         = isDelivered ? cod * 0.96 - billChg : -billChg;
+    return {
+      order_id:     p.booked_packet_order_id || p.order_id || '—',
+      cn,
+      products:     p.products || p.product_title || '—',
+      cod,
+      status,
+      ship_charges: billChg,
+      ship_paid:    shipPaid,
+      cod_paid:     codPaid,
+      inv_date:     invDate,
+      net,
+    };
+  });
+  renderTable(); updateKPIs();
 }
 
 function updateKPIs() {

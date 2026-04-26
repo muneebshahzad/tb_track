@@ -97,6 +97,7 @@ daraz_orders = []
 
 RATE_LIMIT = 2
 LAST_REQUEST_TIME = 0
+product_image_cache = {}  # (product_id, variant_id) -> (image_src, variant_name)
 
 
 # ── Email ─────────────────────────────────────────────────────────────────────
@@ -325,22 +326,29 @@ async def process_order(order, tracking_cache):
             continue
 
         if line_item.product_id is not None:
-            try:
-                product = shopify.Product.find(line_item.product_id)
-                if product and product.variants:
-                    for variant in product.variants:
-                        if variant.id == line_item.variant_id:
-                            if variant.image_id is not None:
-                                images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
-                                variant_name = line_item.variant_title
-                                for image in images:
-                                    if image.id == variant.image_id:
-                                        image_src = image.src
-                            else:
-                                variant_name = ""
-                                image_src = product.image.src if product.image else image_src
-            except Exception as e:
-                print(f"Error fetching product {line_item.product_id}: {e}")
+            cache_key = (line_item.product_id, line_item.variant_id)
+            if cache_key in product_image_cache:
+                image_src, variant_name = product_image_cache[cache_key]
+            else:
+                try:
+                    await asyncio.sleep(0.6)  # stay under 2 calls/sec
+                    product = shopify.Product.find(line_item.product_id)
+                    if product and product.variants:
+                        for variant in product.variants:
+                            if variant.id == line_item.variant_id:
+                                if variant.image_id is not None:
+                                    await asyncio.sleep(0.6)
+                                    images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
+                                    variant_name = line_item.variant_title
+                                    for image in images:
+                                        if image.id == variant.image_id:
+                                            image_src = image.src
+                                else:
+                                    variant_name = ""
+                                    image_src = product.image.src if product.image else image_src
+                    product_image_cache[cache_key] = (image_src, variant_name)
+                except Exception as e:
+                    print(f"Error fetching product {line_item.product_id}: {e}")
         else:
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
 

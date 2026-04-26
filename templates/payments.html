@@ -104,6 +104,20 @@ let curFilt = 'all';
 
 function fPKR(n) { return 'Rs ' + Math.round(n).toLocaleString('en-PK'); }
 
+// Handles comma-separated billed_charges like "-5280.00,5580.00"
+function parseBilledCharges(val) {
+  if (val === null || val === undefined || val === '') return NaN;
+  const parts = String(val).split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+  if (!parts.length) return NaN;
+  return parts.reduce((a, b) => a + b, 0);
+}
+
+// Ship paid = billed_charges is present and non-null
+function shippingPaidBadge(billedChargesVal) {
+  const hasPaid = billedChargesVal && String(billedChargesVal).trim() !== '' && String(billedChargesVal).trim() !== 'null';
+  return { isPaid: !!hasPaid };
+}
+
 async function fetchPayments() {
   const from = document.getElementById('fromDate').value;
   const to   = document.getElementById('toDate').value;
@@ -115,24 +129,26 @@ async function fetchPayments() {
     const packets = data.packet_list || [];
     if (!packets.length) { showToast('No packets found for this date range.'); return; }
 
-    // Enrich product names via track-packets (special_instructions field)
-    const cnNums = packets.map(p => p.cn || p.track_number || '').filter(Boolean);
+    // CN field from last-status API is "tracking_number"
+    const cnNums = packets.map(p => p.tracking_number).filter(Boolean);
+
+    // Enrich product names via track-packets (special_instructions field), chunks of 20
     const trackMap = {};
-    const chunks = [];
-    for (let i = 0; i < cnNums.length; i += 50) chunks.push(cnNums.slice(i, i + 50));
-    for (const chunk of chunks) {
+    const trackChunks = [];
+    for (let i = 0; i < cnNums.length; i += 20) trackChunks.push(cnNums.slice(i, i + 20));
+    for (const chunk of trackChunks) {
       try {
         const tr = await fetch('/api/leopards/track-packets?track_numbers=' + chunk.join(','));
         const td = await tr.json();
         if (td.status === 1 && Array.isArray(td.packet_list)) {
-          td.packet_list.forEach(p => { trackMap[String(p.track_number)] = p.special_instructions || ''; });
+          td.packet_list.forEach(p => { trackMap[String(p.track_number)] = p.special_instructions || '—'; });
         }
       } catch(_) {}
     }
     packets.forEach(p => {
-      const cn = p.cn || p.track_number || '';
-      p.products   = trackMap[cn] || p.products || '—';
-      p.cn         = cn;
+      const cn = String(p.tracking_number || '');
+      p.products   = trackMap[cn] || '—';
+      p.item_image = '';
     });
 
     await enrichAndRender(packets, cnNums);
@@ -159,7 +175,7 @@ async function enrichAndRender(packetList, cnNums) {
   const chunks = [];
   for (let i = 0; i < cnNums.length; i += 50) chunks.push(cnNums.slice(i, i + 50));
 
-  // Payment details → ship_paid, cod_paid, invoice date
+  // Payment details (used as fallback for invoice date)
   const payMap = {};
   for (const chunk of chunks) {
     try {
@@ -169,7 +185,7 @@ async function enrichAndRender(packetList, cnNums) {
     } catch(_) {}
   }
 
-  // Shipping charges → actual billed amount + invoice_cheque_date
+  // Shipping charges → billed_charges (ship paid), invoice_cheque_date (COD paid), gross_charges
   const chargesMap = {};
   for (const chunk of chunks) {
     try {
@@ -180,21 +196,33 @@ async function enrichAndRender(packetList, cnNums) {
   }
 
   allRecords = packetList.map(p => {
-    const cn          = p.cn || p.tracking_number || p.track_number || '—';
+    // CN field: last-status uses "tracking_number"; active-cns uses "tracking_number" too
+    const cn          = p.tracking_number || p.cn || '';
     const pay         = payMap[cn]     || {};
     const charges     = chargesMap[cn] || {};
     const cod         = parseFloat(p.booked_packet_collect_amount || p.cod_value || 0);
-    const grossCharge = parseFloat(charges.gross_charges || 0);
-    const billChg     = charges.billed_charges ? Math.round(parseFloat(charges.billed_charges) * 1.25 * 1.16) : Math.round(grossCharge);
-    const shipPaid    = !!(charges.billed_charges && String(charges.billed_charges).trim());
-    const invDate     = charges.invoice_cheque_date || pay.invoice_cheque_date || '—';
-    const codPaid     = !!(invDate && invDate.trim() && invDate.trim() !== 'null' && invDate !== '—');
+
+    // Shipping charge: use parseBilledCharges (handles comma-separated) × 1.25 × 1.16, fallback to gross_charges
+    const totalCharged = parseBilledCharges(charges.billed_charges);
+    const billChg      = !isNaN(totalCharged)
+      ? Math.round(totalCharged * 1.25 * 1.16)
+      : Math.round(parseFloat(charges.gross_charges || 0));
+
+    // Ship paid = billed_charges field is present & non-empty
+    const shipPaid    = shippingPaidBadge(charges.billed_charges || '').isPaid;
+
+    // COD paid = invoice_cheque_date is present & non-null
+    const invChequeDate = charges.invoice_cheque_date || '';
+    const codPaid       = invChequeDate.trim() !== '' && invChequeDate.trim() !== 'null';
+    const invDate       = invChequeDate || pay.invoice_cheque_date || '—';
+
     const status      = p.booked_packet_status || '—';
     const isDelivered = status.toLowerCase().includes('delivered');
     const net         = isDelivered ? cod * 0.96 - billChg : -billChg;
+
     return {
       order_id:     p.booked_packet_order_id || p.order_id || '—',
-      cn,
+      cn:           cn || '—',
       products:     p.products || p.product_title || '—',
       cod,
       status,

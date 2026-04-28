@@ -97,7 +97,7 @@
           </thead>
           <tbody>
             {% for order in all_orders %}
-            {% set days = ((now - order.date|parse_date).days) if order.date else 0 %}
+            {% set days = ((now - order.date|parse_date).days + 1) if order.date else 0 %}
             <tr>
               <td>
                 <span style="font-size:18px;font-weight:700;color:{% if days >= 3 %}#e74a3b{% elif days >= 1 %}#f6c23e{% else %}#1cc88a{% endif %};">{{ days }}d</span>

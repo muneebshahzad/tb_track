@@ -60,7 +60,7 @@ def parse_recommended_max(cell_value: Any) -> float | None:
 
 
 _daraz_cache: dict[str, dict[str, Any]] = {}
-ENRICHMENT_VERSION = 3
+ENRICHMENT_VERSION = 4
 
 
 def _ensure_campaign_enrichment_version(campaign_id: str, meta: dict[str, Any]) -> dict[str, Any]:
@@ -99,10 +99,33 @@ def _extract_title_from_html(html: str) -> str | None:
     return None
 
 
+def _extract_tracking_field_from_html(html: str, field_name: str) -> str | None:
+    pattern = rf'"{re.escape(field_name)}":"([^"]+)"'
+    match = re.search(pattern, html)
+    if match:
+        return unescape(match.group(1)).replace("\\/", "/").strip()
+    return None
+
+
+def _extract_variant_image_from_html(html: str, sku_id: str) -> str | None:
+    if not sku_id:
+        return None
+    pattern = (
+        rf'"{re.escape(str(sku_id))}":\{{'
+        rf'"categoryId":"[^"]*",'
+        rf'"image":"([^"]+)"'
+    )
+    match = re.search(pattern, html)
+    if match:
+        return unescape(match.group(1)).replace("\\/", "/").strip()
+    return None
+
+
 def enrich_from_daraz_row(row: dict[str, Any]) -> dict[str, Any]:
     seller_sku = str(row.get("seller_sku") or "").strip()
+    sku_id = str(row.get("sku_id") or "").strip()
     product_url = str(row.get("product_url") or "").strip()
-    cache_key = product_url or seller_sku or str(row.get("sku_id") or "")
+    cache_key = f"{product_url}|{sku_id}" if product_url else (seller_sku or sku_id)
     if not cache_key:
         return {}
     if cache_key in _daraz_cache:
@@ -129,9 +152,15 @@ def enrich_from_daraz_row(row: dict[str, Any]) -> dict[str, Any]:
         )
         response.raise_for_status()
         html = response.text
-        title = _extract_title_from_html(html) or fallback["title"]
+        title = (
+            _extract_tracking_field_from_html(html, "pdt_name")
+            or _extract_title_from_html(html)
+            or fallback["title"]
+        )
         image = (
-            _extract_meta_content(html, "og:image")
+            _extract_variant_image_from_html(html, sku_id)
+            or _extract_tracking_field_from_html(html, "pdt_photo")
+            or _extract_meta_content(html, "og:image")
             or _extract_meta_content(html, "twitter:image")
             or fallback["image"]
         )

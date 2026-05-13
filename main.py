@@ -702,6 +702,7 @@ def build_pending_orders_mobile_data():
         if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
             continue
         if shopify_order['status'] in ['Booked', 'Un-Booked', 'Drop Off at Express Center']:
+            filtered_tags = [tag.strip() for tag in shopify_order.get('tags', []) if tag and tag.strip() != 'Leopards Courier']
             shopify_items = []
             for item in shopify_order['line_items']:
                 track_num = item.get('tracking_number', 'N/A')
@@ -718,6 +719,8 @@ def build_pending_orders_mobile_data():
                 'order_via':  'Shopify',
                 'order_id':   shopify_order['order_id'],
                 'status':     shopify_order['status'],
+                'tags':       filtered_tags,
+                'is_lahore':  any('lahore' in tag.lower() for tag in filtered_tags),
                 'date':       shopify_order['created_at'],
                 'items_list': shopify_items,
                 'total_price': shopify_order['total_price']

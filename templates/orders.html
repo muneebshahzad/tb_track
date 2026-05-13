@@ -80,6 +80,16 @@
       font-size: 14px;
       line-height: 1.45;
     }
+    .brand-lockup {
+      width: min(100%, 280px);
+      display: block;
+      margin: 0 auto 14px;
+    }
+    .brand-lockup img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
     .hero-toolbar {
       display: flex;
       gap: 8px;
@@ -125,6 +135,12 @@
       gap: 10px;
       align-items: center;
       justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .controls-right {
+      display: flex;
+      gap: 10px;
+      align-items: center;
       flex-wrap: wrap;
     }
     .summary-row {
@@ -188,6 +204,12 @@
       flex-wrap: wrap;
       margin-bottom: 12px;
     }
+    .order-status-block {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-start;
+    }
     .price {
       font-size: 16px;
       font-weight: 800;
@@ -240,6 +262,21 @@
       background: rgba(38, 103, 255, 0.1);
       color: #2346a8;
     }
+    .tag-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(20, 33, 61, 0.08);
+      color: var(--ink);
+    }
     .actions {
       display: flex;
       gap: 8px;
@@ -261,6 +298,11 @@
       border-color: rgba(38, 103, 255, 0.28);
       background: rgba(38, 103, 255, 0.08);
       color: #2346a8;
+    }
+    .action-btn.lahore {
+      border-color: rgba(242, 182, 50, 0.34);
+      background: rgba(242, 182, 50, 0.14);
+      color: #8b5a00;
     }
     .empty {
       padding: 30px 18px;
@@ -289,17 +331,19 @@
 <body>
   <div class="shell">
     <section class="hero">
+      {% if employee_portal_mode %}
+        <div class="brand-lockup">
+          <img src="/static/tickbags-brand.svg" alt="TickBags.com">
+        </div>
+      {% endif %}
       <div class="eyebrow">{% if employee_portal_mode %}Tick Bags Employee Portal{% else %}Tick Bags Orders{% endif %}</div>
       <h1>Pending orders.</h1>
-      <p class="subcopy">{% if employee_portal_mode %}Same employee app look, but tuned for scanning the queue, checking parcel status, and marking packed or manufactured without hopping back to the dashboard.{% else %}A cleaner mobile queue for pending orders across Shopify and Daraz.{% endif %}</p>
       <div class="hero-toolbar">
         {% if employee_portal_mode %}
           <button class="utility-btn" type="button" onclick="window.location.href='/employee_portal'">Back to Scanner</button>
           <button class="utility-btn" type="button" id="installBtn" hidden>Install App</button>
           <button class="utility-btn" type="button" id="notifyBtn">Enable Notifications</button>
           <span class="status-pill" id="notifyStatus"><span class="dot"></span><span>Notifications off</span></span>
-        {% else %}
-          <button class="utility-btn" type="button" onclick="window.location.href='/'">Back to Dashboard</button>
         {% endif %}
       </div>
     </section>
@@ -310,11 +354,18 @@
         <span class="summary-pill">Shopify: <strong id="shopifyCount">0</strong></span>
         <span class="summary-pill">Daraz: <strong id="darazCount">0</strong></span>
       </div>
-      <select id="sortSelect" class="sort-select">
-        <option value="pending">Sort by Pending Since</option>
-        <option value="order">Sort by Order Number</option>
-        <option value="date">Sort by Date</option>
-      </select>
+      <div class="controls-right">
+        <label class="summary-pill" style="cursor:pointer;">
+          <input id="lahoreOnlyToggle" type="checkbox" style="margin:0;">
+          <span>Lahore only</span>
+        </label>
+        <select id="sortSelect" class="sort-select">
+          <option value="pending">Sort by Pending Since</option>
+          <option value="latest">Latest Orders First</option>
+          <option value="oldest">Oldest Orders First</option>
+          <option value="order">Sort by Order Number</option>
+        </select>
+      </div>
     </section>
 
     <section class="orders" id="ordersContainer">
@@ -322,7 +373,8 @@
         <article class="order-card"
           data-order-id="{{ order.order_id }}"
           data-date="{{ order.date }}"
-          data-order-via="{{ order.order_via|lower }}">
+          data-order-via="{{ order.order_via|lower }}"
+          data-lahore="{{ 'true' if order.is_lahore else 'false' }}">
           <div class="order-head">
             <div>
               <div class="order-no">#{{ order.order_id }}</div>
@@ -334,7 +386,16 @@
             </div>
           </div>
           <div class="order-meta">
-            <div class="muted">{{ order.status }}</div>
+            <div class="order-status-block">
+              <div class="muted">{{ order.status }}</div>
+              {% if order.order_via == 'Shopify' and order.tags %}
+                <div class="tag-row">
+                  {% for tag in order.tags %}
+                    <span class="tag-chip">{{ tag }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
             <div class="price">PKR {{ order.total_price }}</div>
           </div>
           <div class="items">
@@ -355,6 +416,7 @@
                   <div class="actions">
                     <button class="action-btn packed" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">Packed</button>
                     <button class="action-btn manufactured" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">Manufactured</button>
+                    <button class="action-btn lahore" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Delivered in Lahore')">Delivered in Lahore</button>
                   </div>
                 </div>
               </div>
@@ -386,7 +448,7 @@
     }
 
     function updateOrderSummary() {
-      const cards = Array.from(document.querySelectorAll('.order-card'));
+      const cards = Array.from(document.querySelectorAll('.order-card')).filter((card) => card.style.display !== 'none');
       document.getElementById('orderCount').textContent = cards.length;
       document.getElementById('shopifyCount').textContent = cards.filter((card) => card.dataset.orderVia === 'shopify').length;
       document.getElementById('darazCount').textContent = cards.filter((card) => card.dataset.orderVia === 'daraz').length;
@@ -412,16 +474,32 @@
         if (criteria === 'order') {
           return parseInt(b.dataset.orderId || '0', 10) - parseInt(a.dataset.orderId || '0', 10);
         }
+        if (criteria === 'oldest') {
+          return new Date(a.dataset.date) - new Date(b.dataset.date);
+        }
         return new Date(b.dataset.date) - new Date(a.dataset.date);
       });
       sortedCards.forEach((card) => container.appendChild(card));
     }
 
+    function applyLahoreFilter() {
+      const lahoreOnly = document.getElementById('lahoreOnlyToggle')?.checked;
+      document.querySelectorAll('.order-card').forEach((card) => {
+        const visible = !lahoreOnly || card.dataset.lahore === 'true';
+        card.style.display = visible ? '' : 'none';
+      });
+      updateOrderSummary();
+    }
+
     function updateNotificationStatus() {
+      const notifyBtn = document.getElementById('notifyBtn');
       const status = document.getElementById('notifyStatus');
       if (!status) return;
       const label = status.querySelector('span:last-child');
       status.classList.remove('active', 'warn');
+      if (notifyBtn) {
+        notifyBtn.hidden = false;
+      }
       if (!('Notification' in window)) {
         label.textContent = 'Notifications unavailable';
         status.classList.add('warn');
@@ -430,6 +508,9 @@
       if (Notification.permission === 'granted') {
         label.textContent = 'Notifications on';
         status.classList.add('active');
+        if (notifyBtn) {
+          notifyBtn.hidden = true;
+        }
         return;
       }
       if (Notification.permission === 'denied') {
@@ -556,10 +637,12 @@
     document.addEventListener('DOMContentLoaded', () => {
       refreshPendingBadges();
       sortOrders('pending');
-      updateOrderSummary();
+      applyLahoreFilter();
       document.getElementById('sortSelect').addEventListener('change', function () {
         sortOrders(this.value);
+        applyLahoreFilter();
       });
+      document.getElementById('lahoreOnlyToggle').addEventListener('change', applyLahoreFilter);
       if (EMPLOYEE_PORTAL_MODE) {
         document.getElementById('notifyBtn').addEventListener('click', enableNotifications);
         updateNotificationStatus();

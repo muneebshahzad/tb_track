@@ -78,6 +78,16 @@
       font-size: 14px;
       line-height: 1.45;
     }
+    .brand-lockup {
+      width: min(100%, 280px);
+      display: block;
+      margin: 0 auto 14px;
+    }
+    .brand-lockup img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
     .hero-actions {
       margin-top: 14px;
       display: grid;
@@ -502,6 +512,9 @@
   {% if view == 'login' %}
     <div class="login-wrap">
       <section class="login-card">
+        <div class="brand-lockup">
+          <img src="/static/tickbags-brand.svg" alt="TickBags.com">
+        </div>
         <div class="eyebrow">Tick Bags Employee Portal</div>
         <h1 class="login-title">Sign in.</h1>
         <p class="subcopy">Use the employee password to open the scanner, dispatch queue, return queue, and mobile orders view.</p>
@@ -523,9 +536,11 @@
       <div class="desktop-note">This portal is built for phone use. It still works here, but the scanner flow is tuned for mobile cameras.</div>
 
       <section class="hero">
+        <div class="brand-lockup">
+          <img src="/static/tickbags-brand.svg" alt="TickBags.com">
+        </div>
         <div class="eyebrow">Tick Bags Employee Portal</div>
         <h1>Scan, dispatch, return.</h1>
-        <p class="subcopy">Use order number, tracking number, barcode, or QR. Search shows contents. Dispatch and return build a queue, then apply Shopify tags in one step.</p>
         <div class="toolbar-row">
           <button class="utility-btn" type="button" id="installBtn" hidden>Install App</button>
           <button class="utility-btn" type="button" id="notifyBtn">Enable Notifications</button>
@@ -929,9 +944,13 @@
       }
 
       function updateNotificationStatus() {
+        const notifyBtn = document.getElementById('notifyBtn');
         const status = document.getElementById('notifyStatus');
         const label = status.querySelector('span:last-child');
         status.classList.remove('active', 'warn');
+        if (notifyBtn) {
+          notifyBtn.hidden = false;
+        }
         if (!('Notification' in window)) {
           label.textContent = 'Notifications unavailable';
           status.classList.add('warn');
@@ -940,6 +959,9 @@
         if (Notification.permission === 'granted') {
           label.textContent = 'Notifications on';
           status.classList.add('active');
+          if (notifyBtn) {
+            notifyBtn.hidden = true;
+          }
           return;
         }
         if (Notification.permission === 'denied') {

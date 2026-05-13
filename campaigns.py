@@ -36,19 +36,35 @@ def init_campaign_dirs() -> None:
     BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-COL_SELLER_SKU = 0
-COL_SKU_ID = 1
-COL_SHOP_SKU = 2
-COL_PRODUCT_NAME = 3
-COL_PRODUCT_URL = 4
-COL_SALES_PRICE = 5
-COL_CAMPAIGN_PRICE = 6
-COL_RECOMMENDED = 9
-COL_STOCK = 10
-COL_IS_HERO = 11
-COL_CATEGORY = 16
+LEGACY_COLUMN_MAP = {
+    "seller_sku": 0,
+    "sku_id": 1,
+    "shop_sku": 2,
+    "product_name": 3,
+    "product_url": 4,
+    "sales_price": 5,
+    "campaign_price": 6,
+    "recommended_price": 9,
+    "stock": 10,
+    "is_hero": 11,
+    "category": 16,
+}
 
-DATA_START_ROW = 2
+HEADER_ALIASES = {
+    "seller_sku": {"seller sku", "seller_sku"},
+    "sku_id": {"sku id", "skuid", "sku_id"},
+    "shop_sku": {"shop sku", "shop_sku"},
+    "product_name": {"product name", "product_name"},
+    "product_url": {"product url", "product_url", "product link", "productlink"},
+    "sales_price": {"sales price", "sales_price", "current price", "price"},
+    "campaign_price": {"campaign price", "campaign_price"},
+    "recommended_price": {"recommended price", "recommended_price", "traffic-boosting price", "traffic boosting price"},
+    "stock": {"stock", "current stock", "current_stock"},
+    "is_hero": {"is hero product", "is hero", "is_hero_product", "hero product"},
+    "category": {"category"},
+}
+
+HEADER_SCAN_LIMIT = 6
 RECOMMENDED_PATTERN = re.compile(r"<\s*=?\s*([\d.]+)")
 
 
@@ -213,43 +229,89 @@ def _to_int(value: Any) -> int | None:
     return int(numeric) if numeric is not None else None
 
 
-def _read_template_rows(xlsx_path: Path) -> list[dict[str, Any]]:
+def _normalize_header(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower()).strip()
+
+
+def _find_column_index(header_map: dict[str, int], key: str, fallback: int | None = None) -> int | None:
+    for alias in HEADER_ALIASES.get(key, set()):
+        if alias in header_map:
+            return header_map[alias]
+    return fallback
+
+
+def _safe_cell(row: tuple[Any, ...], index: int | None) -> Any:
+    if index is None or index < 0 or index >= len(row):
+        return None
+    return row[index]
+
+
+def _detect_template_columns(worksheet) -> tuple[int, dict[str, int | None]]:
+    for row_index, row in enumerate(worksheet.iter_rows(values_only=True, max_row=HEADER_SCAN_LIMIT)):
+        normalized_cells = [_normalize_header(cell) for cell in row]
+        header_map = {cell: idx for idx, cell in enumerate(normalized_cells) if cell}
+        seller_idx = _find_column_index(header_map, "seller_sku")
+        campaign_idx = _find_column_index(header_map, "campaign_price")
+        if seller_idx is not None and campaign_idx is not None:
+            return row_index, {
+                "seller_sku": seller_idx,
+                "sku_id": _find_column_index(header_map, "sku_id"),
+                "shop_sku": _find_column_index(header_map, "shop_sku"),
+                "product_name": _find_column_index(header_map, "product_name"),
+                "product_url": _find_column_index(header_map, "product_url"),
+                "sales_price": _find_column_index(header_map, "sales_price"),
+                "campaign_price": campaign_idx,
+                "recommended_price": _find_column_index(header_map, "recommended_price"),
+                "stock": _find_column_index(header_map, "stock"),
+                "is_hero": _find_column_index(header_map, "is_hero"),
+                "category": _find_column_index(header_map, "category"),
+            }
+
+    return 0, dict(LEGACY_COLUMN_MAP)
+
+
+def _read_template_rows(xlsx_path: Path) -> tuple[list[dict[str, Any]], dict[str, int | None]]:
     workbook = load_workbook(xlsx_path, data_only=True)
     worksheet = workbook[workbook.sheetnames[0]]
+    header_row_index, column_map = _detect_template_columns(worksheet)
     rows: list[dict[str, Any]] = []
 
     for row_index, row in enumerate(worksheet.iter_rows(values_only=True)):
-        if row_index < DATA_START_ROW:
+        if row_index <= header_row_index:
             continue
-        if not row or row[COL_SELLER_SKU] in (None, ""):
+        seller_sku_value = _safe_cell(row, column_map.get("seller_sku"))
+        if not row or seller_sku_value in (None, ""):
             continue
 
-        seller_sku = str(row[COL_SELLER_SKU]).strip()
-        sales_price = _to_float(row[COL_SALES_PRICE])
-        campaign_price = _to_float(row[COL_CAMPAIGN_PRICE])
-        rec_max = parse_recommended_max(row[COL_RECOMMENDED])
+        seller_sku = str(seller_sku_value).strip()
+        sales_price = _to_float(_safe_cell(row, column_map.get("sales_price")))
+        campaign_price = _to_float(_safe_cell(row, column_map.get("campaign_price")))
+        rec_raw = _safe_cell(row, column_map.get("recommended_price"))
+        rec_max = parse_recommended_max(rec_raw)
+        stock_value = _safe_cell(row, column_map.get("stock"))
+        is_hero_value = _safe_cell(row, column_map.get("is_hero"))
 
         rows.append(
             {
                 "row_index": row_index,
                 "seller_sku": seller_sku,
-                "sku_id": str(row[COL_SKU_ID]) if row[COL_SKU_ID] else "",
-                "shop_sku": str(row[COL_SHOP_SKU]) if row[COL_SHOP_SKU] else "",
-                "daraz_name": row[COL_PRODUCT_NAME] or "",
-                "product_url": row[COL_PRODUCT_URL] or "",
+                "sku_id": str(_safe_cell(row, column_map.get("sku_id")) or ""),
+                "shop_sku": str(_safe_cell(row, column_map.get("shop_sku")) or ""),
+                "daraz_name": _safe_cell(row, column_map.get("product_name")) or "",
+                "product_url": _safe_cell(row, column_map.get("product_url")) or "",
                 "sales_price": sales_price,
                 "campaign_price": campaign_price,
                 "campaign_price_original": campaign_price,
                 "recommended_max": rec_max,
-                "recommended_raw": str(row[COL_RECOMMENDED] or ""),
-                "stock": _to_int(row[COL_STOCK]),
-                "stock_original": _to_int(row[COL_STOCK]),
-                "is_hero": (str(row[COL_IS_HERO] or "N").upper() == "Y"),
-                "category": row[COL_CATEGORY] or "",
+                "recommended_raw": str(rec_raw or ""),
+                "stock": _to_int(stock_value),
+                "stock_original": _to_int(stock_value),
+                "is_hero": (str(is_hero_value or "N").upper() == "Y"),
+                "category": _safe_cell(row, column_map.get("category")) or "",
             }
         )
 
-    return rows
+    return rows, column_map
 
 
 campaigns_bp = Blueprint(
@@ -305,7 +367,7 @@ def upload_campaign():
     uploaded_file.save(xlsx_path)
 
     try:
-        rows = _read_template_rows(xlsx_path)
+        rows, column_map = _read_template_rows(xlsx_path)
     except Exception as e:
         xlsx_path.unlink(missing_ok=True)
         return jsonify({"error": f"Could not parse template: {e}"}), 400
@@ -327,6 +389,7 @@ def upload_campaign():
         "original_filename": uploaded_file.filename,
         "uploaded_at": datetime.now().isoformat(timespec="seconds"),
         "enrichment_version": ENRICHMENT_VERSION,
+        "column_map": column_map,
         "rows": state_rows,
     }
     _save_meta(campaign_id, meta)
@@ -491,6 +554,7 @@ def download_campaign(campaign_id: str):
     if not xlsx_path.exists():
         abort(404, "Source template missing")
 
+    column_map = meta.get("column_map") or dict(LEGACY_COLUMN_MAP)
     rows_by_excel_row = {row["row_index"] + 1: row for row in meta["rows"]}
 
     out_path = BASE_DIR / f"{campaign_id}.download.xlsx"
@@ -529,6 +593,19 @@ def download_campaign(campaign_id: str):
             value_node = ET.SubElement(cell, f"{{{ns['x']}}}v")
             value_node.text = value
 
+    def excel_col_letter(index: int | None) -> str | None:
+        if index is None or index < 0:
+            return None
+        number = index + 1
+        letters = ""
+        while number:
+            number, remainder = divmod(number - 1, 26)
+            letters = chr(65 + remainder) + letters
+        return letters
+
+    campaign_col = excel_col_letter(column_map.get("campaign_price"))
+    stock_col = excel_col_letter(column_map.get("stock"))
+
     for xml_row in list(sheet_data):
         row_num = int(xml_row.attrib.get("r", "0"))
         row_meta = rows_by_excel_row.get(row_num)
@@ -540,9 +617,9 @@ def download_campaign(campaign_id: str):
 
         for cell in xml_row.findall("x:c", ns):
             ref = cell.attrib.get("r", "")
-            if ref.startswith(f"G{row_num}"):
+            if campaign_col and ref.startswith(f"{campaign_col}{row_num}"):
                 set_cell_value(cell, format_price(row_meta.get("campaign_price")), inline_string=True)
-            elif ref.startswith(f"K{row_num}"):
+            elif stock_col and ref.startswith(f"{stock_col}{row_num}"):
                 set_cell_value(cell, str(max(0, int(row_meta.get("stock") or 0))), inline_string=False)
 
     sheet_xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)

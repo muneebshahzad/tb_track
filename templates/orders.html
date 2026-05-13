@@ -81,9 +81,9 @@
       line-height: 1.45;
     }
     .brand-lockup {
-      width: min(100%, 280px);
+      width: 168px;
       display: block;
-      margin: 0 auto 14px;
+      margin: 0 0 10px;
     }
     .brand-lockup img {
       display: block;
@@ -98,7 +98,7 @@
     }
     .utility-btn, .action-btn, .sort-select {
       border-radius: 14px;
-      min-height: 48px;
+      min-height: 44px;
       font-size: 14px;
       font-weight: 700;
       font-family: inherit;
@@ -256,11 +256,11 @@
       display: inline-flex;
       align-items: center;
       border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 11px;
+      padding: 3px 9px;
+      font-size: 10px;
       font-weight: 700;
-      background: rgba(38, 103, 255, 0.1);
-      color: #2346a8;
+      background: rgba(20, 33, 61, 0.06);
+      color: var(--muted);
     }
     .tag-row {
       display: flex;
@@ -271,22 +271,28 @@
       display: inline-flex;
       align-items: center;
       border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 11px;
+      padding: 3px 8px;
+      font-size: 10px;
       font-weight: 700;
-      background: rgba(20, 33, 61, 0.08);
-      color: var(--ink);
+      background: rgba(20, 33, 61, 0.05);
+      color: var(--muted);
+      border: 1px dashed rgba(20, 33, 61, 0.12);
     }
     .actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
       margin-top: 10px;
     }
     .action-btn {
       background: #fff;
       color: var(--ink);
-      padding: 10px 14px;
+      padding: 8px 12px;
+      min-height: 38px;
+      font-size: 12px;
+      font-weight: 800;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(20, 33, 61, 0.06);
       cursor: pointer;
     }
     .action-btn.packed {
@@ -333,7 +339,7 @@
     <section class="hero">
       {% if employee_portal_mode %}
         <div class="brand-lockup">
-          <img src="/static/tickbags-brand.svg" alt="TickBags.com">
+          <img src="/static/tickbags-logo.png" alt="TickBags.com">
         </div>
       {% endif %}
       <div class="eyebrow">{% if employee_portal_mode %}Tick Bags Employee Portal{% else %}Tick Bags Orders{% endif %}</div>
@@ -406,9 +412,6 @@
                   <div class="item-title">{{ item.item_title }}</div>
                   <div class="item-sub">Qty {{ item.quantity }}{% if item.tracking_number != 'N/A' %} • {{ item.tracking_number }}{% endif %}</div>
                   <div class="status-row">
-                    {% if item.status %}
-                      <span class="mini-badge">{{ item.status }}</span>
-                    {% endif %}
                     {% if item.applied_status %}
                       <span class="mini-badge">{{ item.applied_status }}</span>
                     {% endif %}

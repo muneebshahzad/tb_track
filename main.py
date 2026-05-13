@@ -22,6 +22,7 @@ import json
 from apscheduler.schedulers.background import BackgroundScheduler
 from token_manager import get_access_token, save_tokens
 from campaigns import campaigns_bp, init_campaign_dirs
+from shopify_protected_data import fetch_protected_order_details, get_protected_data_config_status
 import ssl
 import certifi
 
@@ -267,6 +268,47 @@ def process_line_item(line_item, fulfillments, tracking_cache, billing):
     }]
 
 
+def merge_customer_details(base: dict[str, str], override: dict[str, str]) -> dict[str, str]:
+    base = base or {}
+    override = override or {}
+    return {
+        "name": override.get("name") or base.get("name", ""),
+        "address": override.get("address") or base.get("address", ""),
+        "city": override.get("city") or base.get("city", ""),
+        "phone": override.get("phone") or base.get("phone", ""),
+    }
+
+
+def enrich_orders_with_protected_customer_data(orders: list[dict[str, object]]) -> list[dict[str, object]]:
+    shopify_orders = [order for order in orders if order.get("id")]
+    if not shopify_orders:
+        return orders
+
+    try:
+        protected_map, errors = fetch_protected_order_details([order["id"] for order in shopify_orders])
+        if errors:
+            print(f"Shopify protected data GraphQL warnings: {errors}")
+    except Exception as e:
+        print(f"Shopify protected data enrichment failed: {e}")
+        return orders
+
+    for order in shopify_orders:
+        protected = protected_map.get(str(order.get("id")))
+        if not protected:
+            continue
+
+        merged_details = merge_customer_details(order.get("customer_details") or {}, protected)
+        order["customer_details"] = merged_details
+
+        for item in order.get("line_items", []):
+            item["name"] = protected.get("name") or item.get("name", "N/A")
+            item["address"] = protected.get("address") or item.get("address", "N/A")
+            item["city"] = protected.get("city") or item.get("city", "N/A")
+            item["phone"] = protected.get("phone") or item.get("phone", "N/A")
+
+    return orders
+
+
 async def process_order(order, tracking_cache):
     global LAST_REQUEST_TIME
 
@@ -469,6 +511,8 @@ async def getShopifyOrders():
         else:
             result.append(r)
 
+    result = enrich_orders_with_protected_customer_data(result)
+
     print(f"Processed {len(result)} orders in {time.time() - total_start:.2f}s")
     return result
 
@@ -490,6 +534,11 @@ def refresh_data():
     except Exception as e:
         print(f"Error refreshing data: {e}")
         return jsonify({'message': 'Failed to refresh data'}), 500
+
+
+@app.route('/shopify/protected-data/status')
+def shopify_protected_data_status():
+    return jsonify(get_protected_data_config_status())
 
 
 @app.route('/api/refresh-tracking', methods=['POST'])

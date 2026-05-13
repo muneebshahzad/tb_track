@@ -20,7 +20,7 @@ import requests
 import json
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from token_manager import get_access_token
+from token_manager import get_access_token, save_tokens
 import ssl
 import certifi
 
@@ -597,6 +597,100 @@ async def limited_request(coroutine, semaphore):
         return await coroutine
 
 
+def normalize_scan_term(term):
+    return (term or "").strip().lower().replace("#", "")
+
+
+def serialize_shopify_order_for_employee(order):
+    customer = order.get('customer_details') or {}
+    line_items = order.get('line_items') or []
+    return {
+        'source': 'shopify',
+        'shopify_id': order.get('id'),
+        'order_id': str(order.get('order_id', '')),
+        'status': order.get('status', ''),
+        'customer_name': customer.get('name', ''),
+        'customer_phone': customer.get('phone', ''),
+        'customer_city': customer.get('city', ''),
+        'total_price': order.get('total_price', 0),
+        'created_at': order.get('created_at', ''),
+        'items': [
+            {
+                'title': item.get('product_title', ''),
+                'quantity': item.get('quantity', 0),
+                'image': item.get('image_src', ''),
+                'tracking_number': item.get('tracking_number', 'N/A'),
+                'status': item.get('status', ''),
+            }
+            for item in line_items
+        ],
+    }
+
+
+def serialize_daraz_order_for_employee(order):
+    customer = order.get('customer') or {}
+    items_list = order.get('items_list') or []
+    return {
+        'source': 'daraz',
+        'shopify_id': None,
+        'order_id': str(order.get('order_id', '')),
+        'status': order.get('status', ''),
+        'customer_name': customer.get('name', ''),
+        'customer_phone': customer.get('phone', ''),
+        'customer_city': '',
+        'total_price': order.get('total_price', 0),
+        'created_at': order.get('date', ''),
+        'items': [
+            {
+                'title': item.get('item_title', ''),
+                'quantity': item.get('quantity', 0),
+                'image': item.get('item_image', ''),
+                'tracking_number': item.get('tracking_number', 'N/A'),
+                'status': item.get('status', ''),
+            }
+            for item in items_list
+        ],
+    }
+
+
+def build_employee_portal_orders():
+    combined_orders = []
+    combined_orders.extend(serialize_shopify_order_for_employee(order) for order in order_details)
+    combined_orders.extend(serialize_daraz_order_for_employee(order) for order in daraz_orders)
+    return combined_orders
+
+
+def find_employee_portal_order(term):
+    normalized = normalize_scan_term(term)
+    if not normalized:
+        return None
+
+    for order in build_employee_portal_orders():
+        order_number = normalize_scan_term(order.get('order_id'))
+        if normalized == order_number or order_number.endswith(normalized):
+            return order
+
+        for item in order.get('items', []):
+            if normalize_scan_term(item.get('tracking_number')) == normalized:
+                return order
+
+    return None
+
+
+def apply_shopify_order_tag(order_id, tag):
+    today_date = datetime.now().strftime('%Y-%m-%d')
+    tag_with_date = f"{tag.strip()} ({today_date})"
+
+    order = shopify.Order.find(order_id)
+    tags = [t.strip() for t in order.tags.split(",")] if order.tags else []
+    if "Leopards Courier" in tags:
+        tags.remove("Leopards Courier")
+    if tag_with_date not in tags:
+        tags.append(tag_with_date)
+    order.tags = ", ".join(tags)
+    return order.save()
+
+
 # ── Daraz ─────────────────────────────────────────────────────────────────────
 
 def get_daraz_orders(statuses):
@@ -865,6 +959,53 @@ def update_status():
     upsert_order_status(key, status)
 
     return jsonify({"message": f"Status updated to {status} for {order_id} ({tracking_number})"})
+
+
+@app.route('/employee_portal')
+def employee_portal():
+    return render_template('employee_portal.html', employee_orders=build_employee_portal_orders())
+
+
+@app.route('/employee_portal/report', methods=['POST'])
+def employee_portal_report():
+    data = request.get_json() or {}
+    mode = (data.get('mode') or '').strip().lower()
+    scanned_orders = data.get('orders') or []
+
+    if mode not in {'dispatch', 'return'}:
+        return jsonify({'success': False, 'error': 'Invalid report mode.'}), 400
+
+    if not scanned_orders:
+        return jsonify({'success': False, 'error': 'No scanned orders provided.'}), 400
+
+    tag_name = 'Dispatched' if mode == 'dispatch' else 'Return Received'
+    tagged_count = 0
+    skipped_count = 0
+    seen_shopify_ids = set()
+
+    try:
+        for entry in scanned_orders:
+            if entry.get('source') != 'shopify':
+                skipped_count += 1
+                continue
+
+            shopify_id = entry.get('shopify_id')
+            if not shopify_id or shopify_id in seen_shopify_ids:
+                continue
+
+            seen_shopify_ids.add(shopify_id)
+            if apply_shopify_order_tag(shopify_id, tag_name):
+                tagged_count += 1
+
+        return jsonify({
+            'success': True,
+            'tagged_count': tagged_count,
+            'skipped_count': skipped_count,
+            'tag_name': tag_name,
+        })
+    except Exception as e:
+        print(f"Employee portal report error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ── Webhooks ──────────────────────────────────────────────────────────────────

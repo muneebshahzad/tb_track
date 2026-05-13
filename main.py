@@ -3,7 +3,7 @@ import sys
 import threading
 import time
 from email.mime.text import MIMEText
-from flask import render_template, request, jsonify, redirect, url_for
+from flask import render_template, request, jsonify, redirect, url_for, session, send_from_directory
 import datetime as dt
 from datetime import datetime
 
@@ -39,6 +39,9 @@ app.debug = False
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
 init_campaign_dirs()
 app.register_blueprint(campaigns_bp)
+
+EMPLOYEE_PORTAL_PASSWORD = os.getenv('EMPLOYEE_PORTAL_PASSWORD', '@@@t')
+EMPLOYEE_PORTAL_SESSION_KEY = 'employee_portal_authenticated'
 
 # ── Jinja2 helpers ────────────────────────────────────────────────────────────
 
@@ -663,6 +666,66 @@ def build_employee_portal_orders():
     return combined_orders
 
 
+def employee_portal_is_authenticated():
+    return bool(session.get(EMPLOYEE_PORTAL_SESSION_KEY))
+
+
+def employee_portal_safe_next_url(candidate):
+    if candidate and str(candidate).startswith('/employee_portal'):
+        return candidate
+    return url_for('employee_portal')
+
+
+def build_pending_orders_mobile_data():
+    all_orders = []
+    statuses = load_order_statuses()
+
+    for daraz_order in daraz_orders:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending', 'packed', 'Packed by seller / warehouse']:
+            items_with_status = []
+            for item in daraz_order['items_list']:
+                track_num = item.get('tracking_number', 'N/A')
+                key = f"{daraz_order['order_id']}:{track_num}"
+                item['applied_status'] = statuses.get(key, "")
+                items_with_status.append(item)
+
+            all_orders.append({
+                'order_via':  'Daraz',
+                'order_id':   daraz_order['order_id'],
+                'status':     daraz_order['status'],
+                'date':       daraz_order['date'],
+                'items_list': items_with_status,
+                'total_price': daraz_order['total_price']
+            })
+
+    for shopify_order in order_details:
+        if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
+            continue
+        if shopify_order['status'] in ['Booked', 'Un-Booked', 'Drop Off at Express Center']:
+            shopify_items = []
+            for item in shopify_order['line_items']:
+                track_num = item.get('tracking_number', 'N/A')
+                key = f"{shopify_order['order_id']}:{track_num}"
+                shopify_items.append({
+                    'item_image':     item['image_src'],
+                    'item_title':     item['product_title'],
+                    'quantity':       item['quantity'],
+                    'tracking_number': track_num,
+                    'status':         item['status'],
+                    'applied_status': statuses.get(key, "")
+                })
+            all_orders.append({
+                'order_via':  'Shopify',
+                'order_id':   shopify_order['order_id'],
+                'status':     shopify_order['status'],
+                'date':       shopify_order['created_at'],
+                'items_list': shopify_items,
+                'total_price': shopify_order['total_price']
+            })
+
+    return all_orders
+
+
 def find_employee_portal_order(term):
     normalized = normalize_scan_term(term)
     if not normalized:
@@ -892,55 +955,7 @@ def pending_orders():
 
 @app.route('/orders')
 def pending_orders_mobile():
-    all_orders = []
-    global daraz_orders, order_details
-
-    statuses = load_order_statuses()
-
-    for daraz_order in daraz_orders:
-        if daraz_order['status'] in ['Ready To Ship', 'Pending', 'packed', 'Packed by seller / warehouse']:
-            items_with_status = []
-            for item in daraz_order['items_list']:
-                track_num = item.get('tracking_number', 'N/A')
-                key = f"{daraz_order['order_id']}:{track_num}"
-                item['applied_status'] = statuses.get(key, "")
-                items_with_status.append(item)
-
-            all_orders.append({
-                'order_via':  'Daraz',
-                'order_id':   daraz_order['order_id'],
-                'status':     daraz_order['status'],
-                'date':       daraz_order['date'],
-                'items_list': items_with_status,
-                'total_price': daraz_order['total_price']
-            })
-
-    for shopify_order in order_details:
-        if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
-            continue
-        if shopify_order['status'] in ['Booked', 'Un-Booked', 'Drop Off at Express Center']:
-            shopify_items = []
-            for item in shopify_order['line_items']:
-                track_num = item.get('tracking_number', 'N/A')
-                key = f"{shopify_order['order_id']}:{track_num}"
-                shopify_items.append({
-                    'item_image':     item['image_src'],
-                    'item_title':     item['product_title'],
-                    'quantity':       item['quantity'],
-                    'tracking_number': track_num,
-                    'status':         item['status'],
-                    'applied_status': statuses.get(key, "")
-                })
-            all_orders.append({
-                'order_via':  'Shopify',
-                'order_id':   shopify_order['order_id'],
-                'status':     shopify_order['status'],
-                'date':       shopify_order['created_at'],
-                'items_list': shopify_items,
-                'total_price': shopify_order['total_price']
-            })
-
-    return render_template('orders.html', all_orders=all_orders)
+    return render_template('orders.html', all_orders=build_pending_orders_mobile_data(), employee_portal_mode=False)
 
 
 @app.route('/undelivered')
@@ -964,13 +979,81 @@ def update_status():
     return jsonify({"message": f"Status updated to {status} for {order_id} ({tracking_number})"})
 
 
-@app.route('/employee_portal')
+@app.route('/employee_portal', methods=['GET', 'POST'])
 def employee_portal():
-    return render_template('employee_portal.html', employee_orders=build_employee_portal_orders())
+    next_url = employee_portal_safe_next_url(request.values.get('next'))
+
+    if request.method == 'POST':
+        submitted_password = (request.form.get('password') or '').strip()
+        if submitted_password == EMPLOYEE_PORTAL_PASSWORD:
+            session[EMPLOYEE_PORTAL_SESSION_KEY] = True
+            return redirect(next_url)
+        return render_template(
+            'employee_portal.html',
+            view='login',
+            login_error='Wrong password. Try again.',
+            next_url=next_url
+        ), 401
+
+    if not employee_portal_is_authenticated():
+        return render_template('employee_portal.html', view='login', login_error='', next_url=next_url)
+
+    return render_template('employee_portal.html', view='portal', employee_orders=build_employee_portal_orders())
+
+
+@app.route('/employee_portal/orders')
+def employee_portal_orders():
+    if not employee_portal_is_authenticated():
+        return redirect(url_for('employee_portal', next='/employee_portal/orders'))
+    return render_template('orders.html', all_orders=build_pending_orders_mobile_data(), employee_portal_mode=True)
+
+
+@app.route('/employee_portal/logout', methods=['POST'])
+def employee_portal_logout():
+    session.pop(EMPLOYEE_PORTAL_SESSION_KEY, None)
+    return redirect(url_for('employee_portal'))
+
+
+@app.route('/employee_portal/updates')
+def employee_portal_updates():
+    if not employee_portal_is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    orders = build_employee_portal_orders()
+    order_summaries = [
+        {
+            'id': f"{order.get('source')}:{order.get('order_id')}",
+            'order_id': order.get('order_id'),
+            'source': order.get('source'),
+            'created_at': order.get('created_at')
+        }
+        for order in orders
+    ]
+    order_summaries.sort(key=lambda entry: str(entry.get('created_at') or ''), reverse=True)
+    return jsonify({
+        'success': True,
+        'count': len(order_summaries),
+        'order_ids': [entry['id'] for entry in order_summaries],
+        'latest': order_summaries[:6],
+        'generated_at': datetime.now().isoformat(timespec='seconds')
+    })
+
+
+@app.route('/employee_portal-manifest.webmanifest')
+def employee_portal_manifest():
+    return send_from_directory('static', 'employee-portal.webmanifest', mimetype='application/manifest+json')
+
+
+@app.route('/employee_portal-sw.js')
+def employee_portal_service_worker():
+    return send_from_directory('static', 'employee-portal-sw.js', mimetype='application/javascript')
 
 
 @app.route('/employee_portal/report', methods=['POST'])
 def employee_portal_report():
+    if not employee_portal_is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
     data = request.get_json() or {}
     mode = (data.get('mode') or '').strip().lower()
     scanned_orders = data.get('orders') or []

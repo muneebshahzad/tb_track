@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14213d">
   <title>TB Employee Portal</title>
+  <link rel="manifest" href="/employee_portal-manifest.webmanifest">
+  <link rel="icon" href="/static/employee-portal-icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -20,7 +23,6 @@
       --red: #cf3f3f;
       --gold: #f2b632;
     }
-
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
     body {
@@ -32,7 +34,6 @@
         linear-gradient(180deg, #fbf7f0 0%, #f4efe6 55%, #efe6da 100%);
       padding: 18px 14px 32px;
     }
-
     .shell {
       max-width: 560px;
       margin: 0 auto;
@@ -40,22 +41,19 @@
       flex-direction: column;
       gap: 14px;
     }
-
-    .hero, .panel, .queue-card, .result-card, .desktop-note {
+    .hero, .panel, .queue-card, .result-card, .desktop-note, .login-card {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 20px;
       box-shadow: var(--shadow);
       backdrop-filter: blur(10px);
     }
-
     .hero {
       padding: 18px;
       position: sticky;
       top: 10px;
       z-index: 10;
     }
-
     .eyebrow {
       display: inline-flex;
       align-items: center;
@@ -69,40 +67,33 @@
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
-
     h1 {
       margin: 12px 0 4px;
       font-size: 28px;
       line-height: 1;
-      letter-spacing: 0;
     }
-
     .subcopy {
       margin: 0;
       color: var(--muted);
       font-size: 14px;
       line-height: 1.45;
     }
-
     .hero-actions {
       margin-top: 14px;
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 10px;
     }
-
     .mode-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 8px;
     }
-
-    .mode-btn, .text-btn, .icon-btn, .primary-btn, .ghost-btn {
+    .mode-btn, .text-btn, .icon-btn, .primary-btn, .ghost-btn, .login-btn, .utility-btn {
       border: 0;
       cursor: pointer;
       font-family: inherit;
     }
-
     .mode-btn {
       padding: 12px 8px;
       border-radius: 16px;
@@ -117,53 +108,77 @@
       text-align: left;
       transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
     }
-
     .mode-btn.active {
       transform: translateY(-1px);
       box-shadow: 0 12px 28px rgba(20, 33, 61, 0.12);
     }
-
     .mode-btn .kicker {
       font-size: 11px;
       font-weight: 800;
       letter-spacing: 0.04em;
       text-transform: uppercase;
     }
-
     .mode-btn .label {
       font-size: 15px;
       font-weight: 700;
       line-height: 1.05;
     }
-
     .mode-search.active { border-color: rgba(38, 103, 255, 0.35); background: rgba(38, 103, 255, 0.08); }
     .mode-dispatch.active { border-color: rgba(42, 157, 91, 0.35); background: rgba(42, 157, 91, 0.08); }
     .mode-return.active { border-color: rgba(207, 63, 63, 0.35); background: rgba(207, 63, 63, 0.08); }
     .mode-search .kicker { color: var(--blue); }
     .mode-dispatch .kicker { color: var(--green); }
     .mode-return .kicker { color: var(--red); }
-
-    .text-btn, .primary-btn, .ghost-btn {
+    .text-btn, .primary-btn, .ghost-btn, .login-btn, .utility-btn {
       border-radius: 14px;
       font-size: 14px;
       font-weight: 700;
       padding: 14px 16px;
       min-height: 52px;
     }
-
-    .text-btn {
+    .text-btn, .ghost-btn, .utility-btn {
       background: #fff;
       color: var(--ink);
       border: 1px solid var(--line);
     }
-
+    .primary-btn, .login-btn {
+      background: var(--ink);
+      color: #fff;
+    }
+    .primary-btn.dispatch { background: var(--green); }
+    .primary-btn.return { background: var(--red); }
     .panel {
       padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 12px;
     }
-
+    .toolbar-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .utility-btn[hidden] { display: none; }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(20, 33, 61, 0.06);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .status-pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #b8b2aa;
+    }
+    .status-pill.active .dot { background: var(--green); }
+    .status-pill.warn .dot { background: var(--gold); }
     .input-row {
       display: grid;
       grid-template-columns: auto 1fr auto;
@@ -174,8 +189,7 @@
       background: #fff;
       border: 1px solid var(--line);
     }
-
-    .input-row input {
+    .input-row input, .login-field {
       border: 0;
       outline: 0;
       background: transparent;
@@ -184,7 +198,6 @@
       color: var(--ink);
       font-family: inherit;
     }
-
     .icon-btn {
       width: 42px;
       height: 42px;
@@ -193,7 +206,6 @@
       color: var(--ink);
       font-size: 18px;
     }
-
     #reader {
       width: 100%;
       overflow: hidden;
@@ -203,9 +215,7 @@
       display: none;
       position: relative;
     }
-
     #reader.active { display: block; }
-
     .camera-meta {
       display: none;
       align-items: center;
@@ -213,11 +223,7 @@
       gap: 10px;
       margin-top: -2px;
     }
-
-    .camera-meta.active {
-      display: flex;
-    }
-
+    .camera-meta.active { display: flex; }
     .scan-count {
       display: inline-flex;
       align-items: center;
@@ -229,7 +235,6 @@
       font-size: 12px;
       font-weight: 800;
     }
-
     .helper-row {
       display: flex;
       align-items: center;
@@ -237,16 +242,11 @@
       gap: 10px;
       flex-wrap: wrap;
     }
-
     .helper {
       font-size: 12px;
       color: var(--muted);
     }
-
-    .result-card, .queue-card {
-      padding: 16px;
-    }
-
+    .result-card, .queue-card { padding: 16px; }
     .result-head, .queue-head {
       display: flex;
       align-items: center;
@@ -254,12 +254,10 @@
       gap: 10px;
       margin-bottom: 12px;
     }
-
     .result-title, .queue-title {
       font-size: 16px;
       font-weight: 800;
     }
-
     .badge {
       display: inline-flex;
       align-items: center;
@@ -270,34 +268,28 @@
       font-weight: 700;
       white-space: nowrap;
     }
-
     .badge.shopify { background: rgba(42, 157, 91, 0.12); color: #1b6f41; }
     .badge.daraz { background: rgba(242, 182, 50, 0.18); color: #8b5a00; }
-
     .order-meta {
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 8px;
       margin-bottom: 12px;
     }
-
     .order-no {
       font-family: 'Space Mono', monospace;
       font-size: 18px;
       font-weight: 700;
     }
-
     .muted {
       color: var(--muted);
       font-size: 13px;
     }
-
-    .items {
+    .items, .queue-list {
       display: flex;
       flex-direction: column;
       gap: 8px;
     }
-
     .item {
       display: grid;
       grid-template-columns: 46px 1fr auto;
@@ -307,7 +299,6 @@
       border-radius: 14px;
       background: rgba(20, 33, 61, 0.04);
     }
-
     .item-thumb {
       width: 46px;
       height: 46px;
@@ -321,46 +312,43 @@
       font-size: 10px;
       font-weight: 700;
     }
-
+    .item-thumb.image-button {
+      padding: 0;
+      border: 0;
+      cursor: pointer;
+    }
     .item-thumb img {
       width: 100%;
       height: 100%;
       object-fit: cover;
     }
-
     .lookup-item {
       grid-template-columns: 92px 1fr auto;
       align-items: stretch;
     }
-
     .lookup-item .item-thumb {
-      width: 92px;
-      height: 92px;
+      width: 116px;
+      height: 116px;
       border-radius: 16px;
       font-size: 12px;
     }
-
     .lookup-item .item-title {
       font-size: 16px;
       line-height: 1.25;
     }
-
     .lookup-item .item-meta {
       font-size: 13px;
     }
-
     .item-title {
       font-size: 14px;
       font-weight: 700;
       line-height: 1.2;
     }
-
     .item-meta {
       margin-top: 2px;
       font-size: 12px;
       color: var(--muted);
     }
-
     .qty-pill {
       border-radius: 999px;
       background: #fff;
@@ -371,14 +359,6 @@
       font-size: 12px;
       font-weight: 800;
     }
-
-    .queue-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      margin-top: 12px;
-    }
-
     .queue-item {
       display: grid;
       grid-template-columns: auto 1fr auto;
@@ -388,7 +368,6 @@
       border-radius: 14px;
       background: rgba(20, 33, 61, 0.04);
     }
-
     .queue-index {
       width: 28px;
       height: 28px;
@@ -401,38 +380,16 @@
       background: #fff;
       border: 1px solid var(--line);
     }
-
     .queue-order {
       font-family: 'Space Mono', monospace;
       font-size: 13px;
       font-weight: 700;
     }
-
     .queue-sub {
       margin-top: 2px;
       font-size: 12px;
       color: var(--muted);
     }
-
-    .primary-btn {
-      background: var(--ink);
-      color: #fff;
-    }
-
-    .primary-btn.dispatch {
-      background: var(--green);
-    }
-
-    .primary-btn.return {
-      background: var(--red);
-    }
-
-    .ghost-btn {
-      background: #fff;
-      color: var(--ink);
-      border: 1px solid var(--line);
-    }
-
     .toast {
       position: fixed;
       left: 50%;
@@ -449,431 +406,667 @@
       display: none;
       z-index: 30;
     }
-
+    .image-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(20, 33, 61, 0.78);
+      z-index: 60;
+    }
+    .image-modal.open { display: flex; }
+    .image-modal-card {
+      position: relative;
+      width: min(100%, 420px);
+      border-radius: 22px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 24px 50px rgba(0, 0, 0, 0.28);
+    }
+    .image-modal-card img {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 78vh;
+      object-fit: contain;
+      background: #f3efe8;
+    }
+    .image-modal-close {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 40px;
+      height: 40px;
+      border: 0;
+      border-radius: 999px;
+      background: rgba(20, 33, 61, 0.72);
+      color: #fff;
+      font-size: 22px;
+      cursor: pointer;
+    }
     .desktop-note {
       display: none;
       padding: 14px 16px;
       font-size: 14px;
       color: var(--muted);
     }
-
+    .login-wrap {
+      min-height: calc(100vh - 36px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-card {
+      width: min(100%, 420px);
+      padding: 24px 20px;
+    }
+    .login-title {
+      margin: 14px 0 6px;
+      font-size: 30px;
+      line-height: 1;
+    }
+    .login-form {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .login-field-wrap {
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+    .login-error {
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(207, 63, 63, 0.08);
+      color: #a12525;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .login-hint {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
     @media (min-width: 900px) {
       .desktop-note { display: block; }
     }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <div class="desktop-note">This portal is built for phone use. It still works here, but the scanner flow is tuned for mobile cameras.</div>
+  {% if view == 'login' %}
+    <div class="login-wrap">
+      <section class="login-card">
+        <div class="eyebrow">Tick Bags Employee Portal</div>
+        <h1 class="login-title">Sign in.</h1>
+        <p class="subcopy">Use the employee password to open the scanner, dispatch queue, return queue, and mobile orders view.</p>
+        <form class="login-form" method="post" action="/employee_portal">
+          <input type="hidden" name="next" value="{{ next_url or '/employee_portal' }}">
+          {% if login_error %}
+            <div class="login-error">{{ login_error }}</div>
+          {% endif %}
+          <label class="login-field-wrap">
+            <input class="login-field" type="password" name="password" placeholder="Employee password" autocomplete="current-password" autofocus>
+          </label>
+          <button class="login-btn" type="submit">Unlock Portal</button>
+        </form>
+        <div class="login-hint">This mobile tool is meant for staff use and opens as a standalone web app after install.</div>
+      </section>
+    </div>
+  {% else %}
+    <div class="shell">
+      <div class="desktop-note">This portal is built for phone use. It still works here, but the scanner flow is tuned for mobile cameras.</div>
 
-    <section class="hero">
-      <div class="eyebrow">Tick Bags Employee Portal</div>
-      <h1>Scan, dispatch, return.</h1>
-      <p class="subcopy">Use order number, tracking number, barcode, or QR. Search shows contents. Dispatch and return build a queue, then apply Shopify tags in one step.</p>
-      <div class="hero-actions">
-        <div class="mode-grid">
-          <button class="mode-btn mode-search active" data-mode="search" onclick="setMode('search')">
-            <span class="kicker">Lookup</span>
-            <span class="label">Scan Order</span>
-          </button>
-          <button class="mode-btn mode-dispatch" data-mode="dispatch" onclick="setMode('dispatch')">
-            <span class="kicker">Queue</span>
-            <span class="label">Dispatch</span>
-          </button>
-          <button class="mode-btn mode-return" data-mode="return" onclick="setMode('return')">
-            <span class="kicker">Queue</span>
-            <span class="label">Return</span>
-          </button>
+      <section class="hero">
+        <div class="eyebrow">Tick Bags Employee Portal</div>
+        <h1>Scan, dispatch, return.</h1>
+        <p class="subcopy">Use order number, tracking number, barcode, or QR. Search shows contents. Dispatch and return build a queue, then apply Shopify tags in one step.</p>
+        <div class="toolbar-row">
+          <button class="utility-btn" type="button" id="installBtn" hidden>Install App</button>
+          <button class="utility-btn" type="button" id="notifyBtn">Enable Notifications</button>
+          <span class="status-pill" id="notifyStatus"><span class="dot"></span><span>Notifications off</span></span>
+          <form method="post" action="/employee_portal/logout" style="margin:0 0 0 auto;">
+            <button class="utility-btn" type="submit">Log Out</button>
+          </form>
         </div>
-        <button class="text-btn" onclick="window.location.href='/orders'">Orders List</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="input-row">
-        <button class="icon-btn" id="cameraToggleBtn" onclick="toggleScanner()" aria-label="Toggle camera">+</button>
-        <input id="scanInput" type="text" placeholder="Scan or type order number / tracking number" enterkeyhint="done">
-        <button class="icon-btn" onclick="submitScan()" aria-label="Submit scan">></button>
-      </div>
-      <div id="reader"></div>
-      <div class="camera-meta" id="cameraMeta">
-        <div class="scan-count" id="scanCount">0 scanned</div>
-        <button class="ghost-btn" type="button" id="hideCameraBtn" onclick="stopScanner()">Hide Camera</button>
-      </div>
-      <div class="helper-row">
-        <div class="helper" id="modeHelper">Search any order and see products with quantities.</div>
-        <button class="ghost-btn" type="button" onclick="submitScan()">Use Typed Code</button>
-      </div>
-    </section>
-
-    <section class="result-card" id="resultCard" style="display:none;"></section>
-
-    <section class="queue-card" id="queueCard" style="display:none;">
-      <div class="queue-head">
-        <div>
-          <div class="queue-title" id="queueTitle">Dispatch Queue</div>
-          <div class="muted" id="queueSummary">0 scanned</div>
+        <div class="hero-actions">
+          <div class="mode-grid">
+            <button class="mode-btn mode-search active" data-mode="search" onclick="setMode('search')">
+              <span class="kicker">Lookup</span>
+              <span class="label">Scan Order</span>
+            </button>
+            <button class="mode-btn mode-dispatch" data-mode="dispatch" onclick="setMode('dispatch')">
+              <span class="kicker">Queue</span>
+              <span class="label">Dispatch</span>
+            </button>
+            <button class="mode-btn mode-return" data-mode="return" onclick="setMode('return')">
+              <span class="kicker">Queue</span>
+              <span class="label">Return</span>
+            </button>
+          </div>
+          <button class="text-btn" onclick="window.location.href='/employee_portal/orders'">Orders List</button>
         </div>
-        <button class="ghost-btn" onclick="clearQueue()">Clear</button>
-      </div>
-      <button class="primary-btn dispatch" id="reportBtn" onclick="createReport()">Create Dispatch Report</button>
-      <div class="queue-list" id="queueList"></div>
-    </section>
-  </div>
+      </section>
 
-  <div class="toast" id="toast"></div>
-
-  <script src="/static/html5-qrcode.min.js"></script>
-  <script>
-    (function passwordGate() {
-      const password = '@@@t';
-      const key = 'tbEmployeePortalAccess';
-      const ttlMs = 10 * 60 * 1000;
-      const lastAccess = Number(localStorage.getItem(key) || 0);
-      if (Date.now() - lastAccess < ttlMs) {
-        return;
-      }
-
-      let entered = '';
-      while (entered !== password) {
-        entered = prompt('Enter employee portal password:') || '';
-        if (!entered) {
-          document.body.innerHTML = '';
-          throw new Error('Access cancelled');
-        }
-        if (entered !== password) {
-          alert('Wrong password');
-        }
-      }
-
-      localStorage.setItem(key, String(Date.now()));
-    })();
-
-    const ORDERS = {{ employee_orders | tojson }};
-    let currentMode = 'search';
-    let scanner = null;
-    let scannerActive = false;
-    let queue = [];
-    let lastScanValue = '';
-    let audioContext = null;
-
-    function setMode(mode) {
-      currentMode = mode;
-      queue = [];
-      renderModeButtons();
-      renderQueue();
-      hideResult();
-      updateScanCount();
-
-      const helper = document.getElementById('modeHelper');
-      const reportBtn = document.getElementById('reportBtn');
-      const queueTitle = document.getElementById('queueTitle');
-
-      if (mode === 'search') {
-        helper.textContent = 'Search any order and see products with quantities.';
-        reportBtn.textContent = 'Create Dispatch Report';
-        reportBtn.className = 'primary-btn dispatch';
-        queueTitle.textContent = 'Dispatch Queue';
-      } else if (mode === 'dispatch') {
-        helper.textContent = 'Scan Shopify or Daraz orders one by one. Report creation tags Shopify orders as Dispatched (today).';
-        reportBtn.textContent = 'Create Dispatch Report';
-        reportBtn.className = 'primary-btn dispatch';
-        queueTitle.textContent = 'Dispatch Queue';
-      } else {
-        helper.textContent = 'Scan returned parcels one by one. Report creation tags Shopify orders as Return Received (today).';
-        reportBtn.textContent = 'Create Return Report';
-        reportBtn.className = 'primary-btn return';
-        queueTitle.textContent = 'Return Queue';
-      }
-    }
-
-    function renderModeButtons() {
-      document.querySelectorAll('.mode-btn').forEach((button) => {
-        button.classList.toggle('active', button.dataset.mode === currentMode);
-      });
-      document.getElementById('queueCard').style.display = currentMode === 'search' ? 'none' : 'block';
-    }
-
-    function normalizeTerm(value) {
-      return (value || '').trim().toLowerCase().replaceAll('#', '');
-    }
-
-    function findOrder(term) {
-      const normalized = normalizeTerm(term);
-      if (!normalized) return null;
-
-      return ORDERS.find((order) => {
-        const orderId = normalizeTerm(order.order_id);
-        if (normalized === orderId || orderId.endsWith(normalized)) {
-          return true;
-        }
-
-        return (order.items || []).some((item) => normalizeTerm(item.tracking_number) === normalized);
-      }) || null;
-    }
-
-    function submitScan() {
-      const input = document.getElementById('scanInput');
-      const term = input.value.trim();
-      if (!term) return;
-      input.value = '';
-      processScan(term);
-    }
-
-    function processScan(term) {
-      if (term === lastScanValue) {
-        return;
-      }
-      lastScanValue = term;
-      setTimeout(() => { lastScanValue = ''; }, 1200);
-
-      const order = findOrder(term);
-      if (!order) {
-        showToast('Order not found', false);
-        return;
-      }
-
-      playSuccessBeep();
-
-      if (currentMode === 'search') {
-        renderResult(order);
-        stopScanner();
-        showToast('Order loaded', true);
-        return;
-      }
-
-      if (queue.some((entry) => entry.source === order.source && entry.order_id === order.order_id)) {
-        showToast('Order already in queue', false);
-        return;
-      }
-
-      queue.unshift(order);
-      renderQueue();
-      renderResult(order);
-      showToast('Added to ' + (currentMode === 'dispatch' ? 'dispatch' : 'return') + ' queue', true);
-    }
-
-    function renderResult(order) {
-      const resultCard = document.getElementById('resultCard');
-      const sourceClass = order.source === 'shopify' ? 'shopify' : 'daraz';
-      const pieces = (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-
-      resultCard.innerHTML = `
-        <div class="result-head">
-          <div class="result-title">Order Details</div>
-          <span class="badge ${sourceClass}">${order.source}</span>
+      <section class="panel">
+        <div class="input-row">
+          <button class="icon-btn" id="cameraToggleBtn" onclick="toggleScanner()" aria-label="Toggle camera">+</button>
+          <input id="scanInput" type="text" placeholder="Scan or type order number / tracking number" enterkeyhint="done">
+          <button class="icon-btn" onclick="submitScan()" aria-label="Submit scan">></button>
         </div>
-        <div class="order-meta">
+        <div id="reader"></div>
+        <div class="camera-meta" id="cameraMeta">
+          <div class="scan-count" id="scanCount">0 scanned</div>
+          <button class="ghost-btn" type="button" id="hideCameraBtn" onclick="stopScanner()">Hide Camera</button>
+        </div>
+        <div class="helper-row">
+          <div class="helper" id="modeHelper">Search any order and see products with quantities.</div>
+          <button class="ghost-btn" type="button" onclick="submitScan()">Use Typed Code</button>
+        </div>
+      </section>
+
+      <section class="result-card" id="resultCard" style="display:none;"></section>
+
+      <section class="queue-card" id="queueCard" style="display:none;">
+        <div class="queue-head">
           <div>
-            <div class="order-no">${escapeHtml(order.order_id)}</div>
-            <div class="muted">${escapeHtml(order.customer_name || 'No customer name')} ${order.customer_phone ? '• ' + escapeHtml(order.customer_phone) : ''}</div>
+            <div class="queue-title" id="queueTitle">Dispatch Queue</div>
+            <div class="muted" id="queueSummary">0 scanned</div>
           </div>
-          <div style="text-align:right">
-            <div style="font-size:18px;font-weight:800;">${pieces} pcs</div>
-            <div class="muted">${escapeHtml(order.status || 'No status')}</div>
+          <button class="ghost-btn" onclick="clearQueue()">Clear</button>
+        </div>
+        <button class="primary-btn dispatch" id="reportBtn" onclick="createReport()">Create Dispatch Report</button>
+        <div class="queue-list" id="queueList"></div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <div class="image-modal" id="imageModal" onclick="closeImageModal(event)">
+      <div class="image-modal-card">
+        <button class="image-modal-close" type="button" aria-label="Close image" onclick="closeImageModal(event)">×</button>
+        <img id="imageModalImg" src="" alt="Product image">
+      </div>
+    </div>
+
+    <script src="/static/html5-qrcode.min.js"></script>
+    <script>
+      const ORDERS = {{ employee_orders | tojson }};
+      const KNOWN_ORDER_STORAGE_KEY = 'tbEmployeePortalKnownOrders';
+      let currentMode = 'search';
+      let scanner = null;
+      let scannerActive = false;
+      let queue = [];
+      let lastScanValue = '';
+      let audioContext = null;
+      let deferredInstallPrompt = null;
+
+      function setMode(mode) {
+        currentMode = mode;
+        queue = [];
+        renderModeButtons();
+        renderQueue();
+        hideResult();
+        updateScanCount();
+
+        const helper = document.getElementById('modeHelper');
+        const reportBtn = document.getElementById('reportBtn');
+        const queueTitle = document.getElementById('queueTitle');
+
+        if (mode === 'search') {
+          helper.textContent = 'Search any order and see products with quantities.';
+          reportBtn.textContent = 'Create Dispatch Report';
+          reportBtn.className = 'primary-btn dispatch';
+          queueTitle.textContent = 'Dispatch Queue';
+        } else if (mode === 'dispatch') {
+          helper.textContent = 'Scan Shopify or Daraz orders one by one. Report creation tags Shopify orders as Dispatched (today).';
+          reportBtn.textContent = 'Create Dispatch Report';
+          reportBtn.className = 'primary-btn dispatch';
+          queueTitle.textContent = 'Dispatch Queue';
+        } else {
+          helper.textContent = 'Scan returned parcels one by one. Report creation tags Shopify orders as Return Received (today).';
+          reportBtn.textContent = 'Create Return Report';
+          reportBtn.className = 'primary-btn return';
+          queueTitle.textContent = 'Return Queue';
+        }
+      }
+
+      function renderModeButtons() {
+        document.querySelectorAll('.mode-btn').forEach((button) => {
+          button.classList.toggle('active', button.dataset.mode === currentMode);
+        });
+        document.getElementById('queueCard').style.display = currentMode === 'search' ? 'none' : 'block';
+      }
+
+      function normalizeTerm(value) {
+        return (value || '').trim().toLowerCase().replaceAll('#', '');
+      }
+
+      function findOrder(term) {
+        const normalized = normalizeTerm(term);
+        if (!normalized) return null;
+
+        return ORDERS.find((order) => {
+          const orderId = normalizeTerm(order.order_id);
+          if (normalized === orderId || orderId.endsWith(normalized)) {
+            return true;
+          }
+          return (order.items || []).some((item) => normalizeTerm(item.tracking_number) === normalized);
+        }) || null;
+      }
+
+      function submitScan() {
+        const input = document.getElementById('scanInput');
+        const term = input.value.trim();
+        if (!term) return;
+        input.value = '';
+        processScan(term);
+      }
+
+      function processScan(term) {
+        if (term === lastScanValue) return;
+        lastScanValue = term;
+        setTimeout(() => { lastScanValue = ''; }, 1200);
+
+        const order = findOrder(term);
+        if (!order) {
+          showToast('Order not found', false);
+          return;
+        }
+
+        playSuccessBeep();
+
+        if (currentMode === 'search') {
+          renderResult(order);
+          stopScanner();
+          showToast('Order loaded', true);
+          return;
+        }
+
+        if (queue.some((entry) => entry.source === order.source && entry.order_id === order.order_id)) {
+          showToast('Order already in queue', false);
+          return;
+        }
+
+        queue.unshift(order);
+        renderQueue();
+        renderResult(order);
+        showToast('Added to ' + (currentMode === 'dispatch' ? 'dispatch' : 'return') + ' queue', true);
+      }
+
+      function renderResult(order) {
+        const resultCard = document.getElementById('resultCard');
+        const sourceClass = order.source === 'shopify' ? 'shopify' : 'daraz';
+        const pieces = (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+
+        resultCard.innerHTML = `
+          <div class="result-head">
+            <div class="result-title">Order Details</div>
+            <span class="badge ${sourceClass}">${order.source}</span>
           </div>
-        </div>
-        <div class="items">
-          ${(order.items || []).map((item) => `
-            <div class="item ${currentMode === 'search' ? 'lookup-item' : ''}">
-              <div class="item-thumb">
-                ${item.image && item.image !== 'None' ? `<img src="${escapeAttribute(item.image)}" alt="">` : 'IMG'}
-              </div>
-              <div>
-                <div class="item-title">${escapeHtml(item.title || 'Untitled item')}</div>
-                <div class="item-meta">${escapeHtml(item.tracking_number || 'No tracking')}</div>
-              </div>
-              <div class="qty-pill">x${Number(item.quantity || 0)}</div>
-            </div>
-          `).join('')}
-        </div>
-      `;
-      resultCard.style.display = 'block';
-    }
-
-    function hideResult() {
-      document.getElementById('resultCard').style.display = 'none';
-    }
-
-    function renderQueue() {
-      const queueList = document.getElementById('queueList');
-      const queueSummary = document.getElementById('queueSummary');
-      const reportBtn = document.getElementById('reportBtn');
-
-      queueSummary.textContent = `${queue.length} scanned`;
-      updateScanCount();
-      reportBtn.disabled = queue.length === 0;
-      reportBtn.style.opacity = queue.length === 0 ? '0.5' : '1';
-
-      queueList.innerHTML = queue.map((order, index) => {
-        const productCount = (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-        return `
-          <div class="queue-item">
-            <div class="queue-index">${index + 1}</div>
+          <div class="order-meta">
             <div>
-              <div class="queue-order">${escapeHtml(order.order_id)}</div>
-              <div class="queue-sub">${escapeHtml(order.source)} • ${productCount} pcs</div>
+              <div class="order-no">${escapeHtml(order.order_id)}</div>
+              <div class="muted">${escapeHtml(order.customer_name || 'No customer name')} ${order.customer_phone ? '• ' + escapeHtml(order.customer_phone) : ''}</div>
             </div>
-            <button class="icon-btn" onclick="removeFromQueue('${escapeJs(order.source)}','${escapeJs(order.order_id)}')" aria-label="Remove order">x</button>
+            <div style="text-align:right">
+              <div style="font-size:18px;font-weight:800;">${pieces} pcs</div>
+              <div class="muted">${escapeHtml(order.status || 'No status')}</div>
+            </div>
+          </div>
+          <div class="items">
+            ${(order.items || []).map((item) => `
+              <div class="item ${currentMode === 'search' ? 'lookup-item' : ''}">
+                ${item.image && item.image !== 'None'
+                  ? `<button class="item-thumb image-button" type="button" onclick="openImageModal('${escapeJs(item.image)}')"><img src="${escapeAttribute(item.image)}" alt=""></button>`
+                  : `<div class="item-thumb">IMG</div>`}
+                <div>
+                  <div class="item-title">${escapeHtml(item.title || 'Untitled item')}</div>
+                  <div class="item-meta">${escapeHtml(item.tracking_number || 'No tracking')}</div>
+                </div>
+                <div class="qty-pill">x${Number(item.quantity || 0)}</div>
+              </div>
+            `).join('')}
           </div>
         `;
-      }).join('');
-    }
-
-    function removeFromQueue(source, orderId) {
-      queue = queue.filter((entry) => !(entry.source === source && entry.order_id === orderId));
-      renderQueue();
-    }
-
-    function clearQueue() {
-      queue = [];
-      renderQueue();
-    }
-
-    function updateScanCount() {
-      const scanCount = document.getElementById('scanCount');
-      const count = currentMode === 'search' ? 0 : queue.length;
-      scanCount.textContent = currentMode === 'search'
-        ? 'Lookup mode'
-        : `${count} parcel${count === 1 ? '' : 's'} scanned`;
-    }
-
-    async function createReport() {
-      if (!queue.length) return;
-
-      const response = await fetch('/employee_portal/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode: currentMode,
-          orders: queue.map((entry) => ({
-            source: entry.source,
-            order_id: entry.order_id,
-            shopify_id: entry.shopify_id
-          }))
-        })
-      });
-
-      const result = await response.json();
-      if (!response.ok || !result.success) {
-        showToast(result.error || 'Report failed', false);
-        return;
+        resultCard.style.display = 'block';
       }
 
-      const label = currentMode === 'dispatch' ? 'dispatch' : 'return';
-      showToast(`Created ${label} report • ${result.tagged_count} Shopify tagged`, true);
-      queue = [];
-      renderQueue();
-    }
-
-    async function toggleScanner() {
-      if (scannerActive) {
-        await stopScanner();
-        return;
+      function hideResult() {
+        document.getElementById('resultCard').style.display = 'none';
       }
 
-      if (typeof Html5Qrcode === 'undefined') {
-        showToast('Scanner library failed to load', false);
-        return;
-      }
+      function renderQueue() {
+        const queueList = document.getElementById('queueList');
+        const queueSummary = document.getElementById('queueSummary');
+        const reportBtn = document.getElementById('reportBtn');
 
-      const readerEl = document.getElementById('reader');
-      const button = document.getElementById('cameraToggleBtn');
-      const cameraMeta = document.getElementById('cameraMeta');
-
-      try {
-        scanner = scanner || new Html5Qrcode('reader');
-        readerEl.classList.add('active');
-        cameraMeta.classList.add('active');
-        await scanner.start(
-          { facingMode: 'environment' },
-          { fps: 10, qrbox: { width: 220, height: 220 } },
-          (decodedText) => processScan(decodedText)
-        );
-        scannerActive = true;
-        button.textContent = currentMode === 'search' ? 'x' : '-';
+        queueSummary.textContent = `${queue.length} scanned`;
         updateScanCount();
-      } catch (error) {
+        reportBtn.disabled = queue.length === 0;
+        reportBtn.style.opacity = queue.length === 0 ? '0.5' : '1';
+
+        queueList.innerHTML = queue.map((order, index) => {
+          const productCount = (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+          return `
+            <div class="queue-item">
+              <div class="queue-index">${index + 1}</div>
+              <div>
+                <div class="queue-order">${escapeHtml(order.order_id)}</div>
+                <div class="queue-sub">${escapeHtml(order.source)} • ${productCount} pcs</div>
+              </div>
+              <button class="icon-btn" onclick="removeFromQueue('${escapeJs(order.source)}','${escapeJs(order.order_id)}')" aria-label="Remove order">x</button>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function removeFromQueue(source, orderId) {
+        queue = queue.filter((entry) => !(entry.source === source && entry.order_id === orderId));
+        renderQueue();
+      }
+
+      function clearQueue() {
+        queue = [];
+        renderQueue();
+      }
+
+      function updateScanCount() {
+        const scanCount = document.getElementById('scanCount');
+        const count = currentMode === 'search' ? 0 : queue.length;
+        scanCount.textContent = currentMode === 'search'
+          ? 'Lookup mode'
+          : `${count} parcel${count === 1 ? '' : 's'} scanned`;
+      }
+
+      async function createReport() {
+        if (!queue.length) return;
+
+        const response = await fetch('/employee_portal/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: currentMode,
+            orders: queue.map((entry) => ({
+              source: entry.source,
+              order_id: entry.order_id,
+              shopify_id: entry.shopify_id
+            }))
+          })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          showToast(result.error || 'Report failed', false);
+          return;
+        }
+
+        const label = currentMode === 'dispatch' ? 'dispatch' : 'return';
+        showToast(`Created ${label} report • ${result.tagged_count} Shopify tagged`, true);
+        queue = [];
+        renderQueue();
+      }
+
+      async function toggleScanner() {
+        if (scannerActive) {
+          await stopScanner();
+          return;
+        }
+
+        if (typeof Html5Qrcode === 'undefined') {
+          showToast('Scanner library failed to load', false);
+          return;
+        }
+
+        const readerEl = document.getElementById('reader');
+        const button = document.getElementById('cameraToggleBtn');
+        const cameraMeta = document.getElementById('cameraMeta');
+
+        try {
+          scanner = scanner || new Html5Qrcode('reader');
+          readerEl.classList.add('active');
+          cameraMeta.classList.add('active');
+          await scanner.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 220, height: 220 } },
+            (decodedText) => processScan(decodedText)
+          );
+          scannerActive = true;
+          button.textContent = currentMode === 'search' ? 'x' : '-';
+          updateScanCount();
+        } catch (error) {
+          readerEl.classList.remove('active');
+          cameraMeta.classList.remove('active');
+          showToast('Camera could not start', false);
+        }
+      }
+
+      async function stopScanner() {
+        const readerEl = document.getElementById('reader');
+        const button = document.getElementById('cameraToggleBtn');
+        const cameraMeta = document.getElementById('cameraMeta');
+        if (scanner && scannerActive) {
+          await scanner.stop();
+        }
+        scannerActive = false;
         readerEl.classList.remove('active');
         cameraMeta.classList.remove('active');
-        showToast('Camera could not start', false);
-      }
-    }
-
-    async function stopScanner() {
-      const readerEl = document.getElementById('reader');
-      const button = document.getElementById('cameraToggleBtn');
-      const cameraMeta = document.getElementById('cameraMeta');
-      if (scanner && scannerActive) {
-        await scanner.stop();
-      }
-      scannerActive = false;
-      readerEl.classList.remove('active');
-      cameraMeta.classList.remove('active');
-      button.textContent = '+';
-    }
-
-    function playSuccessBeep() {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-
-      if (!audioContext) {
-        audioContext = new AudioCtx();
+        button.textContent = '+';
       }
 
-      if (audioContext.state === 'suspended') {
-        audioContext.resume();
+      function playSuccessBeep() {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        if (!audioContext) {
+          audioContext = new AudioCtx();
+        }
+        if (audioContext.state === 'suspended') {
+          audioContext.resume();
+        }
+
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(960, audioContext.currentTime);
+        gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.14, audioContext.currentTime + 0.01);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.16);
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.16);
       }
 
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(960, audioContext.currentTime);
-      gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.14, audioContext.currentTime + 0.01);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.16);
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      oscillator.start();
-      oscillator.stop(audioContext.currentTime + 0.16);
-    }
-
-    function showToast(message, success) {
-      const toast = document.getElementById('toast');
-      toast.textContent = message;
-      toast.style.background = success ? '#2a9d5b' : '#cf3f3f';
-      toast.style.display = 'block';
-      clearTimeout(toast._timer);
-      toast._timer = setTimeout(() => {
-        toast.style.display = 'none';
-      }, 2200);
-    }
-
-    function escapeHtml(value) {
-      return String(value || '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-    }
-
-    function escapeAttribute(value) {
-      return escapeHtml(value);
-    }
-
-    function escapeJs(value) {
-      return String(value || '').replaceAll('\\', '\\\\').replaceAll("'", "\\'");
-    }
-
-    document.getElementById('scanInput').addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        submitScan();
+      function showToast(message, success) {
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.style.background = success ? '#2a9d5b' : '#cf3f3f';
+        toast.style.display = 'block';
+        clearTimeout(toast._timer);
+        toast._timer = setTimeout(() => {
+          toast.style.display = 'none';
+        }, 2200);
       }
-    });
 
-    setMode('search');
-  </script>
+      function openImageModal(src) {
+        const modal = document.getElementById('imageModal');
+        const image = document.getElementById('imageModalImg');
+        image.src = src;
+        modal.classList.add('open');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function closeImageModal(event) {
+        if (event && event.target && event.target !== event.currentTarget && !event.target.classList.contains('image-modal-close')) {
+          return;
+        }
+        const modal = document.getElementById('imageModal');
+        const image = document.getElementById('imageModalImg');
+        modal.classList.remove('open');
+        image.src = '';
+        document.body.style.overflow = '';
+      }
+
+      function escapeHtml(value) {
+        return String(value || '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function escapeAttribute(value) {
+        return escapeHtml(value);
+      }
+
+      function escapeJs(value) {
+        return String(value || '').replaceAll('\\', '\\\\').replaceAll("'", "\\'");
+      }
+
+      function updateNotificationStatus() {
+        const status = document.getElementById('notifyStatus');
+        const label = status.querySelector('span:last-child');
+        status.classList.remove('active', 'warn');
+        if (!('Notification' in window)) {
+          label.textContent = 'Notifications unavailable';
+          status.classList.add('warn');
+          return;
+        }
+        if (Notification.permission === 'granted') {
+          label.textContent = 'Notifications on';
+          status.classList.add('active');
+          return;
+        }
+        if (Notification.permission === 'denied') {
+          label.textContent = 'Notifications blocked';
+          status.classList.add('warn');
+          return;
+        }
+        label.textContent = 'Notifications off';
+      }
+
+      async function ensureServiceWorker() {
+        if (!('serviceWorker' in navigator)) return null;
+        try {
+          return await navigator.serviceWorker.register('/employee_portal-sw.js');
+        } catch (error) {
+          return null;
+        }
+      }
+
+      async function enableNotifications() {
+        if (!('Notification' in window)) {
+          showToast('Notifications not supported here', false);
+          return;
+        }
+        const permission = await Notification.requestPermission();
+        updateNotificationStatus();
+        if (permission !== 'granted') {
+          showToast('Notifications not enabled', false);
+          return;
+        }
+        let baseline = ORDERS.map((order) => `${order.source}:${order.order_id}`);
+        try {
+          const response = await fetch('/employee_portal/updates', { credentials: 'same-origin' });
+          if (response.ok) {
+            const payload = await response.json();
+            baseline = payload.order_ids || baseline;
+          }
+        } catch (error) {
+          return;
+        }
+        localStorage.setItem(KNOWN_ORDER_STORAGE_KEY, JSON.stringify(baseline));
+        showToast('Notifications enabled', true);
+      }
+
+      async function showOrderNotification(newOrders) {
+        if (!newOrders.length || !('Notification' in window) || Notification.permission !== 'granted') return;
+        const registration = await ensureServiceWorker();
+        const count = newOrders.length;
+        const latest = newOrders[0];
+        const title = count === 1 ? `New ${latest.source} order` : `${count} new orders`;
+        const body = count === 1
+          ? `Order ${latest.order_id} just appeared in the employee queue.`
+          : `${latest.order_id} and ${count - 1} more order${count - 1 === 1 ? '' : 's'} are ready to check.`;
+
+        if (registration && registration.showNotification) {
+          registration.showNotification(title, {
+            body,
+            icon: '/static/employee-portal-icon.svg',
+            badge: '/static/employee-portal-icon.svg',
+            tag: 'tb-employee-orders'
+          });
+          return;
+        }
+        new Notification(title, { body });
+      }
+
+      async function pollForNewOrders(initial = false) {
+        try {
+          const response = await fetch('/employee_portal/updates', { credentials: 'same-origin' });
+          if (!response.ok) return;
+          const payload = await response.json();
+          const currentIds = payload.order_ids || [];
+          const knownIds = JSON.parse(localStorage.getItem(KNOWN_ORDER_STORAGE_KEY) || '[]');
+          if (initial && knownIds.length === 0) {
+            localStorage.setItem(KNOWN_ORDER_STORAGE_KEY, JSON.stringify(currentIds));
+            return;
+          }
+
+          const newIds = currentIds.filter((id) => !knownIds.includes(id));
+          if (!initial && newIds.length) {
+            const latest = (payload.latest || []).filter((entry) => newIds.includes(entry.id));
+            await showOrderNotification(latest.length ? latest : newIds.map((id) => ({ id, order_id: id.split(':')[1], source: id.split(':')[0] })));
+          }
+          localStorage.setItem(KNOWN_ORDER_STORAGE_KEY, JSON.stringify(currentIds.slice(0, 300)));
+        } catch (error) {
+          return;
+        }
+      }
+
+      function setupInstallPrompt() {
+        const installBtn = document.getElementById('installBtn');
+        window.addEventListener('beforeinstallprompt', (event) => {
+          event.preventDefault();
+          deferredInstallPrompt = event;
+          installBtn.hidden = false;
+        });
+        installBtn.addEventListener('click', async () => {
+          if (!deferredInstallPrompt) return;
+          deferredInstallPrompt.prompt();
+          await deferredInstallPrompt.userChoice;
+          deferredInstallPrompt = null;
+          installBtn.hidden = true;
+        });
+      }
+
+      document.getElementById('scanInput').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          submitScan();
+        }
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          closeImageModal();
+        }
+      });
+
+      document.getElementById('notifyBtn').addEventListener('click', enableNotifications);
+
+      setMode('search');
+      updateNotificationStatus();
+      setupInstallPrompt();
+      ensureServiceWorker();
+      pollForNewOrders(true);
+      window.setInterval(() => pollForNewOrders(false), 60000);
+    </script>
+  {% endif %}
 </body>
 </html>

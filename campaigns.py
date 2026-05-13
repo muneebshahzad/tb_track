@@ -20,11 +20,12 @@ import time
 import uuid
 import zipfile
 from datetime import datetime
+from html import unescape
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
-import shopify
+import requests
 from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from openpyxl import load_workbook
 
@@ -58,88 +59,93 @@ def parse_recommended_max(cell_value: Any) -> float | None:
     return float(match.group(1)) if match else None
 
 
-_shopify_cache: dict[str, dict[str, Any]] = {}
-_shopify_lookup_lock_seconds = 0.6
+_daraz_cache: dict[str, dict[str, Any]] = {}
+ENRICHMENT_VERSION = 3
 
 
-def _split_seller_sku(seller_sku: str) -> tuple[str, int | None]:
-    if not seller_sku:
-        return "", None
-    if "-" in seller_sku:
-        base, _, tail = seller_sku.rpartition("-")
-        if tail.isdigit():
-            return base, int(tail)
-    return seller_sku, None
+def _ensure_campaign_enrichment_version(campaign_id: str, meta: dict[str, Any]) -> dict[str, Any]:
+    if meta.get("enrichment_version") == ENRICHMENT_VERSION:
+        return meta
+
+    for row in meta.get("rows", []):
+        row["enrichment"] = None
+
+    meta["enrichment_version"] = ENRICHMENT_VERSION
+    _save_meta(campaign_id, meta)
+    return meta
 
 
-def enrich_from_shopify(seller_sku: str) -> dict[str, Any]:
-    if not seller_sku:
+def _extract_meta_content(html: str, property_name: str) -> str | None:
+    patterns = [
+        rf'<meta[^>]+property=["\']{re.escape(property_name)}["\'][^>]+content=["\']([^"\']+)["\']',
+        rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']{re.escape(property_name)}["\']',
+        rf'<meta[^>]+name=["\']{re.escape(property_name)}["\'][^>]+content=["\']([^"\']+)["\']',
+        rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']{re.escape(property_name)}["\']',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html, flags=re.IGNORECASE)
+        if match:
+            return unescape(match.group(1)).strip()
+    return None
+
+
+def _extract_title_from_html(html: str) -> str | None:
+    title = _extract_meta_content(html, "og:title")
+    if title:
+        return title
+    match = re.search(r"<title>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        return unescape(match.group(1)).strip()
+    return None
+
+
+def enrich_from_daraz_row(row: dict[str, Any]) -> dict[str, Any]:
+    seller_sku = str(row.get("seller_sku") or "").strip()
+    product_url = str(row.get("product_url") or "").strip()
+    cache_key = product_url or seller_sku or str(row.get("sku_id") or "")
+    if not cache_key:
         return {}
+    if cache_key in _daraz_cache:
+        return _daraz_cache[cache_key]
 
-    base, variant_idx = _split_seller_sku(seller_sku)
-    if seller_sku in _shopify_cache:
-        return _shopify_cache[seller_sku]
+    fallback = {
+        "title": row.get("daraz_name") or seller_sku or "Untitled product",
+        "image": None,
+        "color": None,
+        "variant_title": None,
+    }
 
-    fallback = {"title": None, "image": None, "color": None, "variant_title": None}
+    if not product_url:
+        _daraz_cache[cache_key] = fallback
+        return fallback
+
     try:
-        time.sleep(_shopify_lookup_lock_seconds)
-        products = shopify.Product.find(limit=5, sku=seller_sku)
-        product = None
-        matched_variant = None
-
-        if products:
-            product = products[0]
-            for variant in product.variants or []:
-                if str(variant.sku) == seller_sku:
-                    matched_variant = variant
-                    break
-
-        if product is None:
-            time.sleep(_shopify_lookup_lock_seconds)
-            products = shopify.Product.find(limit=5, sku=base)
-            if products:
-                product = products[0]
-                if variant_idx is not None and product.variants:
-                    if 0 <= variant_idx < len(product.variants):
-                        matched_variant = product.variants[variant_idx]
-                if matched_variant is None and product.variants:
-                    matched_variant = product.variants[0]
-
-        if product is None:
-            _shopify_cache[seller_sku] = fallback
-            return fallback
-
-        image_src = None
-        if matched_variant and matched_variant.image_id:
-            try:
-                time.sleep(_shopify_lookup_lock_seconds)
-                images = shopify.Image.find(image_id=matched_variant.image_id, product_id=product.id)
-                for image in images:
-                    if image.id == matched_variant.image_id:
-                        image_src = image.src
-                        break
-            except Exception as e:
-                print(f"[campaigns] image fetch failed for {seller_sku}: {e}")
-
-        if image_src is None and product.image:
-            image_src = product.image.src
-
-        variant_title = getattr(matched_variant, "title", None) if matched_variant else None
-        color = None
-        if variant_title and variant_title != "Default Title":
-            color = variant_title.split(" / ")[0]
-
+        response = requests.get(
+            product_url,
+            timeout=12,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            },
+        )
+        response.raise_for_status()
+        html = response.text
+        title = _extract_title_from_html(html) or fallback["title"]
+        image = (
+            _extract_meta_content(html, "og:image")
+            or _extract_meta_content(html, "twitter:image")
+            or fallback["image"]
+        )
         result = {
-            "title": product.title,
-            "image": image_src,
-            "color": color,
-            "variant_title": variant_title,
+            "title": title,
+            "image": image,
+            "color": None,
+            "variant_title": None,
         }
-        _shopify_cache[seller_sku] = result
+        _daraz_cache[cache_key] = result
         return result
     except Exception as e:
-        print(f"[campaigns] Shopify lookup failed for {seller_sku}: {e}")
-        _shopify_cache[seller_sku] = fallback
+        print(f"[campaigns] Daraz lookup failed for {seller_sku or product_url}: {e}")
+        _daraz_cache[cache_key] = fallback
         return fallback
 
 
@@ -291,6 +297,7 @@ def upload_campaign():
         "name": name,
         "original_filename": uploaded_file.filename,
         "uploaded_at": datetime.now().isoformat(timespec="seconds"),
+        "enrichment_version": ENRICHMENT_VERSION,
         "rows": state_rows,
     }
     _save_meta(campaign_id, meta)
@@ -299,19 +306,19 @@ def upload_campaign():
 
 @campaigns_bp.route("/<campaign_id>")
 def edit_campaign(campaign_id: str):
-    meta = _load_meta(campaign_id)
+    meta = _ensure_campaign_enrichment_version(campaign_id, _load_meta(campaign_id))
     return render_template("campaigns.html", view="edit", campaign_id=campaign_id, meta=meta)
 
 
 @campaigns_bp.route("/<campaign_id>/data")
 def campaign_data(campaign_id: str):
-    meta = _load_meta(campaign_id)
+    meta = _ensure_campaign_enrichment_version(campaign_id, _load_meta(campaign_id))
     return jsonify(meta)
 
 
 @campaigns_bp.route("/<campaign_id>/enrich", methods=["POST"])
 def enrich_campaign(campaign_id: str):
-    meta = _load_meta(campaign_id)
+    meta = _ensure_campaign_enrichment_version(campaign_id, _load_meta(campaign_id))
     body = request.get_json(silent=True) or {}
     requested = body.get("seller_skus")
     batch_size = int(body.get("batch_size", 10))
@@ -332,7 +339,8 @@ def enrich_campaign(campaign_id: str):
     to_process = [sku for sku in to_process if not (sku in seen or seen.add(sku))]
 
     for sku in to_process:
-        enriched_now[sku] = enrich_from_shopify(sku)
+        row = next((entry for entry in meta["rows"] if entry["seller_sku"] == sku), None)
+        enriched_now[sku] = enrich_from_daraz_row(row or {"seller_sku": sku})
 
     for row in meta["rows"]:
         if row["seller_sku"] in enriched_now:

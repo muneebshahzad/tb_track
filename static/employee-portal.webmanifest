@@ -1,0 +1,18 @@
+{
+  "name": "Tick Bags Employee Portal",
+  "short_name": "TB Portal",
+  "start_url": "/employee_portal",
+  "scope": "/employee_portal",
+  "display": "standalone",
+  "background_color": "#f4efe6",
+  "theme_color": "#14213d",
+  "description": "Mobile employee app for scanning, dispatching, returns, and queue checks.",
+  "icons": [
+    {
+      "src": "/static/employee-portal-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

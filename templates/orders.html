@@ -1,150 +1,574 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pending Orders - Mobile</title>
-    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        .order-card {
-            margin-bottom: 15px;
-            border-radius: 12px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-        }
-        .order-header {
-            font-size: 16px;
-            font-weight: bold;
-        }
-        .order-items img {
-            max-width: 60px;
-            max-height: 60px;
-            border-radius: 6px;
-        }
-        .order-btns button {
-            margin: 5px 3px;
-            min-width: 100px;
-        }
-        .price {
-            font-weight: bold;
-            color: #28a745;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14213d">
+  <title>TB Orders Queue</title>
+  {% if employee_portal_mode %}
+    <link rel="manifest" href="/employee_portal-manifest.webmanifest">
+    <link rel="icon" href="/static/employee-portal-icon.svg" type="image/svg+xml">
+  {% endif %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --ink: #14213d;
+      --muted: #6f6a63;
+      --line: rgba(20, 33, 61, 0.12);
+      --panel: rgba(255, 252, 247, 0.92);
+      --shadow: 0 18px 40px rgba(20, 33, 61, 0.14);
+      --blue: #2667ff;
+      --green: #2a9d5b;
+      --red: #cf3f3f;
+      --gold: #f2b632;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(242, 182, 50, 0.24), transparent 30%),
+        radial-gradient(circle at top right, rgba(38, 103, 255, 0.16), transparent 28%),
+        linear-gradient(180deg, #fbf7f0 0%, #f4efe6 55%, #efe6da 100%);
+      padding: 18px 14px 32px;
+    }
+    .shell {
+      max-width: 620px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .card, .hero, .order-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .hero {
+      padding: 18px;
+      position: sticky;
+      top: 10px;
+      z-index: 10;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(20, 33, 61, 0.06);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    h1 {
+      margin: 12px 0 4px;
+      font-size: 28px;
+      line-height: 1;
+    }
+    .subcopy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .hero-toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+    }
+    .utility-btn, .action-btn, .sort-select {
+      border-radius: 14px;
+      min-height: 48px;
+      font-size: 14px;
+      font-weight: 700;
+      font-family: inherit;
+      border: 1px solid var(--line);
+    }
+    .utility-btn, .sort-select {
+      background: #fff;
+      color: var(--ink);
+      padding: 12px 14px;
+    }
+    .utility-btn[hidden] { display: none; }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(20, 33, 61, 0.06);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .status-pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #b8b2aa;
+    }
+    .status-pill.active .dot { background: var(--green); }
+    .status-pill.warn .dot { background: var(--gold); }
+    .controls.card {
+      padding: 14px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .summary-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .summary-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(20, 33, 61, 0.06);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .orders {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .order-card {
+      padding: 16px;
+    }
+    .order-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .order-no {
+      font-family: 'Space Mono', monospace;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .muted {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .badge.shopify { background: rgba(42, 157, 91, 0.12); color: #1b6f41; }
+    .badge.daraz { background: rgba(242, 182, 50, 0.18); color: #8b5a00; }
+    .badge.pending { background: rgba(20, 33, 61, 0.08); color: var(--ink); }
+    .order-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .price {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--green);
+    }
+    .items {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .item {
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(20, 33, 61, 0.04);
+    }
+    .item img {
+      width: 64px;
+      height: 64px;
+      border-radius: 12px;
+      object-fit: cover;
+      background: #e9e4dc;
+    }
+    .item-title {
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+    .item-sub {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .status-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .mini-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(38, 103, 255, 0.1);
+      color: #2346a8;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .action-btn {
+      background: #fff;
+      color: var(--ink);
+      padding: 10px 14px;
+      cursor: pointer;
+    }
+    .action-btn.packed {
+      border-color: rgba(42, 157, 91, 0.28);
+      background: rgba(42, 157, 91, 0.08);
+      color: #1b6f41;
+    }
+    .action-btn.manufactured {
+      border-color: rgba(38, 103, 255, 0.28);
+      background: rgba(38, 103, 255, 0.08);
+      color: #2346a8;
+    }
+    .empty {
+      padding: 30px 18px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 20px;
+      transform: translateX(-50%);
+      min-width: 220px;
+      max-width: calc(100vw - 32px);
+      padding: 14px 16px;
+      border-radius: 16px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      box-shadow: 0 20px 40px rgba(20, 33, 61, 0.24);
+      display: none;
+      z-index: 30;
+    }
+  </style>
 </head>
-<body class="bg-light">
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="eyebrow">{% if employee_portal_mode %}Tick Bags Employee Portal{% else %}Tick Bags Orders{% endif %}</div>
+      <h1>Pending orders.</h1>
+      <p class="subcopy">{% if employee_portal_mode %}Same employee app look, but tuned for scanning the queue, checking parcel status, and marking packed or manufactured without hopping back to the dashboard.{% else %}A cleaner mobile queue for pending orders across Shopify and Daraz.{% endif %}</p>
+      <div class="hero-toolbar">
+        {% if employee_portal_mode %}
+          <button class="utility-btn" type="button" onclick="window.location.href='/employee_portal'">Back to Scanner</button>
+          <button class="utility-btn" type="button" id="installBtn" hidden>Install App</button>
+          <button class="utility-btn" type="button" id="notifyBtn">Enable Notifications</button>
+          <span class="status-pill" id="notifyStatus"><span class="dot"></span><span>Notifications off</span></span>
+        {% else %}
+          <button class="utility-btn" type="button" onclick="window.location.href='/'">Back to Dashboard</button>
+        {% endif %}
+      </div>
+    </section>
 
-<div class="container py-3">
-    <h4 class="mb-3 text-center">📦 Pending Orders</h4>
+    <section class="controls card">
+      <div class="summary-row">
+        <span class="summary-pill">Orders: <strong id="orderCount">{{ all_orders|length }}</strong></span>
+        <span class="summary-pill">Shopify: <strong id="shopifyCount">0</strong></span>
+        <span class="summary-pill">Daraz: <strong id="darazCount">0</strong></span>
+      </div>
+      <select id="sortSelect" class="sort-select">
+        <option value="pending">Sort by Pending Since</option>
+        <option value="order">Sort by Order Number</option>
+        <option value="date">Sort by Date</option>
+      </select>
+    </section>
 
-    <div class="mb-3 text-center">
-        <select id="sortSelect" class="form-control w-auto d-inline-block">
-            <option value="pending">Sort by Pending Since</option>
-            <option value="order">Sort by Order Number</option>
-            <option value="date">Sort by Date</option>
-        </select>
-    </div>
-
-    <div id="ordersContainer">
-        {% for order in all_orders %}
-        <div class="card order-card"
-             data-order-id="{{ order.order_id }}"
-             data-date="{{ order.date }}">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div class="order-header">
-                        {{ order.order_via }} — Order #{{ order.order_id }}
-                    </div>
-                    <span class="badge badge-warning" id="pendingBadge-{{ loop.index }}"></span>
-                </div>
-                <small class="text-muted">Date: {{ order.date }}</small>
-                <p class="mt-1 price">Total: {{ order.total_price }}</p>
-
-                <div class="order-items">
-                    {% for item in order.items_list %}
-                    <div class="d-flex align-items-center border-bottom py-2 w-100">
-                        <img src="{{ item.item_image }}" class="mr-2" style="max-width:60px; max-height:60px;">
-                        <div class="flex-grow-1">
-                            <div style="font-size:14px;">{{ item.item_title }}</div>
-                            <small>Qty: {{ item.quantity }}</small>
-                            {% if item.tracking_number != 'N/A' %}
-                                <div><small>Tracking: {{ item.tracking_number }}</small></div>
-                            {% endif %}
-                            {% if item.applied_status %}
-                                <div><span class="badge badge-info">{{ item.applied_status }}</span></div>
-                            {% endif %}
-                            <div class="order-btns mt-2">
-                                <button class="btn btn-success btn-sm"
-                                    onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">
-                                    Packed
-                                </button>
-                                <button class="btn btn-primary btn-sm"
-                                    onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">
-                                    Manufactured
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
+    <section class="orders" id="ordersContainer">
+      {% for order in all_orders %}
+        <article class="order-card"
+          data-order-id="{{ order.order_id }}"
+          data-date="{{ order.date }}"
+          data-order-via="{{ order.order_via|lower }}">
+          <div class="order-head">
+            <div>
+              <div class="order-no">#{{ order.order_id }}</div>
+              <div class="muted">{{ order.date }}</div>
             </div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+              <span class="badge {{ 'shopify' if order.order_via == 'Shopify' else 'daraz' }}">{{ order.order_via }}</span>
+              <span class="badge pending pending-badge"></span>
+            </div>
+          </div>
+          <div class="order-meta">
+            <div class="muted">{{ order.status }}</div>
+            <div class="price">PKR {{ order.total_price }}</div>
+          </div>
+          <div class="items">
+            {% for item in order.items_list %}
+              <div class="item">
+                <img src="{{ item.item_image }}" alt="">
+                <div>
+                  <div class="item-title">{{ item.item_title }}</div>
+                  <div class="item-sub">Qty {{ item.quantity }}{% if item.tracking_number != 'N/A' %} • {{ item.tracking_number }}{% endif %}</div>
+                  <div class="status-row">
+                    {% if item.status %}
+                      <span class="mini-badge">{{ item.status }}</span>
+                    {% endif %}
+                    {% if item.applied_status %}
+                      <span class="mini-badge">{{ item.applied_status }}</span>
+                    {% endif %}
+                  </div>
+                  <div class="actions">
+                    <button class="action-btn packed" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">Packed</button>
+                    <button class="action-btn manufactured" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">Manufactured</button>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </article>
+      {% else %}
+        <div class="card empty">No pending orders right now.</div>
+      {% endfor %}
+    </section>
+  </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    const orders = document.querySelectorAll('.order-card');
+  <div class="toast" id="toast"></div>
 
-    // Calculate Pending Since days
-    orders.forEach((card, idx) => {
-        const dateStr = card.getAttribute('data-date');
-        const orderDate = new Date(dateStr);
-        const diffDays = Math.floor((new Date() - orderDate) / (1000 * 60 * 60 * 24));
-        card.dataset.pendingDays = diffDays;
-        document.getElementById(`pendingBadge-${idx+1}`).textContent = `Pending ${diffDays} days`;
-    });
+  <script>
+    const EMPLOYEE_PORTAL_MODE = {{ employee_portal_mode|tojson }};
+    const KNOWN_ORDER_STORAGE_KEY = 'tbEmployeePortalKnownOrders';
+    let deferredInstallPrompt = null;
 
-    // Sorting
-    function sortOrders(criteria) {
-        const container = document.getElementById('ordersContainer');
-        const sortedCards = Array.from(orders).sort((a, b) => {
-            if (criteria === 'pending') {
-                return b.dataset.pendingDays - a.dataset.pendingDays;
-            } else if (criteria === 'order') {
-                return parseInt(b.dataset.orderId) - parseInt(a.dataset.orderId);
-            } else if (criteria === 'date') {
-                return new Date(b.dataset.date) - new Date(a.dataset.date);
-            }
-        });
-        container.innerHTML = '';
-        sortedCards.forEach(card => container.appendChild(card));
+    function showToast(message, success) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.style.background = success ? '#2a9d5b' : '#cf3f3f';
+      toast.style.display = 'block';
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => {
+        toast.style.display = 'none';
+      }, 2200);
     }
 
-    document.getElementById('sortSelect').addEventListener('change', function () {
-        sortOrders(this.value);
-    });
+    function updateOrderSummary() {
+      const cards = Array.from(document.querySelectorAll('.order-card'));
+      document.getElementById('orderCount').textContent = cards.length;
+      document.getElementById('shopifyCount').textContent = cards.filter((card) => card.dataset.orderVia === 'shopify').length;
+      document.getElementById('darazCount').textContent = cards.filter((card) => card.dataset.orderVia === 'daraz').length;
+    }
 
-    sortOrders('pending');
-});
+    function refreshPendingBadges() {
+      document.querySelectorAll('.order-card').forEach((card) => {
+        const dateStr = card.getAttribute('data-date');
+        const orderDate = new Date(dateStr);
+        const diffDays = Math.max(0, Math.floor((new Date() - orderDate) / (1000 * 60 * 60 * 24)));
+        card.dataset.pendingDays = diffDays;
+        card.querySelector('.pending-badge').textContent = `Pending ${diffDays} day${diffDays === 1 ? '' : 's'}`;
+      });
+    }
 
-function updateStatus(orderId, trackingNumber, status) {
-    fetch("/update_status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+    function sortOrders(criteria) {
+      const container = document.getElementById('ordersContainer');
+      const cards = Array.from(document.querySelectorAll('.order-card'));
+      const sortedCards = cards.sort((a, b) => {
+        if (criteria === 'pending') {
+          return Number(b.dataset.pendingDays || 0) - Number(a.dataset.pendingDays || 0);
+        }
+        if (criteria === 'order') {
+          return parseInt(b.dataset.orderId || '0', 10) - parseInt(a.dataset.orderId || '0', 10);
+        }
+        return new Date(b.dataset.date) - new Date(a.dataset.date);
+      });
+      sortedCards.forEach((card) => container.appendChild(card));
+    }
+
+    function updateNotificationStatus() {
+      const status = document.getElementById('notifyStatus');
+      if (!status) return;
+      const label = status.querySelector('span:last-child');
+      status.classList.remove('active', 'warn');
+      if (!('Notification' in window)) {
+        label.textContent = 'Notifications unavailable';
+        status.classList.add('warn');
+        return;
+      }
+      if (Notification.permission === 'granted') {
+        label.textContent = 'Notifications on';
+        status.classList.add('active');
+        return;
+      }
+      if (Notification.permission === 'denied') {
+        label.textContent = 'Notifications blocked';
+        status.classList.add('warn');
+        return;
+      }
+      label.textContent = 'Notifications off';
+    }
+
+    async function ensureServiceWorker() {
+      if (!('serviceWorker' in navigator)) return null;
+      try {
+        return await navigator.serviceWorker.register('/employee_portal-sw.js');
+      } catch (error) {
+        return null;
+      }
+    }
+
+    async function enableNotifications() {
+      if (!('Notification' in window)) {
+        showToast('Notifications not supported here', false);
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      updateNotificationStatus();
+      if (permission !== 'granted') {
+        showToast('Notifications not enabled', false);
+        return;
+      }
+      let baseline = [];
+      try {
+        const response = await fetch('/employee_portal/updates', { credentials: 'same-origin' });
+        if (response.ok) {
+          const payload = await response.json();
+          baseline = payload.order_ids || [];
+        }
+      } catch (error) {
+        return;
+      }
+      localStorage.setItem(KNOWN_ORDER_STORAGE_KEY, JSON.stringify(baseline));
+      showToast('Notifications enabled', true);
+    }
+
+    async function showOrderNotification(newOrders) {
+      if (!newOrders.length || !('Notification' in window) || Notification.permission !== 'granted') return;
+      const registration = await ensureServiceWorker();
+      const count = newOrders.length;
+      const latest = newOrders[0];
+      const title = count === 1 ? `New ${latest.source} order` : `${count} new orders`;
+      const body = count === 1
+        ? `Order ${latest.order_id} just appeared in the employee queue.`
+        : `${latest.order_id} and ${count - 1} more order${count - 1 === 1 ? '' : 's'} are ready to check.`;
+      if (registration && registration.showNotification) {
+        registration.showNotification(title, {
+          body,
+          icon: '/static/employee-portal-icon.svg',
+          badge: '/static/employee-portal-icon.svg',
+          tag: 'tb-employee-orders'
+        });
+        return;
+      }
+      new Notification(title, { body });
+    }
+
+    async function pollForNewOrders(initial = false) {
+      if (!EMPLOYEE_PORTAL_MODE) return;
+      try {
+        const response = await fetch('/employee_portal/updates', { credentials: 'same-origin' });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const currentIds = payload.order_ids || [];
+        const knownIds = JSON.parse(localStorage.getItem(KNOWN_ORDER_STORAGE_KEY) || '[]');
+        if (initial && knownIds.length === 0) {
+          localStorage.setItem(KNOWN_ORDER_STORAGE_KEY, JSON.stringify(currentIds));
+          return;
+        }
+        const newIds = currentIds.filter((id) => !knownIds.includes(id));
+        if (!initial && newIds.length) {
+          const latest = (payload.latest || []).filter((entry) => newIds.includes(entry.id));
+          await showOrderNotification(latest.length ? latest : newIds.map((id) => ({ id, order_id: id.split(':')[1], source: id.split(':')[0] })));
+        }
+        localStorage.setItem(KNOWN_ORDER_STORAGE_KEY, JSON.stringify(currentIds.slice(0, 300)));
+      } catch (error) {
+        return;
+      }
+    }
+
+    function setupInstallPrompt() {
+      const installBtn = document.getElementById('installBtn');
+      if (!installBtn) return;
+      window.addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+        installBtn.hidden = false;
+      });
+      installBtn.addEventListener('click', async () => {
+        if (!deferredInstallPrompt) return;
+        deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        installBtn.hidden = true;
+      });
+    }
+
+    function updateStatus(orderId, trackingNumber, status) {
+      fetch('/update_status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            order_id: orderId,
-            tracking_number: trackingNumber,
-            status: status
+          order_id: orderId,
+          tracking_number: trackingNumber,
+          status: status
         })
-    })
-    .then(response => response.json())
-    .then(data => {
-        alert(data.message);
-        location.reload(); // Reload so updated status appears
-    })
-    .catch(error => console.error("Error updating status:", error));
-}
-</script>
+      })
+      .then((response) => response.json())
+      .then((data) => {
+        showToast(data.message || 'Status updated', true);
+        window.setTimeout(() => window.location.reload(), 500);
+      })
+      .catch(() => showToast('Could not update status', false));
+    }
 
+    document.addEventListener('DOMContentLoaded', () => {
+      refreshPendingBadges();
+      sortOrders('pending');
+      updateOrderSummary();
+      document.getElementById('sortSelect').addEventListener('change', function () {
+        sortOrders(this.value);
+      });
+      if (EMPLOYEE_PORTAL_MODE) {
+        document.getElementById('notifyBtn').addEventListener('click', enableNotifications);
+        updateNotificationStatus();
+        setupInstallPrompt();
+        ensureServiceWorker();
+        pollForNewOrders(true);
+        window.setInterval(() => pollForNewOrders(false), 60000);
+      }
+    });
+  </script>
 </body>
 </html>

@@ -54,6 +54,10 @@
   .pgrid .price-cmp{ font-size:11px; color:var(--tb-text-muted); margin-top:3px;}
   .pgrid .price-cmp.profit-pos{ color:#0f6848;}
   .pgrid .price-cmp.profit-neg{ color:var(--tb-danger);}
+  .pgrid tr.excluded td{
+    opacity:.55;
+    background:#fbfbfd;
+  }
   .color-swatch{
     display:inline-block; width:9px; height:9px; border-radius:50%;
     background:#bbb; margin-right:5px; vertical-align:middle; border:1px solid rgba(0,0,0,.08);
@@ -96,6 +100,9 @@
   .save-bar.show{ display:flex; align-items:center; justify-content:space-between; gap:12px;}
   .save-bar .changes-count{ font-weight:600; color:#1f2547;}
   .modal-content{ border-radius:10px; border:none;}
+  .row-actions{ display:flex; gap:8px; justify-content:flex-end; }
+  .linkish{ border:none; background:none; color:var(--tb-primary); font-weight:600; padding:0; cursor:pointer; }
+  .linkish.danger{ color:var(--tb-danger); }
 </style>
 </head>
 <body>
@@ -126,7 +133,7 @@
             <div>
               <div style="font-weight:600; color:#1f2547;">{{ c.name }}</div>
               <div class="meta">
-                {{ c.row_count }} SKUs · {% if c.edited_count %}<span style="color:var(--tb-primary); font-weight:600;">{{ c.edited_count }} edited</span> · {% endif %}
+                {{ c.row_count }} SKUs · {% if c.excluded_count %}<span style="color:var(--tb-danger); font-weight:600;">{{ c.excluded_count }} excluded</span> · {% endif %}{% if c.edited_count %}<span style="color:var(--tb-primary); font-weight:600;">{{ c.edited_count }} edited</span> · {% endif %}
                 uploaded {{ c.uploaded_at[:16] }} · <span style="color:#aab1cf;">{{ c.original_filename }}</span>
               </div>
             </div>
@@ -152,11 +159,14 @@
         <input type="text" id="search" class="search" placeholder="Search by name, SKU…">
         <div class="sep"></div>
         <span class="summary-pill">Total: <strong id="stat-total">0</strong></span>
+        <span class="summary-pill">Visible: <strong id="stat-visible">0</strong></span>
         <span class="summary-pill">Edited: <strong id="stat-edited">0</strong></span>
+        <span class="summary-pill">Excluded: <strong id="stat-excluded">0</strong></span>
         <span class="summary-pill">Invalid: <strong id="stat-invalid" style="color:var(--tb-danger);">0</strong></span>
         <span class="summary-pill" id="enrich-pill">Loading product info…</span>
         <div class="sep"></div>
         <button class="btn btn-tb btn-tb-ghost" id="select-all-toggle">Select all</button>
+        <button class="btn btn-tb btn-tb-ghost" id="toggle-excluded">Show excluded</button>
       </div>
       <div style="max-height:calc(100vh - 230px); overflow:auto;">
         <table class="pgrid" id="grid">
@@ -169,7 +179,8 @@
               <th style="width:140px;">Min Price <span title="Your cost floor — campaign price won't go below this" style="cursor:help;">ⓘ</span></th>
               <th style="width:170px;">Campaign Price</th>
               <th style="width:120px;">Recommended</th>
-              <th style="width:70px;">Stock</th>
+              <th style="width:90px;">Stock</th>
+              <th style="width:110px;">Action</th>
             </tr>
           </thead>
           <tbody id="grid-body"></tbody>
@@ -202,6 +213,11 @@
               <option value="percent_off_sales">Campaign Price = Sales Price − X%</option>
               <option value="flat_amount_off_sales">Campaign Price = Sales Price − Rs X</option>
               <option value="set_min_to_percent_of_sales">Set Min Price = X% of Sales Price</option>
+              <option value="set_stock_absolute">Set Stock = X</option>
+              <option value="increase_stock_by">Increase Stock by X</option>
+              <option value="decrease_stock_by">Decrease Stock by X</option>
+              <option value="exclude_products">Exclude selected products</option>
+              <option value="restore_products">Restore selected products</option>
             </select>
           </div>
           <div class="mb-3" id="bulk-param-wrap">
@@ -276,6 +292,7 @@ const CAMPAIGN_ID = "{{ campaign_id }}";
 let ROWS = [];
 let DIRTY = new Map();
 let SELECTED = new Set();
+let SHOW_EXCLUDED = false;
 
 function moneyFmt(v){
   if(v === null || v === undefined || v === '') return '';
@@ -288,15 +305,36 @@ function profitPct(sale, cost){
 function escapeHtml(s){
   return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+function effectiveValue(row, field){
+  const dirty = DIRTY.get(row.seller_sku) || {};
+  if(dirty[field] !== undefined) return dirty[field];
+  return row[field];
+}
+function isExcluded(row){
+  return !!effectiveValue(row, 'excluded');
+}
+function visibleRows(){
+  const term = document.getElementById('search').value.trim().toLowerCase();
+  return ROWS.filter(r=>{
+    if(!SHOW_EXCLUDED && isExcluded(r)) return false;
+    if(!term) return true;
+    const enr = r.enrichment || {};
+    return (enr.title||'').toLowerCase().includes(term)
+        || (r.seller_sku||'').toLowerCase().includes(term)
+        || (r.daraz_name||'').toLowerCase().includes(term)
+        || (enr.color||'').toLowerCase().includes(term);
+  });
+}
 
 function rowHtml(r){
   const enr = r.enrichment || {};
   const title = enr.title || '(Loading…)';
   const img = enr.image || 'https://static.thenounproject.com/png/1578832-200.png';
   const color = enr.color || '';
-  const dirty = DIRTY.get(r.seller_sku) || {};
-  const campaignPrice = dirty.campaign_price !== undefined ? dirty.campaign_price : (r.campaign_price ?? '');
-  const minPrice = dirty.min_price !== undefined ? dirty.min_price : (r.min_price ?? 0);
+  const campaignPrice = effectiveValue(r, 'campaign_price') ?? '';
+  const minPrice = effectiveValue(r, 'min_price') ?? 0;
+  const stock = effectiveValue(r, 'stock') ?? 0;
+  const excluded = isExcluded(r);
 
   let cpClass = '';
   let cpWarn = '';
@@ -315,13 +353,14 @@ function rowHtml(r){
   }
 
   return `
-    <tr data-sku="${escapeHtml(r.seller_sku)}">
+    <tr data-sku="${escapeHtml(r.seller_sku)}" class="${excluded ? 'excluded' : ''}">
       <td><input type="checkbox" class="row-check" ${SELECTED.has(r.seller_sku)?'checked':''}></td>
       <td class="col-img"><img src="${escapeHtml(img)}" loading="lazy" onerror="this.src='https://static.thenounproject.com/png/1578832-200.png'"></td>
       <td>
         <div class="product-title">${escapeHtml(title)} ${color ? `<span class="color-swatch"></span><span style="font-weight:500; color:#3a3f5c; font-size:12px;">${escapeHtml(color)}</span>`:''}</div>
         <div class="product-meta">SKU ${escapeHtml(r.seller_sku)}${r.is_hero?' · <span style="color:#b8860b;">★ Hero</span>':''}</div>
         ${r.daraz_name ? `<div class="urdu">${escapeHtml(r.daraz_name)}</div>` : ''}
+        ${excluded ? `<div class="price-cmp profit-neg">Excluded from final download</div>` : ''}
       </td>
       <td>Rs ${moneyFmt(r.sales_price)}</td>
       <td><input class="price min-input" data-field="min_price" type="number" step="0.01" min="0" value="${minPrice ?? 0}"></td>
@@ -330,22 +369,21 @@ function rowHtml(r){
         ${cpWarn ? `<div class="price-cmp profit-neg">${cpWarn}</div>` : profitHtml}
       </td>
       <td><div class="rec">≤ Rs ${moneyFmt(r.recommended_max)}</div></td>
-      <td>${r.stock ?? '—'}</td>
+      <td><input class="price stock-input" data-field="stock" type="number" step="1" min="0" value="${stock ?? 0}"></td>
+      <td>
+        <div class="row-actions">
+          <button class="linkish ${excluded ? '' : 'danger'}" data-action="${excluded ? 'restore' : 'exclude'}" type="button">
+            ${excluded ? 'Restore' : 'Remove'}
+          </button>
+        </div>
+      </td>
     </tr>
   `;
 }
 
 function render(){
-  const term = document.getElementById('search').value.trim().toLowerCase();
   const body = document.getElementById('grid-body');
-  const filtered = ROWS.filter(r=>{
-    if(!term) return true;
-    const enr = r.enrichment || {};
-    return (enr.title||'').toLowerCase().includes(term)
-        || (r.seller_sku||'').toLowerCase().includes(term)
-        || (r.daraz_name||'').toLowerCase().includes(term)
-        || (enr.color||'').toLowerCase().includes(term);
-  });
+  const filtered = visibleRows();
   body.innerHTML = filtered.map(rowHtml).join('');
   refreshStats();
   attachRowHandlers();
@@ -353,12 +391,14 @@ function render(){
 
 function refreshStats(){
   document.getElementById('stat-total').textContent = ROWS.length;
+  document.getElementById('stat-visible').textContent = visibleRows().length;
   document.getElementById('stat-edited').textContent = DIRTY.size;
+  document.getElementById('stat-excluded').textContent = ROWS.filter(isExcluded).length;
   let invalid = 0;
   ROWS.forEach(r=>{
-    const d = DIRTY.get(r.seller_sku) || {};
-    const cp = d.campaign_price !== undefined ? parseFloat(d.campaign_price) : r.campaign_price;
-    const mp = d.min_price !== undefined ? parseFloat(d.min_price) : r.min_price;
+    if(isExcluded(r)) return;
+    const cp = parseFloat(effectiveValue(r, 'campaign_price'));
+    const mp = parseFloat(effectiveValue(r, 'min_price'));
     if(cp !== null && cp !== undefined && !isNaN(cp)){
       if(r.recommended_max && cp > r.recommended_max) invalid++;
       else if(mp && cp < mp) invalid++;
@@ -378,7 +418,11 @@ function attachRowHandlers(){
       const field = e.target.dataset.field;
       const row = ROWS.find(r=> r.seller_sku === sku);
       const val = e.target.value === '' ? null : parseFloat(e.target.value);
-      const orig = field === 'campaign_price' ? row.campaign_price_original : 0;
+      const orig = field === 'campaign_price'
+        ? row.campaign_price_original
+        : field === 'stock'
+          ? row.stock_original
+          : (row.min_price ?? 0);
       const d = DIRTY.get(sku) || {};
       if(val === orig){ delete d[field]; }
       else { d[field] = val; }
@@ -396,6 +440,27 @@ function attachRowHandlers(){
       updateBulkScope();
     });
   });
+  document.querySelectorAll('#grid-body [data-action]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const tr = e.target.closest('tr');
+      const sku = tr.dataset.sku;
+      const row = ROWS.find(r => r.seller_sku === sku);
+      const d = DIRTY.get(sku) || {};
+      const currentExcluded = d.excluded !== undefined ? d.excluded : !!row.excluded;
+      d.excluded = !currentExcluded;
+      if (
+        d.campaign_price === undefined &&
+        d.min_price === undefined &&
+        d.stock === undefined &&
+        d.excluded === !!row.excluded
+      ) {
+        delete d.excluded;
+      }
+      if(Object.keys(d).length === 0) DIRTY.delete(sku);
+      else DIRTY.set(sku, d);
+      render();
+    });
+  });
 }
 
 function updateBulkScope(){
@@ -409,6 +474,8 @@ function commitDirtyToRows(){
     if(!d) return;
     if(d.campaign_price !== undefined){ r.campaign_price = d.campaign_price; r.campaign_price_original = d.campaign_price; }
     if(d.min_price !== undefined){ r.min_price = d.min_price; }
+    if(d.stock !== undefined){ r.stock = d.stock; r.stock_original = d.stock; }
+    if(d.excluded !== undefined){ r.excluded = d.excluded; }
   });
   DIRTY.clear();
 }
@@ -444,13 +511,18 @@ async function enrichLoop(){
 document.getElementById('search').addEventListener('input', render);
 
 document.getElementById('select-all').addEventListener('change', e=>{
-  if(e.target.checked) ROWS.forEach(r=> SELECTED.add(r.seller_sku));
-  else SELECTED.clear();
+  if(e.target.checked) visibleRows().forEach(r=> SELECTED.add(r.seller_sku));
+  else visibleRows().forEach(r=> SELECTED.delete(r.seller_sku));
   render(); updateBulkScope();
 });
 document.getElementById('select-all-toggle').addEventListener('click', ()=>{
   const cb = document.getElementById('select-all');
   cb.checked = !cb.checked; cb.dispatchEvent(new Event('change'));
+});
+document.getElementById('toggle-excluded').addEventListener('click', ()=>{
+  SHOW_EXCLUDED = !SHOW_EXCLUDED;
+  document.getElementById('toggle-excluded').textContent = SHOW_EXCLUDED ? 'Hide excluded' : 'Show excluded';
+  render();
 });
 
 document.getElementById('save-btn').addEventListener('click', async ()=>{
@@ -467,10 +539,11 @@ const bulkParamLabel = document.getElementById('bulk-param-label');
 const bulkAction = document.getElementById('bulk-action');
 bulkAction.addEventListener('change', ()=>{
   const a = bulkAction.value;
-  if(a === 'set_to_recommended_max'){ bulkParamWrap.style.display='none'; }
+  if(a === 'set_to_recommended_max' || a === 'exclude_products' || a === 'restore_products'){ bulkParamWrap.style.display='none'; }
   else {
     bulkParamWrap.style.display='block';
     if(a === 'percent_off_sales' || a === 'set_min_to_percent_of_sales'){ bulkParamLabel.textContent = 'Percentage (%)'; }
+    else if(a === 'set_stock_absolute' || a === 'increase_stock_by' || a === 'decrease_stock_by'){ bulkParamLabel.textContent = 'Stock Units'; }
     else { bulkParamLabel.textContent = 'Amount (Rs)'; }
   }
 });
@@ -479,6 +552,7 @@ document.getElementById('bulk-apply').addEventListener('click', async ()=>{
   const params = {};
   if(action === 'percent_off_sales' || action === 'set_min_to_percent_of_sales') params.pct = parseFloat(document.getElementById('bulk-param').value || 0);
   if(action === 'flat_amount_off_sales') params.amount = parseFloat(document.getElementById('bulk-param').value || 0);
+  if(action === 'set_stock_absolute' || action === 'increase_stock_by' || action === 'decrease_stock_by') params.value = parseFloat(document.getElementById('bulk-param').value || 0);
   const body = {action, params, seller_skus: Array.from(SELECTED)};
   const r = await fetch(`/campaigns/${CAMPAIGN_ID}/bulk`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if(r.ok){

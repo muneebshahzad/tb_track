@@ -18,9 +18,11 @@ import os
 import re
 import time
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree as ET
 
 import shopify
 from flask import Blueprint, abort, jsonify, render_template, request, send_file
@@ -206,6 +208,7 @@ def _read_template_rows(xlsx_path: Path) -> list[dict[str, Any]]:
                 "recommended_max": rec_max,
                 "recommended_raw": str(row[COL_RECOMMENDED] or ""),
                 "stock": _to_int(row[COL_STOCK]),
+                "stock_original": _to_int(row[COL_STOCK]),
                 "is_hero": (str(row[COL_IS_HERO] or "N").upper() == "Y"),
                 "category": row[COL_CATEGORY] or "",
             }
@@ -237,10 +240,15 @@ def list_campaigns():
                     "uploaded_at": meta.get("uploaded_at", ""),
                     "original_filename": meta.get("original_filename", ""),
                     "row_count": len(meta.get("rows", [])),
+                    "excluded_count": sum(1 for row in meta.get("rows", []) if row.get("excluded")),
                     "edited_count": sum(
                         1
                         for row in meta.get("rows", [])
-                        if row.get("campaign_price") != row.get("campaign_price_original")
+                        if (
+                            row.get("campaign_price") != row.get("campaign_price_original")
+                            or row.get("stock") != row.get("stock_original")
+                            or row.get("excluded")
+                        )
                     ),
                 }
             )
@@ -275,6 +283,7 @@ def upload_campaign():
                 "min_price": 0,
                 "campaign_price": row["campaign_price"],
                 "enrichment": None,
+                "excluded": False,
             }
         )
 
@@ -356,6 +365,12 @@ def update_prices(campaign_id: str):
             value = _to_float(update["min_price"])
             if value is not None:
                 row["min_price"] = value
+        if "stock" in update:
+            value = _to_int(update["stock"])
+            if value is not None:
+                row["stock"] = max(0, value)
+        if "excluded" in update:
+            row["excluded"] = bool(update["excluded"])
 
     _save_meta(campaign_id, meta)
     return jsonify({"updated": changed})
@@ -393,6 +408,29 @@ def bulk_apply(campaign_id: str):
                 row["min_price"] = round(row["sales_price"] * pct / 100.0, 2)
                 changed += 1
             continue
+        elif action == "set_stock_absolute":
+            value = max(0, int(float(params.get("value", 0))))
+            row["stock"] = value
+            changed += 1
+            continue
+        elif action == "increase_stock_by":
+            value = max(0, int(float(params.get("value", 0))))
+            row["stock"] = max(0, int(row.get("stock") or 0) + value)
+            changed += 1
+            continue
+        elif action == "decrease_stock_by":
+            value = max(0, int(float(params.get("value", 0))))
+            row["stock"] = max(0, int(row.get("stock") or 0) - value)
+            changed += 1
+            continue
+        elif action == "exclude_products":
+            row["excluded"] = True
+            changed += 1
+            continue
+        elif action == "restore_products":
+            row["excluded"] = False
+            changed += 1
+            continue
         else:
             continue
 
@@ -409,43 +447,68 @@ def bulk_apply(campaign_id: str):
 
 @campaigns_bp.route("/<campaign_id>/download")
 def download_campaign(campaign_id: str):
-    import re as regex
     import shutil
-    import zipfile
 
     meta = _load_meta(campaign_id)
     xlsx_path, _ = _campaign_paths(campaign_id)
     if not xlsx_path.exists():
         abort(404, "Source template missing")
 
-    edits = {
-        row["row_index"] + 1: row["campaign_price"]
-        for row in meta["rows"]
-        if row.get("campaign_price") is not None
-    }
+    rows_by_excel_row = {row["row_index"] + 1: row for row in meta["rows"]}
 
     out_path = BASE_DIR / f"{campaign_id}.download.xlsx"
     shutil.copy(xlsx_path, out_path)
 
     with zipfile.ZipFile(out_path) as zin:
-      sheet_xml = zin.read("xl/worksheets/sheet1.xml").decode("utf-8")
-      other_files = {name: zin.read(name) for name in zin.namelist() if name != "xl/worksheets/sheet1.xml"}
+        sheet_xml = zin.read("xl/worksheets/sheet1.xml")
+        other_files = {name: zin.read(name) for name in zin.namelist() if name != "xl/worksheets/sheet1.xml"}
+
+    ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    ET.register_namespace("", ns["x"])
+    root = ET.fromstring(sheet_xml)
+    sheet_data = root.find("x:sheetData", ns)
+    if sheet_data is None:
+        abort(500, "Invalid source template: missing sheet data")
 
     def format_price(price):
+        if price is None:
+            return ""
         if isinstance(price, (int, float)):
             if float(price).is_integer():
                 return str(int(price))
             return f"{price:.2f}".rstrip("0").rstrip(".")
         return str(price)
 
-    for row_num, price in edits.items():
-        price_str = format_price(price)
-        price_xml = price_str.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        new_cell = f'<c r="G{row_num}" t="inlineStr"><is><t>{price_xml}</t></is></c>'
-        pattern = regex.compile(rf'<c r="G{row_num}"[^>]*>.*?</c>', regex.DOTALL)
-        sheet_xml, n_subs = pattern.subn(new_cell, sheet_xml, count=1)
-        if n_subs == 0:
-            print(f"[campaigns] warning: could not find G{row_num} cell to replace")
+    def set_cell_value(cell, value, inline_string=False):
+        for child in list(cell):
+            cell.remove(child)
+        if inline_string:
+            cell.attrib["t"] = "inlineStr"
+            is_node = ET.SubElement(cell, f"{{{ns['x']}}}is")
+            text_node = ET.SubElement(is_node, f"{{{ns['x']}}}t")
+            text_node.text = value
+        else:
+            cell.attrib.pop("t", None)
+            value_node = ET.SubElement(cell, f"{{{ns['x']}}}v")
+            value_node.text = value
+
+    for xml_row in list(sheet_data):
+        row_num = int(xml_row.attrib.get("r", "0"))
+        row_meta = rows_by_excel_row.get(row_num)
+        if not row_meta:
+            continue
+        if row_meta.get("excluded"):
+            sheet_data.remove(xml_row)
+            continue
+
+        for cell in xml_row.findall("x:c", ns):
+            ref = cell.attrib.get("r", "")
+            if ref.startswith(f"G{row_num}"):
+                set_cell_value(cell, format_price(row_meta.get("campaign_price")), inline_string=True)
+            elif ref.startswith(f"K{row_num}"):
+                set_cell_value(cell, str(max(0, int(row_meta.get("stock") or 0))), inline_string=False)
+
+    sheet_xml = ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zout:
         for name, data in other_files.items():

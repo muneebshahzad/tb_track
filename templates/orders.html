@@ -228,6 +228,27 @@
       padding: 10px;
       border-radius: 14px;
       background: rgba(20, 33, 61, 0.04);
+      position: relative;
+      overflow: hidden;
+    }
+    .item.awaiting-lahore-approval {
+      background: rgba(20, 33, 61, 0.08);
+      filter: grayscale(0.2);
+      opacity: 0.82;
+    }
+    .item-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      text-align: center;
+      background: rgba(255, 252, 247, 0.76);
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
     }
     .item img {
       width: 64px;
@@ -261,6 +282,10 @@
       font-weight: 700;
       background: rgba(20, 33, 61, 0.06);
       color: var(--muted);
+    }
+    .mini-badge.awaiting {
+      background: rgba(242, 182, 50, 0.14);
+      color: #8b5a00;
     }
     .tag-row {
       display: flex;
@@ -406,22 +431,36 @@
           </div>
           <div class="items">
             {% for item in order.items_list %}
-              <div class="item">
+              {% set is_lahore_waiting = item.applied_status == 'Delivered in Lahore' %}
+              <div class="item {% if is_lahore_waiting %}awaiting-lahore-approval{% endif %}">
                 <img src="{{ item.item_image }}" alt="">
                 <div>
                   <div class="item-title">{{ item.item_title }}</div>
                   <div class="item-sub">Qty {{ item.quantity }}{% if item.tracking_number != 'N/A' %} • {{ item.tracking_number }}{% endif %}</div>
                   <div class="status-row">
                     {% if item.applied_status %}
-                      <span class="mini-badge">{{ item.applied_status }}</span>
+                      <span class="mini-badge {% if is_lahore_waiting %}awaiting{% endif %}">
+                        {% if is_lahore_waiting %}
+                          Marked Delivered in Lahore
+                        {% else %}
+                          {{ item.applied_status }}
+                        {% endif %}
+                      </span>
                     {% endif %}
                   </div>
-                  <div class="actions">
-                    <button class="action-btn packed" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">Packed</button>
-                    <button class="action-btn manufactured" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">Manufactured</button>
-                    <button class="action-btn lahore" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Delivered in Lahore')">Delivered in Lahore</button>
-                  </div>
+                  {% if not is_lahore_waiting %}
+                    <div class="actions">
+                      <button class="action-btn packed" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">Packed</button>
+                      <button class="action-btn manufactured" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">Manufactured</button>
+                      {% if order.is_lahore %}
+                        <button class="action-btn lahore" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Delivered in Lahore')">Delivered in Lahore</button>
+                      {% endif %}
+                    </div>
+                  {% endif %}
                 </div>
+                {% if is_lahore_waiting %}
+                  <div class="item-overlay">Marked Delivered in Lahore, waiting approval.</div>
+                {% endif %}
               </div>
             {% endfor %}
           </div>

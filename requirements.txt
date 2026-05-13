@@ -8,3 +8,4 @@ lazop-sdk~=1.0.0
 apscheduler~=3.10.1
 pytz~=2024.1
 certifi
+openpyxl~=3.1.5

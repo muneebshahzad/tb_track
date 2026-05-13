@@ -1,0 +1,495 @@
+{# Daraz Campaign Manager — two views in one template (list / edit) #}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campaign Manager · TB Track</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  :root{
+    --tb-primary:#4e73df;
+    --tb-success:#1cc88a;
+    --tb-warning:#f6c23e;
+    --tb-danger:#e74a3b;
+    --tb-info:#36b9cc;
+    --tb-bg:#f6f7fb;
+    --tb-border:#e6e8ef;
+    --tb-text-muted:#6c7693;
+  }
+  body{background:var(--tb-bg); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .page-header{
+    background:#fff; border-bottom:1px solid var(--tb-border);
+    padding:18px 24px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .page-header h1{font-size:22px; margin:0; font-weight:600;}
+  .page-header .crumb{color:var(--tb-text-muted); font-size:13px; margin-top:2px;}
+  .card-tb{background:#fff; border:1px solid var(--tb-border); border-radius:10px; box-shadow:0 1px 2px rgba(20,20,40,.04);}
+  .summary-pill{
+    display:inline-flex; align-items:center; gap:6px; padding:5px 10px;
+    background:#f3f5fb; border-radius:99px; font-size:12px; color:#3a3f5c; font-weight:500;
+  }
+  .summary-pill strong{color:#1f2547;}
+  .pgrid{ width:100%; border-collapse:separate; border-spacing:0; }
+  .pgrid th{
+    position:sticky; top:0; background:#fafbff; z-index:2;
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px;
+    color:var(--tb-text-muted); padding:10px 12px; border-bottom:1px solid var(--tb-border); font-weight:600;
+  }
+  .pgrid td{ padding:10px 12px; border-bottom:1px solid #f0f1f6; vertical-align:middle; font-size:13.5px;}
+  .pgrid tr:hover td{ background:#fafbff;}
+  .pgrid .col-img{ width:64px;}
+  .pgrid .col-img img{ width:48px; height:48px; object-fit:cover; border-radius:6px; background:#eef0f8; display:block;}
+  .pgrid .product-title{ font-weight:600; color:#1f2547; line-height:1.25;}
+  .pgrid .product-meta{ font-size:11.5px; color:var(--tb-text-muted); margin-top:2px;}
+  .pgrid .urdu{ direction:rtl; font-size:11px; color:#9aa0b8; margin-top:1px;}
+  .pgrid input.price{
+    width:110px; text-align:right; padding:5px 8px; font-size:13px;
+    border:1px solid var(--tb-border); border-radius:6px; background:#fff;
+  }
+  .pgrid input.price:focus{ outline:none; border-color:var(--tb-primary); box-shadow:0 0 0 3px rgba(78,115,223,.18);}
+  .pgrid input.price.invalid{ border-color:var(--tb-danger); background:#fff5f5;}
+  .pgrid input.price.warn{ border-color:var(--tb-warning); background:#fffbf0;}
+  .pgrid .rec{ color:var(--tb-text-muted); font-size:11.5px;}
+  .pgrid .price-cmp{ font-size:11px; color:var(--tb-text-muted); margin-top:3px;}
+  .pgrid .price-cmp.profit-pos{ color:#0f6848;}
+  .pgrid .price-cmp.profit-neg{ color:var(--tb-danger);}
+  .color-swatch{
+    display:inline-block; width:9px; height:9px; border-radius:50%;
+    background:#bbb; margin-right:5px; vertical-align:middle; border:1px solid rgba(0,0,0,.08);
+  }
+  .toolbar{
+    display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+    padding:14px 20px; background:#fff; border-bottom:1px solid var(--tb-border);
+    border-radius:10px 10px 0 0;
+  }
+  .toolbar .sep{ width:1px; height:24px; background:var(--tb-border); margin:0 4px;}
+  .toolbar .search{
+    flex:1 1 220px; min-width:220px; max-width:340px;
+    padding:7px 12px; font-size:13px; border:1px solid var(--tb-border); border-radius:6px;
+  }
+  .btn-tb{ padding:6px 14px; font-size:13px; border-radius:6px; font-weight:500;}
+  .btn-tb-primary{ background:var(--tb-primary); color:#fff; border:1px solid var(--tb-primary);}
+  .btn-tb-primary:hover{ background:#3b5dc7;}
+  .btn-tb-success{ background:var(--tb-success); color:#fff; border:1px solid var(--tb-success);}
+  .btn-tb-success:hover{ background:#13a875;}
+  .btn-tb-ghost{ background:#fff; color:#3a3f5c; border:1px solid var(--tb-border);}
+  .btn-tb-ghost:hover{ background:#f3f5fb;}
+  .upload-card{ max-width:560px; margin:60px auto; padding:32px;}
+  .dropzone{
+    border:2px dashed #c8cee0; border-radius:10px; padding:38px; text-align:center;
+    background:#fafbff; transition:.15s;
+  }
+  .dropzone.drag{ border-color:var(--tb-primary); background:#eef2ff;}
+  .dropzone svg{ color:#a8b0d0;}
+  .campaign-card{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:16px 20px; border-bottom:1px solid var(--tb-border); text-decoration:none; color:inherit;
+  }
+  .campaign-card:hover{ background:#fafbff;}
+  .campaign-card .meta{ font-size:12px; color:var(--tb-text-muted); margin-top:3px;}
+  .save-bar{
+    position:fixed; bottom:0; left:0; right:0; background:#fff;
+    border-top:1px solid var(--tb-border); padding:12px 24px; display:none;
+    box-shadow:0 -2px 8px rgba(20,20,40,.06); z-index:50;
+  }
+  .save-bar.show{ display:flex; align-items:center; justify-content:space-between; gap:12px;}
+  .save-bar .changes-count{ font-weight:600; color:#1f2547;}
+  .modal-content{ border-radius:10px; border:none;}
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div>
+    <h1>Daraz Campaign Manager</h1>
+    <div class="crumb">
+      {% if view == 'list' %}All campaigns{% else %}<a href="/campaigns/" style="color:var(--tb-text-muted); text-decoration:none;">All campaigns</a> &rsaquo; {{ meta.name }}{% endif %}
+    </div>
+  </div>
+  {% if view == 'list' %}
+    <button class="btn btn-tb btn-tb-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">+ Upload Campaign Template</button>
+  {% else %}
+    <div class="d-flex gap-2">
+      <button class="btn btn-tb btn-tb-ghost" id="bulk-btn" data-bs-toggle="modal" data-bs-target="#bulkModal">Bulk actions</button>
+      <a class="btn btn-tb btn-tb-success" href="/campaigns/{{ campaign_id }}/download">⬇ Download Daraz xlsx</a>
+    </div>
+  {% endif %}
+</div>
+
+{% if view == 'list' %}
+  <div class="container-fluid py-4" style="max-width:980px;">
+    {% if campaigns %}
+      <div class="card-tb">
+        {% for c in campaigns %}
+          <a class="campaign-card" href="/campaigns/{{ c.id }}">
+            <div>
+              <div style="font-weight:600; color:#1f2547;">{{ c.name }}</div>
+              <div class="meta">
+                {{ c.row_count }} SKUs · {% if c.edited_count %}<span style="color:var(--tb-primary); font-weight:600;">{{ c.edited_count }} edited</span> · {% endif %}
+                uploaded {{ c.uploaded_at[:16] }} · <span style="color:#aab1cf;">{{ c.original_filename }}</span>
+              </div>
+            </div>
+            <div style="color:var(--tb-text-muted); font-size:13px;">Open &rsaquo;</div>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="card-tb upload-card text-center">
+        <div style="font-size:48px; line-height:1;">📦</div>
+        <h3 style="margin-top:14px; font-size:18px;">No campaigns yet</h3>
+        <p style="color:var(--tb-text-muted); margin-bottom:22px;">Upload a campaign Excel template downloaded from Daraz Seller Center to begin.</p>
+        <button class="btn btn-tb btn-tb-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">Upload Template</button>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+
+{% if view == 'edit' %}
+  <div class="container-fluid py-4">
+    <div class="card-tb mb-3">
+      <div class="toolbar">
+        <input type="text" id="search" class="search" placeholder="Search by name, SKU…">
+        <div class="sep"></div>
+        <span class="summary-pill">Total: <strong id="stat-total">0</strong></span>
+        <span class="summary-pill">Edited: <strong id="stat-edited">0</strong></span>
+        <span class="summary-pill">Invalid: <strong id="stat-invalid" style="color:var(--tb-danger);">0</strong></span>
+        <span class="summary-pill" id="enrich-pill">Loading product info…</span>
+        <div class="sep"></div>
+        <button class="btn btn-tb btn-tb-ghost" id="select-all-toggle">Select all</button>
+      </div>
+      <div style="max-height:calc(100vh - 230px); overflow:auto;">
+        <table class="pgrid" id="grid">
+          <thead>
+            <tr>
+              <th style="width:30px;"><input type="checkbox" id="select-all"></th>
+              <th class="col-img"></th>
+              <th>Product</th>
+              <th style="width:110px;">Sales Price</th>
+              <th style="width:140px;">Min Price <span title="Your cost floor — campaign price won't go below this" style="cursor:help;">ⓘ</span></th>
+              <th style="width:170px;">Campaign Price</th>
+              <th style="width:120px;">Recommended</th>
+              <th style="width:70px;">Stock</th>
+            </tr>
+          </thead>
+          <tbody id="grid-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="save-bar" id="save-bar">
+    <div><span class="changes-count" id="save-bar-count">0</span> unsaved change(s)</div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-tb btn-tb-ghost" id="discard-btn">Discard</button>
+      <button class="btn btn-tb btn-tb-primary" id="save-btn">Save changes</button>
+    </div>
+  </div>
+
+  <div class="modal fade" id="bulkModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Bulk action</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p style="color:var(--tb-text-muted); font-size:13px;">Applies to <strong id="bulk-scope">all rows</strong>. Results are clamped to your Min Price and the Recommended max.</p>
+          <div class="mb-3">
+            <label class="form-label">Action</label>
+            <select id="bulk-action" class="form-select">
+              <option value="set_to_recommended_max">Set Campaign Price = Recommended max</option>
+              <option value="percent_off_sales">Campaign Price = Sales Price − X%</option>
+              <option value="flat_amount_off_sales">Campaign Price = Sales Price − Rs X</option>
+              <option value="set_min_to_percent_of_sales">Set Min Price = X% of Sales Price</option>
+            </select>
+          </div>
+          <div class="mb-3" id="bulk-param-wrap">
+            <label class="form-label" id="bulk-param-label">Value</label>
+            <input type="number" id="bulk-param" class="form-control" placeholder="e.g. 15">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-tb-ghost btn-tb" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-tb-primary btn-tb" id="bulk-apply">Apply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="modal fade" id="uploadModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Upload Campaign Template</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Campaign name</label>
+          <input id="campaign-name" class="form-control" placeholder="e.g. 6.6 Budget Bazar June 2026">
+        </div>
+        <div class="dropzone" id="dropzone">
+          <svg width="44" height="44" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          <div style="font-weight:600; margin-top:10px;">Drop the .xlsx here</div>
+          <div style="color:var(--tb-text-muted); font-size:13px; margin-top:4px;">or click to browse</div>
+          <input id="file-input" type="file" accept=".xlsx" hidden>
+        </div>
+        <div id="upload-status" class="mt-3" style="font-size:13px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function(){
+  const dz = document.getElementById('dropzone');
+  const fi = document.getElementById('file-input');
+  const status = document.getElementById('upload-status');
+  if(!dz) return;
+
+  dz.addEventListener('click', ()=> fi.click());
+  ['dragover','dragenter'].forEach(e=> dz.addEventListener(e, ev=>{ev.preventDefault(); dz.classList.add('drag');}));
+  ['dragleave','drop'].forEach(e=> dz.addEventListener(e, ev=>{ev.preventDefault(); dz.classList.remove('drag');}));
+  dz.addEventListener('drop', ev=>{ if(ev.dataTransfer.files[0]) handleUpload(ev.dataTransfer.files[0]); });
+  fi.addEventListener('change', ev=>{ if(ev.target.files[0]) handleUpload(ev.target.files[0]); });
+
+  async function handleUpload(file){
+    if(!file.name.toLowerCase().endsWith('.xlsx')){
+      status.innerHTML = '<span style="color:var(--tb-danger);">Please choose a .xlsx file.</span>'; return;
+    }
+    status.textContent = 'Uploading and parsing…';
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('name', document.getElementById('campaign-name').value || file.name.replace(/\.xlsx$/i,''));
+    const r = await fetch('/campaigns/upload', {method:'POST', body:fd});
+    const j = await r.json();
+    if(j.redirect){ window.location.href = j.redirect; }
+    else { status.innerHTML = '<span style="color:var(--tb-danger);">'+(j.error||'Upload failed')+'</span>'; }
+  }
+})();
+
+{% if view == 'edit' %}
+const CAMPAIGN_ID = "{{ campaign_id }}";
+let ROWS = [];
+let DIRTY = new Map();
+let SELECTED = new Set();
+
+function moneyFmt(v){
+  if(v === null || v === undefined || v === '') return '';
+  return Number(v).toLocaleString('en-PK', {maximumFractionDigits:2});
+}
+function profitPct(sale, cost){
+  if(!sale || !cost) return null;
+  return ((sale - cost) / sale * 100);
+}
+function escapeHtml(s){
+  return (s||'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function rowHtml(r){
+  const enr = r.enrichment || {};
+  const title = enr.title || '(Loading…)';
+  const img = enr.image || 'https://static.thenounproject.com/png/1578832-200.png';
+  const color = enr.color || '';
+  const dirty = DIRTY.get(r.seller_sku) || {};
+  const campaignPrice = dirty.campaign_price !== undefined ? dirty.campaign_price : (r.campaign_price ?? '');
+  const minPrice = dirty.min_price !== undefined ? dirty.min_price : (r.min_price ?? 0);
+
+  let cpClass = '';
+  let cpWarn = '';
+  const cpNum = parseFloat(campaignPrice);
+  if(!isNaN(cpNum)){
+    if(r.recommended_max && cpNum > r.recommended_max){ cpClass = 'invalid'; cpWarn = `Above max ${moneyFmt(r.recommended_max)}`; }
+    else if(minPrice && cpNum < parseFloat(minPrice)){ cpClass = 'invalid'; cpWarn = `Below your min ${moneyFmt(minPrice)}`; }
+    else if(r.sales_price && cpNum > r.sales_price){ cpClass = 'warn'; cpWarn = `Higher than sales price`; }
+  }
+
+  let profitHtml = '';
+  if(!isNaN(cpNum) && minPrice && parseFloat(minPrice) > 0){
+    const p = profitPct(cpNum, parseFloat(minPrice));
+    const cls = p >= 15 ? 'profit-pos' : 'profit-neg';
+    profitHtml = `<div class="price-cmp ${cls}">Margin: ${p.toFixed(1)}%</div>`;
+  }
+
+  return `
+    <tr data-sku="${escapeHtml(r.seller_sku)}">
+      <td><input type="checkbox" class="row-check" ${SELECTED.has(r.seller_sku)?'checked':''}></td>
+      <td class="col-img"><img src="${escapeHtml(img)}" loading="lazy" onerror="this.src='https://static.thenounproject.com/png/1578832-200.png'"></td>
+      <td>
+        <div class="product-title">${escapeHtml(title)} ${color ? `<span class="color-swatch"></span><span style="font-weight:500; color:#3a3f5c; font-size:12px;">${escapeHtml(color)}</span>`:''}</div>
+        <div class="product-meta">SKU ${escapeHtml(r.seller_sku)}${r.is_hero?' · <span style="color:#b8860b;">★ Hero</span>':''}</div>
+        ${r.daraz_name ? `<div class="urdu">${escapeHtml(r.daraz_name)}</div>` : ''}
+      </td>
+      <td>Rs ${moneyFmt(r.sales_price)}</td>
+      <td><input class="price min-input" data-field="min_price" type="number" step="0.01" min="0" value="${minPrice ?? 0}"></td>
+      <td>
+        <input class="price cp-input ${cpClass}" data-field="campaign_price" type="number" step="0.01" min="0" value="${campaignPrice}">
+        ${cpWarn ? `<div class="price-cmp profit-neg">${cpWarn}</div>` : profitHtml}
+      </td>
+      <td><div class="rec">≤ Rs ${moneyFmt(r.recommended_max)}</div></td>
+      <td>${r.stock ?? '—'}</td>
+    </tr>
+  `;
+}
+
+function render(){
+  const term = document.getElementById('search').value.trim().toLowerCase();
+  const body = document.getElementById('grid-body');
+  const filtered = ROWS.filter(r=>{
+    if(!term) return true;
+    const enr = r.enrichment || {};
+    return (enr.title||'').toLowerCase().includes(term)
+        || (r.seller_sku||'').toLowerCase().includes(term)
+        || (r.daraz_name||'').toLowerCase().includes(term)
+        || (enr.color||'').toLowerCase().includes(term);
+  });
+  body.innerHTML = filtered.map(rowHtml).join('');
+  refreshStats();
+  attachRowHandlers();
+}
+
+function refreshStats(){
+  document.getElementById('stat-total').textContent = ROWS.length;
+  document.getElementById('stat-edited').textContent = DIRTY.size;
+  let invalid = 0;
+  ROWS.forEach(r=>{
+    const d = DIRTY.get(r.seller_sku) || {};
+    const cp = d.campaign_price !== undefined ? parseFloat(d.campaign_price) : r.campaign_price;
+    const mp = d.min_price !== undefined ? parseFloat(d.min_price) : r.min_price;
+    if(cp !== null && cp !== undefined && !isNaN(cp)){
+      if(r.recommended_max && cp > r.recommended_max) invalid++;
+      else if(mp && cp < mp) invalid++;
+    }
+  });
+  document.getElementById('stat-invalid').textContent = invalid;
+  const sb = document.getElementById('save-bar');
+  if(DIRTY.size > 0){ sb.classList.add('show'); document.getElementById('save-bar-count').textContent = DIRTY.size; }
+  else { sb.classList.remove('show'); }
+}
+
+function attachRowHandlers(){
+  document.querySelectorAll('#grid-body input.price').forEach(inp=>{
+    inp.addEventListener('input', e=>{
+      const tr = e.target.closest('tr');
+      const sku = tr.dataset.sku;
+      const field = e.target.dataset.field;
+      const row = ROWS.find(r=> r.seller_sku === sku);
+      const val = e.target.value === '' ? null : parseFloat(e.target.value);
+      const orig = field === 'campaign_price' ? row.campaign_price_original : 0;
+      const d = DIRTY.get(sku) || {};
+      if(val === orig){ delete d[field]; }
+      else { d[field] = val; }
+      if(Object.keys(d).length === 0) DIRTY.delete(sku);
+      else DIRTY.set(sku, d);
+      tr.outerHTML = rowHtml(row);
+      refreshStats();
+      attachRowHandlers();
+    });
+  });
+  document.querySelectorAll('.row-check').forEach(c=>{
+    c.addEventListener('change', e=>{
+      const sku = e.target.closest('tr').dataset.sku;
+      if(e.target.checked) SELECTED.add(sku); else SELECTED.delete(sku);
+      updateBulkScope();
+    });
+  });
+}
+
+function updateBulkScope(){
+  const el = document.getElementById('bulk-scope');
+  if(el) el.textContent = SELECTED.size === 0 ? 'all rows' : `${SELECTED.size} selected row(s)`;
+}
+
+function commitDirtyToRows(){
+  ROWS.forEach(r=>{
+    const d = DIRTY.get(r.seller_sku);
+    if(!d) return;
+    if(d.campaign_price !== undefined){ r.campaign_price = d.campaign_price; r.campaign_price_original = d.campaign_price; }
+    if(d.min_price !== undefined){ r.min_price = d.min_price; }
+  });
+  DIRTY.clear();
+}
+
+async function loadData(){
+  const r = await fetch(`/campaigns/${CAMPAIGN_ID}/data`);
+  const j = await r.json();
+  ROWS = j.rows;
+  render();
+  enrichLoop();
+}
+
+async function enrichLoop(){
+  const pill = document.getElementById('enrich-pill');
+  let remaining = ROWS.filter(r=> !r.enrichment).length;
+  if(remaining === 0){ pill.textContent = `All ${ROWS.length} products enriched`; pill.style.background='#e8f5e9'; pill.style.color='#0f6848'; return; }
+  while(remaining > 0){
+    pill.textContent = `Loading product info… ${ROWS.length - remaining}/${ROWS.length}`;
+    const r = await fetch(`/campaigns/${CAMPAIGN_ID}/enrich`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({batch_size: 8})});
+    const j = await r.json();
+    Object.entries(j.enriched).forEach(([sku, info])=>{
+      const row = ROWS.find(r=> r.seller_sku === sku);
+      if(row) row.enrichment = info;
+    });
+    render();
+    remaining = j.remaining;
+    if(Object.keys(j.enriched).length === 0) break;
+  }
+  pill.textContent = `All products loaded`;
+  pill.style.background='#e8f5e9'; pill.style.color='#0f6848';
+}
+
+document.getElementById('search').addEventListener('input', render);
+
+document.getElementById('select-all').addEventListener('change', e=>{
+  if(e.target.checked) ROWS.forEach(r=> SELECTED.add(r.seller_sku));
+  else SELECTED.clear();
+  render(); updateBulkScope();
+});
+document.getElementById('select-all-toggle').addEventListener('click', ()=>{
+  const cb = document.getElementById('select-all');
+  cb.checked = !cb.checked; cb.dispatchEvent(new Event('change'));
+});
+
+document.getElementById('save-btn').addEventListener('click', async ()=>{
+  if(DIRTY.size === 0) return;
+  const updates = [];
+  DIRTY.forEach((d, sku)=> updates.push({seller_sku: sku, ...d}));
+  const r = await fetch(`/campaigns/${CAMPAIGN_ID}/update`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({updates})});
+  if(r.ok){ commitDirtyToRows(); render(); }
+});
+document.getElementById('discard-btn').addEventListener('click', ()=>{ DIRTY.clear(); render(); });
+
+const bulkParamWrap = document.getElementById('bulk-param-wrap');
+const bulkParamLabel = document.getElementById('bulk-param-label');
+const bulkAction = document.getElementById('bulk-action');
+bulkAction.addEventListener('change', ()=>{
+  const a = bulkAction.value;
+  if(a === 'set_to_recommended_max'){ bulkParamWrap.style.display='none'; }
+  else {
+    bulkParamWrap.style.display='block';
+    if(a === 'percent_off_sales' || a === 'set_min_to_percent_of_sales'){ bulkParamLabel.textContent = 'Percentage (%)'; }
+    else { bulkParamLabel.textContent = 'Amount (Rs)'; }
+  }
+});
+document.getElementById('bulk-apply').addEventListener('click', async ()=>{
+  const action = bulkAction.value;
+  const params = {};
+  if(action === 'percent_off_sales' || action === 'set_min_to_percent_of_sales') params.pct = parseFloat(document.getElementById('bulk-param').value || 0);
+  if(action === 'flat_amount_off_sales') params.amount = parseFloat(document.getElementById('bulk-param').value || 0);
+  const body = {action, params, seller_skus: Array.from(SELECTED)};
+  const r = await fetch(`/campaigns/${CAMPAIGN_ID}/bulk`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if(r.ok){
+    DIRTY.clear();
+    await loadData();
+    bootstrap.Modal.getInstance(document.getElementById('bulkModal')).hide();
+  }
+});
+
+loadData();
+{% endif %}
+</script>
+</body>
+</html>

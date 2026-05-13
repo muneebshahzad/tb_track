@@ -201,9 +201,34 @@
       border: 1px solid var(--line);
       background: #fff;
       display: none;
+      position: relative;
     }
 
     #reader.active { display: block; }
+
+    .camera-meta {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: -2px;
+    }
+
+    .camera-meta.active {
+      display: flex;
+    }
+
+    .scan-count {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(20, 33, 61, 0.06);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+    }
 
     .helper-row {
       display: flex;
@@ -301,6 +326,27 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
+    }
+
+    .lookup-item {
+      grid-template-columns: 92px 1fr auto;
+      align-items: stretch;
+    }
+
+    .lookup-item .item-thumb {
+      width: 92px;
+      height: 92px;
+      border-radius: 16px;
+      font-size: 12px;
+    }
+
+    .lookup-item .item-title {
+      font-size: 16px;
+      line-height: 1.25;
+    }
+
+    .lookup-item .item-meta {
+      font-size: 13px;
     }
 
     .item-title {
@@ -450,6 +496,10 @@
         <button class="icon-btn" onclick="submitScan()" aria-label="Submit scan">></button>
       </div>
       <div id="reader"></div>
+      <div class="camera-meta" id="cameraMeta">
+        <div class="scan-count" id="scanCount">0 scanned</div>
+        <button class="ghost-btn" type="button" id="hideCameraBtn" onclick="stopScanner()">Hide Camera</button>
+      </div>
       <div class="helper-row">
         <div class="helper" id="modeHelper">Search any order and see products with quantities.</div>
         <button class="ghost-btn" type="button" onclick="submitScan()">Use Typed Code</button>
@@ -505,6 +555,7 @@
     let scannerActive = false;
     let queue = [];
     let lastScanValue = '';
+    let audioContext = null;
 
     function setMode(mode) {
       currentMode = mode;
@@ -512,6 +563,7 @@
       renderModeButtons();
       renderQueue();
       hideResult();
+      updateScanCount();
 
       const helper = document.getElementById('modeHelper');
       const reportBtn = document.getElementById('reportBtn');
@@ -581,8 +633,11 @@
         return;
       }
 
+      playSuccessBeep();
+
       if (currentMode === 'search') {
         renderResult(order);
+        stopScanner();
         showToast('Order loaded', true);
         return;
       }
@@ -620,7 +675,7 @@
         </div>
         <div class="items">
           ${(order.items || []).map((item) => `
-            <div class="item">
+            <div class="item ${currentMode === 'search' ? 'lookup-item' : ''}">
               <div class="item-thumb">
                 ${item.image && item.image !== 'None' ? `<img src="${escapeAttribute(item.image)}" alt="">` : 'IMG'}
               </div>
@@ -646,6 +701,7 @@
       const reportBtn = document.getElementById('reportBtn');
 
       queueSummary.textContent = `${queue.length} scanned`;
+      updateScanCount();
       reportBtn.disabled = queue.length === 0;
       reportBtn.style.opacity = queue.length === 0 ? '0.5' : '1';
 
@@ -672,6 +728,14 @@
     function clearQueue() {
       queue = [];
       renderQueue();
+    }
+
+    function updateScanCount() {
+      const scanCount = document.getElementById('scanCount');
+      const count = currentMode === 'search' ? 0 : queue.length;
+      scanCount.textContent = currentMode === 'search'
+        ? 'Lookup mode'
+        : `${count} parcel${count === 1 ? '' : 's'} scanned`;
     }
 
     async function createReport() {
@@ -715,19 +779,23 @@
 
       const readerEl = document.getElementById('reader');
       const button = document.getElementById('cameraToggleBtn');
+      const cameraMeta = document.getElementById('cameraMeta');
 
       try {
         scanner = scanner || new Html5Qrcode('reader');
         readerEl.classList.add('active');
+        cameraMeta.classList.add('active');
         await scanner.start(
           { facingMode: 'environment' },
           { fps: 10, qrbox: { width: 220, height: 220 } },
           (decodedText) => processScan(decodedText)
         );
         scannerActive = true;
-        button.textContent = '-';
+        button.textContent = currentMode === 'search' ? 'x' : '-';
+        updateScanCount();
       } catch (error) {
         readerEl.classList.remove('active');
+        cameraMeta.classList.remove('active');
         showToast('Camera could not start', false);
       }
     }
@@ -735,12 +803,39 @@
     async function stopScanner() {
       const readerEl = document.getElementById('reader');
       const button = document.getElementById('cameraToggleBtn');
+      const cameraMeta = document.getElementById('cameraMeta');
       if (scanner && scannerActive) {
         await scanner.stop();
       }
       scannerActive = false;
       readerEl.classList.remove('active');
+      cameraMeta.classList.remove('active');
       button.textContent = '+';
+    }
+
+    function playSuccessBeep() {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      if (!audioContext) {
+        audioContext = new AudioCtx();
+      }
+
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(960, audioContext.currentTime);
+      gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.14, audioContext.currentTime + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.16);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.16);
     }
 
     function showToast(message, success) {

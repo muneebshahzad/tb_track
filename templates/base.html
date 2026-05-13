@@ -137,6 +137,7 @@
       <a href="/scan" class="sb-item {% if request.path == '/scan' %}active{% endif %}"><span class="sb-icon">🔍</span><span class="sb-item-label">Scan</span></a>
       <a href="/pending" class="sb-item {% if request.path == '/pending' %}active{% endif %}"><span class="sb-icon">📋</span><span class="sb-item-label">Pending Orders</span></a>
       <a href="/undelivered" class="sb-item {% if request.path == '/undelivered' %}active{% endif %}"><span class="sb-icon">🚚</span><span class="sb-item-label">Undelivered Orders</span></a>
+      <a href="/campaigns/" class="sb-item {% if request.path.startswith('/campaigns') %}active{% endif %}"><span class="sb-icon">📣</span><span class="sb-item-label">Daraz Campaigns</span></a>
       <a href="#" class="sb-item" id="refreshDataBtn" onclick="triggerRefresh(event)"><span class="sb-icon">🔄</span><span class="sb-item-label">Refresh Data</span></a>
       <a href="/payments" class="sb-item {% if request.path == '/payments' %}active{% endif %}"><span class="sb-icon">💰</span><span class="sb-item-label">Finance</span></a>
     </nav>

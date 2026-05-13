@@ -21,6 +21,7 @@ import json
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from token_manager import get_access_token, save_tokens
+from campaigns import campaigns_bp, init_campaign_dirs
 import ssl
 import certifi
 
@@ -36,6 +37,8 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 app.debug = False
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
+init_campaign_dirs()
+app.register_blueprint(campaigns_bp)
 
 # ── Jinja2 helpers ────────────────────────────────────────────────────────────
 

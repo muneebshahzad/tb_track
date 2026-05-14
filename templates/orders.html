@@ -51,39 +51,33 @@
       backdrop-filter: blur(10px);
     }
     .hero {
-      padding: 18px;
+      padding: 12px 14px;
       position: sticky;
-      top: 10px;
+      top: 8px;
       z-index: 10;
     }
     .eyebrow {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 6px 10px;
+      padding: 5px 9px;
       border-radius: 999px;
       background: rgba(20, 33, 61, 0.06);
       color: var(--muted);
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
     h1 {
-      margin: 12px 0 4px;
-      font-size: 28px;
+      margin: 10px 0 0;
+      font-size: 22px;
       line-height: 1;
     }
-    .subcopy {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.45;
-    }
     .brand-lockup {
-      width: 168px;
+      width: 112px;
       display: block;
-      margin: 0 0 10px;
+      margin: 0 0 8px;
     }
     .brand-lockup img {
       display: block;
@@ -94,7 +88,7 @@
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-      margin-top: 14px;
+      margin-top: 10px;
     }
     .utility-btn, .action-btn, .sort-select {
       border-radius: 14px;
@@ -110,11 +104,25 @@
       padding: 12px 14px;
     }
     .utility-btn[hidden] { display: none; }
+    .hero-icon-btn {
+      width: 42px;
+      min-width: 42px;
+      min-height: 42px;
+      padding: 0;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      line-height: 1;
+    }
     .status-pill {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 8px 12px;
+      gap: 0;
+      width: 42px;
+      height: 42px;
+      justify-content: center;
       border-radius: 999px;
       background: rgba(20, 33, 61, 0.06);
       color: var(--ink);
@@ -122,15 +130,16 @@
       font-weight: 700;
     }
     .status-pill .dot {
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
       background: #b8b2aa;
     }
+    .status-pill span:last-child { display: none; }
     .status-pill.active .dot { background: var(--green); }
     .status-pill.warn .dot { background: var(--gold); }
     .controls.card {
-      padding: 14px;
+      padding: 12px 14px;
       display: flex;
       gap: 10px;
       align-items: center;
@@ -152,11 +161,11 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 8px 12px;
+      padding: 7px 11px;
       border-radius: 999px;
       background: rgba(20, 33, 61, 0.06);
       color: var(--ink);
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
     }
     .orders {
@@ -376,10 +385,10 @@
       <h1>Pending orders.</h1>
       <div class="hero-toolbar">
         {% if employee_portal_mode %}
-          <button class="utility-btn" type="button" onclick="window.location.href='/employee_portal'">Back to Scanner</button>
-          <button class="utility-btn" type="button" id="installBtn" hidden>Install App</button>
-          <button class="utility-btn" type="button" id="notifyBtn">Enable Notifications</button>
-          <span class="status-pill" id="notifyStatus"><span class="dot"></span><span>Notifications off</span></span>
+          <button class="utility-btn hero-icon-btn" type="button" onclick="window.location.href='/employee_portal'" title="Back to Scanner" aria-label="Back to Scanner">←</button>
+          <button class="utility-btn hero-icon-btn" type="button" id="installBtn" hidden title="Install App" aria-label="Install App">＋</button>
+          <button class="utility-btn hero-icon-btn" type="button" id="notifyBtn" title="Enable Notifications" aria-label="Enable Notifications">🔔</button>
+          <span class="status-pill" id="notifyStatus" title="Notification status" aria-label="Notification status"><span class="dot"></span><span>Notifications off</span></span>
         {% endif %}
       </div>
     </section>
@@ -584,11 +593,13 @@
       }
       if (!('Notification' in window)) {
         label.textContent = 'Notifications unavailable';
+        status.title = 'Notifications unavailable';
         status.classList.add('warn');
         return;
       }
       if (Notification.permission === 'granted') {
         label.textContent = 'Notifications on';
+        status.title = 'Notifications on';
         status.classList.add('active');
         if (notifyBtn) {
           notifyBtn.hidden = true;
@@ -597,10 +608,12 @@
       }
       if (Notification.permission === 'denied') {
         label.textContent = 'Notifications blocked';
+        status.title = 'Notifications blocked';
         status.classList.add('warn');
         return;
       }
       label.textContent = 'Notifications off';
+      status.title = 'Notifications off';
     }
 
     async function ensureServiceWorker() {

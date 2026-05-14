@@ -107,6 +107,20 @@ def upsert_order_status(key: str, status: str):
         print(f"DB upsert error: {e}")
 
 
+def delete_order_status(key: str):
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM order_statuses WHERE key = %s", (key,))
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB delete error: {e}")
+        return False
+
+
 def get_app_setting(key: str, default: str = "") -> str:
     try:
         with get_conn() as conn:

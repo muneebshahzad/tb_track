@@ -335,6 +335,11 @@
       background: rgba(242, 182, 50, 0.14);
       color: #8b5a00;
     }
+    .action-btn.cancel {
+      border-color: rgba(207, 63, 63, 0.32);
+      background: rgba(207, 63, 63, 0.1);
+      color: #9b2525;
+    }
     .empty {
       padding: 30px 18px;
       text-align: center;
@@ -432,16 +437,20 @@
           <div class="items">
             {% for item in order.items_list %}
               {% set is_lahore_waiting = item.applied_status == 'Delivered in Lahore' %}
-              <div class="item {% if is_lahore_waiting %}awaiting-lahore-approval{% endif %}">
+              {% set is_cancel_waiting = item.applied_status == 'Cancelled by Employee' %}
+              {% set is_waiting_approval = is_lahore_waiting or is_cancel_waiting %}
+              <div class="item {% if is_waiting_approval %}awaiting-lahore-approval{% endif %}">
                 <img src="{{ item.item_image }}" alt="">
                 <div>
                   <div class="item-title">{{ item.item_title }}</div>
                   <div class="item-sub">Qty {{ item.quantity }}{% if item.tracking_number != 'N/A' %} • {{ item.tracking_number }}{% endif %}</div>
                   <div class="status-row">
                     {% if item.applied_status %}
-                      <span class="mini-badge {% if is_lahore_waiting %}awaiting{% endif %}">
+                      <span class="mini-badge {% if is_waiting_approval %}awaiting{% endif %}">
                         {% if is_lahore_waiting %}
                           Marked Delivered in Lahore
+                        {% elif is_cancel_waiting %}
+                          Cancelled by Employee
                         {% else %}
                           {{ item.applied_status }}
                         {% endif %}
@@ -451,18 +460,27 @@
                       {% endif %}
                     {% endif %}
                   </div>
-                  {% if not is_lahore_waiting %}
+                  {% if not is_waiting_approval %}
                     <div class="actions">
                       <button class="action-btn packed" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">Packed</button>
                       <button class="action-btn manufactured" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">Manufactured</button>
                       {% if order.is_lahore %}
                         <button class="action-btn lahore" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Delivered in Lahore')">Delivered in Lahore</button>
                       {% endif %}
+                      {% if order.order_via == 'Shopify' %}
+                        <button class="action-btn cancel" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Cancelled by Employee')">Cancelled</button>
+                      {% endif %}
                     </div>
                   {% endif %}
                 </div>
-                {% if is_lahore_waiting %}
-                  <div class="item-overlay">Marked Delivered in Lahore, waiting approval. Shopify tag applied: Delivered in Lahore.</div>
+                {% if is_waiting_approval %}
+                  <div class="item-overlay">
+                    {% if is_lahore_waiting %}
+                      Marked Delivered in Lahore, waiting approval. Shopify tag applied: Delivered in Lahore.
+                    {% else %}
+                      Cancelled by Employee, waiting approval.
+                    {% endif %}
+                  </div>
                 {% endif %}
               </div>
             {% endfor %}

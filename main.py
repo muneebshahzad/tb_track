@@ -19,6 +19,7 @@ from flask import Flask
 import shopify
 import requests
 import json
+from urllib.parse import urlparse
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from token_manager import get_access_token, save_tokens
@@ -36,7 +37,7 @@ from shopify_protected_data import (
 import ssl
 import certifi
 
-from db import init_db, load_order_statuses, upsert_order_status
+from db import init_db, load_order_statuses, upsert_order_status, delete_order_status
 from markupsafe import Markup
 
 os.environ['SSL_CERT_FILE'] = certifi.where()
@@ -538,7 +539,12 @@ async def getShopifyOrders():
 @app.route("/")
 def tracking():
     global order_details, daraz_orders
-    return render_template("track.html", order_details=order_details, darazOrders=daraz_orders)
+    return render_template(
+        "track.html",
+        order_details=order_details,
+        darazOrders=daraz_orders,
+        employee_approvals=build_employee_approval_items(),
+    )
 
 
 @app.route('/refresh', methods=['POST'])
@@ -711,6 +717,14 @@ def is_lahore_city(city):
     return "lahore" in normalized or "lhr" in normalized
 
 
+def find_shopify_order_by_order_name(order_id):
+    normalized_order_id = normalize_scan_term(order_id)
+    for order in order_details:
+        if normalize_scan_term(order.get("order_id")) == normalized_order_id:
+            return order
+    return None
+
+
 def serialize_shopify_order_for_employee(order):
     customer = order.get('customer_details') or {}
     line_items = order.get('line_items') or []
@@ -835,6 +849,40 @@ def build_pending_orders_mobile_data():
     return all_orders
 
 
+def build_employee_approval_items():
+    approvals = []
+    statuses = load_order_statuses()
+    approval_statuses = {"Delivered in Lahore", "Cancelled by Employee"}
+
+    for shopify_order in order_details:
+        customer = shopify_order.get('customer_details') or {}
+        for item in shopify_order.get('line_items', []):
+            tracking_number = item.get('tracking_number', 'N/A')
+            key = f"{shopify_order['order_id']}:{tracking_number}"
+            applied_status = statuses.get(key, "")
+            if applied_status not in approval_statuses:
+                continue
+
+            approvals.append({
+                'shopify_id': shopify_order.get('id'),
+                'order_id': shopify_order.get('order_id'),
+                'tracking_number': tracking_number,
+                'requested_status': applied_status,
+                'item_title': item.get('product_title', ''),
+                'item_image': item.get('image_src', ''),
+                'quantity': item.get('quantity', 0),
+                'customer_name': customer.get('name', ''),
+                'customer_city': customer.get('city', ''),
+                'customer_phone': customer.get('phone', ''),
+                'total_price': shopify_order.get('total_price', 0),
+                'date': shopify_order.get('created_at', ''),
+                'tags': shopify_order.get('tags', []),
+            })
+
+    approvals.sort(key=lambda item: item.get('date', ''), reverse=True)
+    return approvals
+
+
 def find_employee_portal_order(term):
     normalized = normalize_scan_term(term)
     if not normalized:
@@ -864,6 +912,144 @@ def apply_shopify_order_tag(order_id, tag, include_date=False):
         tags.append(clean_tag)
     order.tags = ", ".join(tags)
     return order.save()
+
+
+def get_shopify_rest_base_url():
+    raw_shop_url = (os.getenv('SHOP_URL') or '').strip()
+    parsed = urlparse(raw_shop_url)
+    netloc = parsed.netloc or parsed.path
+    if not netloc:
+        raise RuntimeError('SHOP_URL is not configured.')
+    api_version = os.getenv('SHOPIFY_ADMIN_API_VERSION', '2026-04')
+    return f"https://{netloc}/admin/api/{api_version}"
+
+
+def shopify_rest_headers():
+    token = (os.getenv('PASSWORD') or '').strip()
+    if not token:
+        raise RuntimeError('Shopify admin access token is missing.')
+    return {
+        'X-Shopify-Access-Token': token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+    }
+
+
+def capture_shopify_payment(order):
+    financial_status = ((getattr(order, 'financial_status', '') or '')).lower()
+    if financial_status in {'paid', 'partially_paid'}:
+        return []
+
+    base_url = get_shopify_rest_base_url()
+    headers = shopify_rest_headers()
+    response = requests.get(f"{base_url}/orders/{order.id}/transactions.json", headers=headers, timeout=30)
+    response.raise_for_status()
+    transactions = response.json().get('transactions', [])
+    authorization = next(
+        (
+            transaction for transaction in transactions
+            if transaction.get('kind') == 'authorization' and transaction.get('status') == 'success'
+        ),
+        None
+    )
+
+    if not authorization:
+        return ['No capturable authorization transaction found.']
+
+    payload = {
+        'transaction': {
+            'kind': 'capture',
+            'parent_id': authorization['id'],
+            'amount': str(order.total_price),
+            'currency': authorization.get('currency') or getattr(order, 'currency', 'PKR') or 'PKR',
+        }
+    }
+    capture_response = requests.post(
+        f"{base_url}/orders/{order.id}/transactions.json",
+        headers=headers,
+        json=payload,
+        timeout=30,
+    )
+    capture_response.raise_for_status()
+    return []
+
+
+def fulfill_shopify_order(order):
+    fulfillment_status = ((getattr(order, 'fulfillment_status', '') or '')).lower()
+    if fulfillment_status == 'fulfilled':
+        return []
+
+    base_url = get_shopify_rest_base_url()
+    headers = shopify_rest_headers()
+    response = requests.get(f"{base_url}/orders/{order.id}/fulfillment_orders.json", headers=headers, timeout=30)
+    response.raise_for_status()
+    fulfillment_orders = response.json().get('fulfillment_orders', [])
+    open_fulfillment_orders = [
+        {'fulfillment_order_id': fulfillment_order['id']}
+        for fulfillment_order in fulfillment_orders
+        if fulfillment_order.get('status') not in {'closed', 'cancelled', 'incomplete'}
+    ]
+
+    if not open_fulfillment_orders:
+        return ['No open fulfillment orders found.']
+
+    payload = {
+        'fulfillment': {
+            'notify_customer': False,
+            'line_items_by_fulfillment_order': open_fulfillment_orders,
+        }
+    }
+    fulfillment_response = requests.post(
+        f"{base_url}/fulfillments.json",
+        headers=headers,
+        json=payload,
+        timeout=30,
+    )
+    fulfillment_response.raise_for_status()
+    return []
+
+
+def approve_shopify_delivery(order):
+    warnings = []
+    try:
+        warnings.extend(capture_shopify_payment(order))
+    except Exception as e:
+        warnings.append(f'Could not capture payment: {e}')
+
+    try:
+        warnings.extend(fulfill_shopify_order(order))
+    except Exception as e:
+        warnings.append(f'Could not create fulfillment: {e}')
+
+    try:
+        close_result = order.close()
+        if close_result is False:
+            warnings.append('Shopify order close returned false.')
+    except Exception as e:
+        warnings.append(f'Could not close Shopify order: {e}')
+
+    try:
+        if apply_shopify_order_tag(order.id, 'Delivered in Lahore Approved', include_date=True) is False:
+            warnings.append('Could not save Delivered in Lahore Approved tag.')
+    except Exception as e:
+        warnings.append(f'Could not save approval tag: {e}')
+
+    return warnings
+
+
+def approve_shopify_cancellation(order):
+    warnings = []
+    cancelled = order.cancel()
+    if cancelled is False:
+        warnings.append('Shopify order cancel returned false.')
+
+    try:
+        if apply_shopify_order_tag(order.id, 'Cancelled by Employee', include_date=True) is False:
+            warnings.append('Could not save Cancelled by Employee tag.')
+    except Exception as e:
+        warnings.append(f'Could not save cancellation tag: {e}')
+
+    return warnings
 
 
 # ── Daraz ─────────────────────────────────────────────────────────────────────
@@ -1109,6 +1295,52 @@ def update_status():
                 print(f"Could not apply Shopify Lahore tag for {order_id}: {e}")
 
     return jsonify({"message": response_message})
+
+
+@app.route("/employee_status/approve", methods=["POST"])
+def approve_employee_status():
+    data = request.get_json() or {}
+    order_id = str(data.get("order_id") or "")
+    tracking_number = str(data.get("tracking_number") or "N/A")
+    requested_status = str(data.get("requested_status") or "").strip()
+    key = f"{order_id}:{tracking_number}"
+
+    if requested_status not in {"Delivered in Lahore", "Cancelled by Employee"}:
+        return jsonify({"success": False, "error": "Unsupported employee approval status."}), 400
+
+    matching_order = find_shopify_order_by_order_name(order_id)
+    if not matching_order or not matching_order.get("id"):
+        return jsonify({"success": False, "error": "Shopify order not found."}), 404
+
+    try:
+        order = shopify.Order.find(matching_order["id"])
+        warnings = []
+        if requested_status == "Delivered in Lahore":
+            warnings = approve_shopify_delivery(order)
+            matching_order["financial_status"] = "Paid"
+            matching_order["fulfillment_status"] = "Fulfilled"
+            matching_order["status"] = "Delivered"
+            local_tags = [tag for tag in (matching_order.get("tags") or []) if tag != "Leopards Courier"]
+            if "Delivered in Lahore Approved" not in local_tags:
+                local_tags.append("Delivered in Lahore Approved")
+            matching_order["tags"] = local_tags
+        elif requested_status == "Cancelled by Employee":
+            warnings = approve_shopify_cancellation(order)
+            matching_order["status"] = "Cancelled"
+            local_tags = [tag for tag in (matching_order.get("tags") or []) if tag != "Leopards Courier"]
+            if "Cancelled by Employee" not in local_tags:
+                local_tags.append("Cancelled by Employee")
+            matching_order["tags"] = local_tags
+
+        delete_order_status(key)
+
+        message = f"Approved {requested_status} for {order_id}."
+        if warnings:
+            message = f"{message} Warnings: {' '.join(warnings)}"
+        return jsonify({"success": True, "message": message, "warnings": warnings})
+    except Exception as e:
+        print(f"Employee approval failed for {order_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/employee_portal', methods=['GET', 'POST'])

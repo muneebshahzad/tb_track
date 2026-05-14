@@ -32,7 +32,7 @@
         radial-gradient(circle at top left, rgba(242, 182, 50, 0.24), transparent 30%),
         radial-gradient(circle at top right, rgba(38, 103, 255, 0.16), transparent 28%),
         linear-gradient(180deg, #fbf7f0 0%, #f4efe6 55%, #efe6da 100%);
-      padding: 14px 12px 92px;
+      padding: 14px 12px 20px;
     }
     .shell {
       max-width: 760px;
@@ -162,7 +162,7 @@
     }
     .viewer-frame {
       width: 100%;
-      height: calc(100vh - 190px);
+      height: calc(100vh - 150px);
       min-height: 560px;
       border: 0;
       background: #fff;
@@ -187,6 +187,26 @@
       align-items: center;
       gap: 8px;
     }
+    .menu-btn-wrap {
+      position: relative;
+    }
+    .menu-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--red);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #fff;
+    }
     .login-field {
       width: 100%;
       border-radius: 16px;
@@ -203,51 +223,87 @@
       color: var(--red);
       font-weight: 700;
     }
-    .bottom-nav {
+    .menu-overlay {
       position: fixed;
-      left: 12px;
-      right: 12px;
-      bottom: 12px;
-      z-index: 40;
-      background: rgba(255, 252, 247, 0.96);
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
-      padding: 8px;
+      inset: 0;
+      background: rgba(20, 33, 61, 0.18);
+      backdrop-filter: blur(2px);
+      z-index: 60;
+      display: none;
+    }
+    .menu-overlay.open {
+      display: block;
+    }
+    .menu-drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: min(82vw, 360px);
+      background: rgba(255, 252, 247, 0.98);
+      border-left: 1px solid var(--line);
+      box-shadow: -16px 0 40px rgba(20, 33, 61, 0.16);
+      transform: translateX(100%);
+      transition: transform 0.22s ease;
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+      gap: 10px;
+    }
+    .menu-overlay.open .menu-drawer {
+      transform: translateX(0);
+    }
+    .menu-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 4px;
+    }
+    .menu-title {
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .menu-list {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
     }
-    .bottom-nav-btn {
+    .menu-nav-btn {
       border: 1px solid var(--line);
       border-radius: 14px;
       background: #fff;
       color: var(--ink);
-      min-height: 58px;
-      padding: 7px 6px;
+      min-height: 72px;
+      padding: 8px 7px;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 4px;
+      gap: 5px;
       text-align: center;
       transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
     }
-    .bottom-nav-btn.active {
+    .menu-nav-btn.active {
       background: rgba(38, 103, 255, 0.08);
       border-color: rgba(38, 103, 255, 0.35);
       box-shadow: 0 10px 24px rgba(20, 33, 61, 0.1);
       transform: translateY(-1px);
     }
-    .bottom-nav .tab-icon {
-      font-size: 17px;
+    .menu-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: auto;
     }
-    .bottom-nav .tab-label {
-      font-size: 10px;
+    .menu-actions .text-btn,
+    .menu-actions .primary-btn {
+      flex: 1;
+      min-height: 44px;
+      font-size: 13px;
     }
     @media (max-width: 640px) {
-      .viewer-frame { height: calc(100vh - 180px); min-height: 500px; }
+      .viewer-frame { height: calc(100vh - 146px); min-height: 500px; }
+      .menu-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
   </style>
 </head>
@@ -274,9 +330,10 @@
           </button>
           <div class="hero-actions">
             <button class="icon-btn" type="button" id="addOrderBtn" title="Add Order">＋</button>
-            <form method="post" action="/admin_portal/logout" style="margin:0;">
-              <button class="icon-btn" type="submit" title="Logout">⎋</button>
-            </form>
+            <div class="menu-btn-wrap">
+              <button class="icon-btn" type="button" id="menuToggleBtn" title="Open Navigation">☰</button>
+              <span class="menu-badge" id="shipperAdviceBadge">0</span>
+            </div>
           </div>
         </div>
       </section>
@@ -285,20 +342,34 @@
         <iframe id="toolFrame" class="viewer-frame" title="Admin portal tool view" src=""></iframe>
       </section>
 
-      <nav class="bottom-nav" id="tabGrid" aria-label="Admin navigation">
-        {% for section in sections %}
-          <button
-            class="bottom-nav-btn{% if section.id == selected_section %} active{% endif %}"
-            type="button"
-            data-section="{{ section.id }}"
-            data-src="{{ section.src }}"
-            data-label="{{ section.label }}"
-          >
-            <span class="tab-icon">{{ section.icon }}</span>
-            <span class="tab-label">{{ section.label }}</span>
-          </button>
-        {% endfor %}
-      </nav>
+      <div class="menu-overlay" id="menuOverlay" aria-hidden="true">
+        <aside class="menu-drawer" aria-label="Admin navigation">
+          <div class="menu-head">
+            <div class="menu-title">Navigation</div>
+            <button class="icon-btn" type="button" id="menuCloseBtn" title="Close Menu">×</button>
+          </div>
+          <div class="menu-list" id="tabGrid">
+            {% for section in sections %}
+              <button
+                class="menu-nav-btn{% if section.id == selected_section %} active{% endif %}"
+                type="button"
+                data-section="{{ section.id }}"
+                data-src="{{ section.src }}"
+                data-label="{{ section.label }}"
+              >
+                <span class="tab-icon">{{ section.icon }}</span>
+                <span class="tab-label">{{ section.label }}</span>
+              </button>
+            {% endfor %}
+          </div>
+          <div class="menu-actions">
+            <button class="text-btn" type="button" id="openCurrentToolBtn">Open Tool</button>
+            <form method="post" action="/admin_portal/logout" style="margin:0;flex:1;">
+              <button class="primary-btn" type="submit" style="width:100%;">Logout</button>
+            </form>
+          </div>
+        </aside>
+      </div>
     {% endif %}
   </div>
 
@@ -309,28 +380,51 @@
       const toolFrame = document.getElementById('toolFrame');
       const logoHomeBtn = document.getElementById('logoHomeBtn');
       const addOrderBtn = document.getElementById('addOrderBtn');
+      const menuToggleBtn = document.getElementById('menuToggleBtn');
+      const menuCloseBtn = document.getElementById('menuCloseBtn');
+      const menuOverlay = document.getElementById('menuOverlay');
+      const openCurrentToolBtn = document.getElementById('openCurrentToolBtn');
+      const shipperAdviceBadge = document.getElementById('shipperAdviceBadge');
+      let currentSectionId = defaultSection;
+      let shipperAdviceIds = [];
+      let audioContext = null;
 
       function getSectionById(id) {
         return sections.find(section => section.id === id) || sections[0];
       }
 
       function updateActiveTab(sectionId) {
-        document.querySelectorAll('.bottom-nav-btn').forEach(button => {
+        document.querySelectorAll('.menu-nav-btn').forEach(button => {
           button.classList.toggle('active', button.dataset.section === sectionId);
         });
       }
 
+      function openMenu() {
+        menuOverlay?.classList.add('open');
+        menuOverlay?.setAttribute('aria-hidden', 'false');
+      }
+
+      function closeMenu() {
+        menuOverlay?.classList.remove('open');
+        menuOverlay?.setAttribute('aria-hidden', 'true');
+      }
+
       function openSection(sectionId, persist = true) {
         const section = getSectionById(sectionId);
+        currentSectionId = section.id;
         toolFrame.src = section.src;
         updateActiveTab(section.id);
+        if (openCurrentToolBtn) {
+          openCurrentToolBtn.onclick = () => window.open(section.src, '_blank', 'noopener');
+        }
         if (persist) {
           localStorage.setItem('tbAdminPortalSection', section.id);
           history.replaceState(null, '', `/admin_portal?section=${encodeURIComponent(section.id)}`);
         }
+        closeMenu();
       }
 
-      document.querySelectorAll('.bottom-nav-btn').forEach(button => {
+      document.querySelectorAll('.menu-nav-btn').forEach(button => {
         button.addEventListener('click', () => openSection(button.dataset.section));
       });
 
@@ -338,8 +432,86 @@
         navigator.serviceWorker.register('/admin_portal-sw.js').catch(() => {});
       }
 
+      function ensureAudioContext() {
+        if (!audioContext) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+            audioContext = new AudioContextClass();
+          }
+        }
+        if (audioContext && audioContext.state === 'suspended') {
+          audioContext.resume().catch(() => {});
+        }
+      }
+
+      function playShipperAdviceAlert() {
+        ensureAudioContext();
+        if (!audioContext) return;
+        const now = audioContext.currentTime;
+        [0, 0.18].forEach((offset) => {
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          oscillator.type = 'sine';
+          oscillator.frequency.setValueAtTime(880, now + offset);
+          gain.gain.setValueAtTime(0.0001, now + offset);
+          gain.gain.exponentialRampToValueAtTime(0.08, now + offset + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.13);
+          oscillator.connect(gain);
+          gain.connect(audioContext.destination);
+          oscillator.start(now + offset);
+          oscillator.stop(now + offset + 0.14);
+        });
+      }
+
+      function updateShipperAdviceBadge(count) {
+        if (!shipperAdviceBadge) return;
+        if (count > 0) {
+          shipperAdviceBadge.textContent = count > 9 ? '9+' : String(count);
+          shipperAdviceBadge.style.display = 'inline-flex';
+        } else {
+          shipperAdviceBadge.style.display = 'none';
+        }
+      }
+
+      async function pollShipperAdvice(playSoundOnNew) {
+        try {
+          const response = await fetch('/api/leopards/shipper-advice', { credentials: 'same-origin' });
+          const payload = await response.json();
+          if (!response.ok || String(payload.status) !== '1') {
+            return;
+          }
+          const items = payload.items || [];
+          const nextIds = items.map((item) => String(item.id || item.cn_number || ''));
+          const previousSet = new Set(shipperAdviceIds);
+          const newItems = nextIds.filter((id) => id && !previousSet.has(id));
+          shipperAdviceIds = nextIds;
+          updateShipperAdviceBadge(items.length);
+          if (playSoundOnNew && newItems.length) {
+            playShipperAdviceAlert();
+          }
+        } catch (error) {
+          console.warn('Could not poll shipper advice', error);
+        }
+      }
+
       logoHomeBtn?.addEventListener('click', () => openSection('dashboard'));
+      menuToggleBtn?.addEventListener('click', () => {
+        ensureAudioContext();
+        openMenu();
+      });
+      menuCloseBtn?.addEventListener('click', closeMenu);
+      menuOverlay?.addEventListener('click', event => {
+        if (event.target === menuOverlay) {
+          closeMenu();
+        }
+      });
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          closeMenu();
+        }
+      });
       addOrderBtn?.addEventListener('click', () => {
+        ensureAudioContext();
         openSection('employee-orders');
         window.setTimeout(() => {
           toolFrame.src = '/employee_portal/orders?show_add_order=1';
@@ -348,6 +520,8 @@
 
       const remembered = localStorage.getItem('tbAdminPortalSection');
       openSection(remembered || defaultSection, false);
+      pollShipperAdvice(false);
+      window.setInterval(() => pollShipperAdvice(true), 60000);
     </script>
   {% endif %}
 </body>

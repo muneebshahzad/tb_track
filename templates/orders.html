@@ -446,6 +446,9 @@
                           {{ item.applied_status }}
                         {% endif %}
                       </span>
+                      {% if is_lahore_waiting %}
+                        <span class="mini-badge awaiting">Shopify tag applied: Delivered in Lahore</span>
+                      {% endif %}
                     {% endif %}
                   </div>
                   {% if not is_lahore_waiting %}
@@ -459,7 +462,7 @@
                   {% endif %}
                 </div>
                 {% if is_lahore_waiting %}
-                  <div class="item-overlay">Marked Delivered in Lahore, waiting approval.</div>
+                  <div class="item-overlay">Marked Delivered in Lahore, waiting approval. Shopify tag applied: Delivered in Lahore.</div>
                 {% endif %}
               </div>
             {% endfor %}

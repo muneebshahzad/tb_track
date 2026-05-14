@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tracking {{ tracking_number }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --panel: rgba(255, 252, 247, 0.95);
+      --ink: #14213d;
+      --muted: #6f6a63;
+      --line: rgba(20, 33, 61, 0.12);
+      --shadow: 0 18px 40px rgba(20, 33, 61, 0.12);
+      --green: #2a9d5b;
+      --amber: #c98700;
+      --red: #cf3f3f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'DM Sans', sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(242, 182, 50, 0.18), transparent 30%),
+        radial-gradient(circle at top right, rgba(38, 103, 255, 0.12), transparent 28%),
+        linear-gradient(180deg, #fbf7f0 0%, #f4efe6 55%, #efe6da 100%);
+      padding: 20px 14px 40px;
+    }
+    .shell {
+      max-width: 760px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(20, 33, 61, 0.06);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    h1 {
+      margin: 12px 0 6px;
+      font-size: 30px;
+      line-height: 1.05;
+    }
+    .subcopy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .cn {
+      font-family: 'Space Mono', monospace;
+      font-size: 15px;
+      font-weight: 700;
+      margin-top: 12px;
+      word-break: break-all;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(42, 157, 91, 0.12);
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .status-pill.warn {
+      background: rgba(201, 135, 0, 0.12);
+      color: var(--amber);
+    }
+    .status-pill.error {
+      background: rgba(207, 63, 63, 0.12);
+      color: var(--red);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .stat {
+      padding: 14px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.72);
+    }
+    .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+    .value {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 14px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(20, 33, 61, 0.08);
+    }
+    .timeline-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: #2667ff;
+      margin-top: 5px;
+      box-shadow: 0 0 0 4px rgba(38, 103, 255, 0.12);
+    }
+    .timeline-status {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .timeline-meta {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .empty {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--ink);
+      text-decoration: none;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    @media (max-width: 640px) {
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 26px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <a class="back-link" href="/">← Back to Dashboard</a>
+
+    <section class="card">
+      <div class="eyebrow">Leopards Tracking</div>
+      <h1>Shipment tracking details.</h1>
+      <p class="subcopy">This page pulls the latest CN activity directly from Leopards for a single shipment.</p>
+      <div class="cn">{{ tracking_number }}</div>
+
+      {% if error %}
+        <div class="status-pill error">{{ error }}</div>
+      {% elif parsed %}
+        <div class="status-pill {% if 'RETURN' in parsed.status.upper() or 'REFUSED' in parsed.status.upper() %}error{% elif 'OUT FOR' in parsed.status.upper() or 'TRANSIT' in parsed.status.upper() %}warn{% endif %}">
+          {{ parsed.status }}
+        </div>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div class="grid">
+        <div class="stat">
+          <div class="label">Recipient</div>
+          <div class="value">{{ parsed.name if parsed and parsed.name else 'Not available' }}</div>
+        </div>
+        <div class="stat">
+          <div class="label">Phone</div>
+          <div class="value">{{ parsed.phone if parsed and parsed.phone else 'Not available' }}</div>
+        </div>
+        <div class="stat">
+          <div class="label">City</div>
+          <div class="value">{{ parsed.city if parsed and parsed.city else (packet.booked_packet_destination_city_name if packet else 'Not available') }}</div>
+        </div>
+        <div class="stat">
+          <div class="label">COD Amount</div>
+          <div class="value">{{ packet.booked_packet_collect_amount if packet and packet.booked_packet_collect_amount else 'Not available' }}</div>
+        </div>
+        <div class="stat">
+          <div class="label">Address</div>
+          <div class="value">{{ parsed.address if parsed and parsed.address else 'Not available' }}</div>
+        </div>
+        <div class="stat">
+          <div class="label">Booked Status</div>
+          <div class="value">{{ packet.booked_packet_status if packet and packet.booked_packet_status else 'Not available' }}</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="label" style="margin-bottom: 10px;">Tracking Timeline</div>
+      {% if history %}
+        <div class="timeline">
+          {% for step in history %}
+            <div class="timeline-item">
+              <div class="dot"></div>
+              <div>
+                <div class="timeline-status">{{ step.Status or 'Status update' }}</div>
+                <div class="timeline-meta">
+                  {% if step.Reason %}<div>{{ step.Reason }}</div>{% endif %}
+                  {% if step.Activity_Date or step.Activity_Time %}
+                    <div>{{ step.Activity_Date or '' }}{% if step.Activity_Date and step.Activity_Time %} • {% endif %}{{ step.Activity_Time or '' }}</div>
+                  {% endif %}
+                  {% if step.Location %}<div>{{ step.Location }}</div>{% endif %}
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">No detailed tracking timeline was returned for this CN yet.</div>
+      {% endif %}
+    </section>
+  </div>
+</body>
+</html>

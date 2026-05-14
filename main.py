@@ -706,6 +706,11 @@ def normalize_scan_term(term):
     return (term or "").strip().lower().replace("#", "")
 
 
+def is_lahore_city(city):
+    normalized = (city or "").strip().lower()
+    return "lahore" in normalized or "lhr" in normalized
+
+
 def serialize_shopify_order_for_employee(order):
     customer = order.get('customer_details') or {}
     line_items = order.get('line_items') or []
@@ -802,6 +807,7 @@ def build_pending_orders_mobile_data():
             continue
         if shopify_order['status'] in ['Booked', 'Un-Booked', 'Drop Off at Express Center']:
             filtered_tags = [tag.strip() for tag in shopify_order.get('tags', []) if tag and tag.strip() != 'Leopards Courier']
+            customer_city = ((shopify_order.get('customer_details') or {}).get('city') or '').strip()
             shopify_items = []
             for item in shopify_order['line_items']:
                 track_num = item.get('tracking_number', 'N/A')
@@ -819,7 +825,8 @@ def build_pending_orders_mobile_data():
                 'order_id':   shopify_order['order_id'],
                 'status':     shopify_order['status'],
                 'tags':       filtered_tags,
-                'is_lahore':  any('lahore' in tag.lower() for tag in filtered_tags),
+                'customer_city': customer_city,
+                'is_lahore':  is_lahore_city(customer_city),
                 'date':       shopify_order['created_at'],
                 'items_list': shopify_items,
                 'total_price': shopify_order['total_price']
@@ -845,16 +852,16 @@ def find_employee_portal_order(term):
     return None
 
 
-def apply_shopify_order_tag(order_id, tag):
-    today_date = datetime.now().strftime('%Y-%m-%d')
-    tag_with_date = f"{tag.strip()} ({today_date})"
-
+def apply_shopify_order_tag(order_id, tag, include_date=False):
     order = shopify.Order.find(order_id)
     tags = [t.strip() for t in order.tags.split(",")] if order.tags else []
     if "Leopards Courier" in tags:
         tags.remove("Leopards Courier")
-    if tag_with_date not in tags:
-        tags.append(tag_with_date)
+    clean_tag = tag.strip()
+    if include_date:
+        clean_tag = f"{clean_tag} ({datetime.now().strftime('%Y-%m-%d')})"
+    if clean_tag not in tags:
+        tags.append(clean_tag)
     order.tags = ", ".join(tags)
     return order.save()
 
@@ -1077,8 +1084,31 @@ def update_status():
 
     key = f"{order_id}:{tracking_number}"
     upsert_order_status(key, status)
+    response_message = f"Status updated to {status} for {order_id} ({tracking_number})"
 
-    return jsonify({"message": f"Status updated to {status} for {order_id} ({tracking_number})"})
+    if status == "Delivered in Lahore":
+        matching_order = next(
+            (
+                order for order in order_details
+                if normalize_scan_term(order.get("order_id")) == normalize_scan_term(order_id)
+            ),
+            None
+        )
+        if matching_order and matching_order.get("id"):
+            try:
+                if apply_shopify_order_tag(matching_order["id"], "Delivered in Lahore"):
+                    local_tags = [tag for tag in (matching_order.get("tags") or []) if tag != "Leopards Courier"]
+                    if "Delivered in Lahore" not in local_tags:
+                        local_tags.append("Delivered in Lahore")
+                    matching_order["tags"] = local_tags
+                    response_message = (
+                        f"Status updated to {status} for {order_id} ({tracking_number}). "
+                        "Shopify tag applied: Delivered in Lahore."
+                    )
+            except Exception as e:
+                print(f"Could not apply Shopify Lahore tag for {order_id}: {e}")
+
+    return jsonify({"message": response_message})
 
 
 @app.route('/employee_portal', methods=['GET', 'POST'])
@@ -1182,7 +1212,7 @@ def employee_portal_report():
                 continue
 
             seen_shopify_ids.add(shopify_id)
-            if apply_shopify_order_tag(shopify_id, tag_name):
+            if apply_shopify_order_tag(shopify_id, tag_name, include_date=True):
                 tagged_count += 1
 
         return jsonify({
@@ -1523,6 +1553,58 @@ def leopards_track_packets():
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"status": 0, "error": str(e)}), 500
+
+
+@app.route('/track/<tracking_number>')
+def leopards_tracking_detail(tracking_number):
+    tracking_number = (tracking_number or '').strip()
+    if not tracking_number:
+        return render_template('tracking_detail.html', tracking_number='', packet=None, parsed=None, history=[], error='Tracking number is missing.'), 400
+
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+    url = (
+        f"https://merchantapi.leopardscourier.com/api/trackBookedPacket/format/json/"
+        f"?api_key={api_key}&api_password={api_password}&track_numbers={tracking_number}"
+    )
+
+    try:
+        r = _req.get(url, verify=False, timeout=30)
+        data = r.json()
+        packet = next(
+            (item for item in data.get('packet_list', []) if str(item.get('track_number', '')).strip() == tracking_number),
+            None
+        )
+        if not packet:
+            return render_template(
+                'tracking_detail.html',
+                tracking_number=tracking_number,
+                packet=None,
+                parsed=None,
+                history=[],
+                error='No Leopards tracking record was found for this CN.'
+            ), 404
+
+        parsed = parse_leopards_status(packet, tracking_number)
+        history = packet.get('Tracking Detail', []) or []
+        history = list(reversed(history))
+        return render_template(
+            'tracking_detail.html',
+            tracking_number=tracking_number,
+            packet=packet,
+            parsed=parsed,
+            history=history,
+            error=''
+        )
+    except Exception as e:
+        return render_template(
+            'tracking_detail.html',
+            tracking_number=tracking_number,
+            packet=None,
+            parsed=None,
+            history=[],
+            error=f'Could not fetch Leopards tracking right now: {e}'
+        ), 502
 
 
 @app.route('/api/leopards/active-cns')

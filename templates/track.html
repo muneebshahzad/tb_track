@@ -3,46 +3,166 @@
 
 {% block content %}
 <style>
+  *, *::before, *::after { box-sizing: border-box; }
+
+  /* ── Stats strip ── */
+  .stats-strip { display: flex; background: #fff; border-bottom: 1px solid #e3e6f0; overflow-x: auto; padding: 0 6px; scrollbar-width: none; flex-shrink: 0; }
+  .stats-strip::-webkit-scrollbar { display: none; }
+  .stat { display: flex; flex-direction: column; align-items: center; padding: 8px 12px; flex-shrink: 0; gap: 1px; }
+  .stat-val { font-size: 16px; font-weight: 700; line-height: 1; }
+  .stat-pkr { font-size: 9px; font-weight: 600; color: #b0b2be; font-family: 'DM Mono', monospace; margin-top: 1px; white-space: nowrap; }
+  .stat-lbl { font-size: 10px; color: #8a8b96; font-weight: 500; white-space: nowrap; }
+  .stat-div  { width: 1px; background: #e3e6f0; margin: 8px 0; flex-shrink: 0; }
+
+  /* ── Bulk bar ── */
+  .bulk-bar { display: none; background: #2d2e36; color: #fff; padding: 9px 14px; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid #1a1b20; flex-shrink: 0; }
+  .bulk-bar.visible { display: flex; }
+  .bulk-count { font-size: 12px; font-weight: 700; white-space: nowrap; padding-right: 4px; }
+  .bulk-actions { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; flex: 1; }
+  .bulk-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.1); color: #fff; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'DM Sans', sans-serif; white-space: nowrap; transition: background 0.15s; }
+  .bulk-btn:hover { background: rgba(255,255,255,0.2); }
+  .bulk-clear { padding: 4px 10px; border-radius: 6px; border: 1px solid #555; background: transparent; color: #888; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'DM Sans', sans-serif; margin-left: auto; white-space: nowrap; }
+
+  /* ── Filter strip ── */
+  .filter-strip { display: flex; align-items: center; gap: 6px; padding: 8px 14px; overflow-x: auto; scrollbar-width: none; background: #f2f4f8; flex-shrink: 0; }
+  .filter-strip::-webkit-scrollbar { display: none; }
+  .fpill { padding: 5px 13px; border-radius: 99px; border: 1.5px solid #e3e6f0; font-size: 11px; font-weight: 600; background: #fff; color: #8a8b96; cursor: pointer; white-space: nowrap; font-family: 'DM Sans', sans-serif; flex-shrink: 0; transition: all 0.15s; }
+  .fpill.active { background: #4e73df; color: #fff; border-color: #4e73df; }
+  .refresh-btn { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 7px; border: 1px solid #e3e6f0; background: #fff; font-size: 11px; font-weight: 600; font-family: 'DM Sans', sans-serif; color: #4e73df; cursor: pointer; white-space: nowrap; }
+  .refresh-btn:hover { background: #f0f4ff; }
+
   /* ── Order card ── */
-  .order-card { background: #fff; border-radius: 10px; overflow: hidden; border: 1px solid #e3e6f0; box-shadow: 0 1px 4px rgba(0,0,0,0.04); transition: border-color 0.18s, box-shadow 0.18s; }
-  .order-card:hover { border-color: rgba(78,115,223,0.33); box-shadow: 0 4px 18px rgba(78,115,223,0.10); }
-  .order-header { display: grid; grid-template-columns: 110px 1fr 1fr 70px 90px 120px 160px; align-items: start; gap: 12px; padding: 12px 4px; }
-  .order-items-section { border-top: 1px solid #e3e6f0; padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; }
+  .card { background: #fff; border-radius: 12px; border: 1.5px solid #e3e6f0; overflow: hidden; transition: box-shadow 0.15s, border-color 0.15s; }
+  .card:hover { box-shadow: 0 2px 14px rgba(78,115,223,0.08); }
+  .card.selected { border-color: #4e73df; background: #fafbff; }
+
+  /* ── Card header ── */
+  .card-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px 8px; flex-wrap: nowrap; }
+
+  /* Checkbox */
+  .cb-wrap { flex-shrink: 0; width: 18px; height: 18px; position: relative; cursor: pointer; }
+  .cb-wrap input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .cb-box { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid #d0d3e0; background: #fff; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .cb-wrap input:checked ~ .cb-box { background: #4e73df; border-color: #4e73df; }
+  .cb-wrap input:checked ~ .cb-box::after { content: ''; width: 5px; height: 9px; border: 2px solid #fff; border-top: none; border-left: none; transform: rotate(42deg) translateY(-1px); display: block; }
+
+  .card-id { font-family: 'DM Mono', monospace; font-size: 13px; font-weight: 700; color: #4e73df; text-decoration: none; }
+  .card-id:hover { text-decoration: underline; }
+  .card-date { font-size: 10px; color: #b0b2be; margin-top: 1px; }
+  .ch-spacer { flex: 1; }
+  .card-amount { font-family: 'DM Mono', monospace; font-size: 14px; font-weight: 700; color: #2d2e36; white-space: nowrap; }
+  .card-amount-cur { font-size: 10px; color: #8a8b96; margin-left: 2px; }
+
+  /* Status badge */
+  .sbadge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 99px; font-size: 10px; font-weight: 700; flex-shrink: 0; white-space: nowrap; }
+  .sb-booked    { background: #ddeeff; color: #1a6bbd; }
+  .sb-unbooked  { background: #ececec; color: #666; }
+  .sb-delivered { background: #d9f7eb; color: #0e7a53; }
+  .sb-ofd       { background: #fff3cd; color: #7a5c00; }
+  .sb-return    { background: #fde8e6; color: #c0392b; }
+
+  /* ── Card body ── */
+  .card-body { padding: 0 14px 0; display: flex; flex-direction: column; gap: 10px; }
+
+  /* Product thumbnails */
+  .products { display: flex; gap: 10px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .products::-webkit-scrollbar { display: none; }
+  .product { display: flex; flex-direction: column; align-items: center; gap: 5px; flex-shrink: 0; width: 72px; }
+  .product-img { width: 72px; height: 72px; border-radius: 9px; background: #f2f4f8; border: 1px solid #e8eaef; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
+  .product-img img { width: 100%; height: 100%; object-fit: cover; }
+  .product-name { font-size: 9px; color: #4a4b55; text-align: center; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-width: 72px; font-weight: 500; }
+  .product-qty { font-size: 9px; color: #b0b2be; }
+  .product-track { font-family: 'DM Mono', monospace; font-size: 8px; color: #3a3b45; background: #e8eaef; padding: 2px 5px; border-radius: 3px; text-decoration: none; text-align: center; max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; font-weight: 600; transition: background 0.15s, color 0.15s; }
+  .product-track:hover { background: #2d2e36; color: #fff; }
+  .product-notrack { font-size: 8px; color: #c0c2cc; font-style: italic; }
+
+  /* Desktop info block */
+  .info-block { display: flex; flex-direction: column; gap: 4px; }
+  .info-row { display: flex; gap: 6px; font-size: 11px; align-items: flex-start; }
+  .info-lbl { color: #b0b2be; width: 56px; flex-shrink: 0; font-size: 10px; padding-top: 1px; }
+  .info-val { color: #2d2e36; font-weight: 500; line-height: 1.4; }
+  .tags-wrap { display: flex; flex-wrap: wrap; gap: 4px; }
+
+  /* Desktop columns */
+  .desktop-info    { display: none; }
+  .desktop-actions { display: none; }
+
+  /* Mobile: expandable detail */
+  .mobile-detail { display: none; flex-direction: column; gap: 8px; border-top: 1px solid #f2f4f8; padding: 10px 14px 0; }
+  .mobile-detail.open { display: flex; }
+
+  /* Expanded item row (in detail) */
+  .detail-item { display: flex; align-items: center; gap: 8px; background: #f8f9fc; border: 1px solid #e8eaef; border-radius: 7px; padding: 7px 9px; }
+  .detail-item-img { width: 32px; height: 32px; border-radius: 5px; background: #e3e6f0; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+  .detail-item-img img { width: 100%; height: 100%; object-fit: cover; }
+  .detail-item-name { flex: 1; font-size: 11px; font-weight: 600; color: #3a3b45; min-width: 0; }
+  .detail-item-qty  { font-size: 10px; color: #8a8b96; }
+
+  /* Mobile actions — right-aligned */
+  .mobile-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 8px 14px 11px; }
+  .mobile-expand { width: 26px; height: 26px; border-radius: 6px; border: 1px solid #e3e6f0; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s; flex-shrink: 0; }
+
+  /* Action buttons */
+  .mark-as-wrap { position: relative; }
+  .mark-as-btn { display: flex; align-items: center; gap: 4px; padding: 5px 9px; border-radius: 7px; background: #f2f4f8; color: #3a3b45; border: 1px solid #d8dae8; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'DM Sans', sans-serif; white-space: nowrap; justify-content: center; }
+  .mark-as-btn:hover { background: #e6e9f2; border-color: #c0c4d8; }
+  .icon-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid #e3e6f0; background: #fff; cursor: pointer; text-decoration: none; font-size: 14px; flex-shrink: 0; }
+  .icon-btn:hover { background: #f2f4f8; }
+
+  /* Dropdown */
+  .dropdown-menu { display: none; position: absolute; background: #fff; border: 1px solid #e3e6f0; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.13); min-width: 185px; overflow: hidden; z-index: 300; }
+  .dropdown-menu.open { display: block; }
+  .dd-item { display: flex; align-items: center; gap: 8px; padding: 9px 14px; font-size: 12px; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; width: 100%; border: none; background: none; text-align: left; color: #2d2e36; text-decoration: none; }
+  .dd-item:hover { background: #f2f4f8; }
+  .dd-item.danger { color: #c0392b; }
+
+  /* Mobile dropdowns: open upward to the right */
+  .mobile-actions .mark-as-wrap .dropdown-menu { bottom: 110%; right: 0; left: auto; }
+  /* Desktop dropdowns: open downward to the right */
+  .desktop-actions .mark-as-wrap .dropdown-menu { top: 110%; right: 0; left: auto; }
+
+  /* ── Bottom bar ── */
+  .bottom-bar { display: none; background: #fff; border-top: 1px solid #e3e6f0; padding: 8px 14px; gap: 8px; flex-shrink: 0; }
+  .bottom-bar.visible { display: flex; }
+  .bottom-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 12px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'DM Sans', sans-serif; }
+  .bottom-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .bb-green { background: #eafaf4; color: #0e7a53; border-color: #b2e8d4; }
+  .bb-green:not(:disabled):hover { background: #d4f5ea; }
+  .bb-red   { background: #fef0ee; color: #c0392b; border-color: #f5c0b8; }
+  .bb-red:not(:disabled):hover   { background: #fde3df; }
+
+  /* ── Daraz section (unchanged styles) ── */
+  .daraz-row { display: grid; grid-template-columns: 120px 220px 100px 90px 90px 1fr; gap: 12px; padding: 12px 4px; background: #fff; border-radius: 8px; border: 1px solid #e3e6f0; align-items: start; }
   .item-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f8f9fc; border-radius: 7px; border: 1px solid #e3e6f0; }
   .item-img { width: 36px; height: 36px; border-radius: 5px; flex-shrink: 0; overflow: hidden; background: #e3e6f0; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #858796; }
   .item-img img { width: 100%; height: 100%; object-fit: cover; }
   .item-title { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: #3a3b45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-qty { font-size: 11px; color: #858796; margin-top: 1px; }
-  .item-cn { font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500; color: #4e73df; background: #dde4fb; padding: 2px 8px; border-radius: 5px; text-decoration: none; flex-shrink: 0; white-space: nowrap; }
   .item-no-cn { font-size: 11px; color: #b7b9cc; font-style: italic; flex-shrink: 0; }
-
-  /* ── Filter pills ── */
-  .filter-pill { padding: 4px 11px; border-radius: 99px; border: none; cursor: pointer; font-size: 11px; font-weight: 500; background: #f8f9fc; color: #858796; transition: background 0.15s; font-family: 'DM Sans', sans-serif; }
-  .filter-pill.active { background: #4e73df; color: #fff; }
-
-  /* ── Stats grid ── */
-  .stats-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 12px; margin-bottom: 20px; }
-
-  /* ── Daraz row ── */
-  .daraz-row { display: grid; grid-template-columns: 120px 220px 100px 90px 90px 1fr; gap: 12px; padding: 12px 4px; background: #fff; border-radius: 8px; border: 1px solid #e3e6f0; align-items: start; }
-
-  /* ── Mobile card header ── */
-  .order-header-mobile { padding: 10px 12px; }
-  .order-header-mobile .row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-  .order-header-mobile .row2 { display: flex; align-items: center; gap: 6px; }
 
   /* ── Token banner ── */
   #token-banner { display: none; padding: 7px 16px; font-size: 12px; font-weight: 500; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 
-  @media (max-width: 767px) {
-    .stats-grid { grid-template-columns: repeat(2,1fr); }
-    .order-header { display: none; }
-    .col-headers-track { display: none !important; }
-    .item-title { white-space: normal; }
-    .daraz-row { grid-template-columns: 1fr 1fr; }
+  @media (min-width: 680px) {
+    .card-body { flex-direction: row; align-items: flex-start; gap: 16px; padding: 0 14px 12px; }
+    .products { flex: 0 0 auto; flex-wrap: wrap; overflow: visible; padding-bottom: 0; max-width: 240px; }
+    .product { width: 76px; }
+    .product-img { width: 76px; height: 76px; }
+    .product-name { max-width: 76px; }
+    .product-track { max-width: 76px; }
+    .desktop-info    { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; padding-top: 2px; }
+    .desktop-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; width: 130px; padding-top: 2px; }
+    .desktop-actions .icon-btn { width: 100%; }
+    .mobile-actions { display: none; }
+    .mobile-detail  { display: none !important; }
+    .filter-strip { padding: 8px 20px; }
+    .bottom-bar { padding: 8px 20px; }
+    .daraz-col-headers { display: grid; }
   }
-  @media (min-width: 768px) {
-    .order-header-mobile { display: none; }
+
+  @media (max-width: 679px) {
+    .daraz-row { grid-template-columns: 1fr 1fr; }
+    .daraz-col-headers { display: none; }
   }
 </style>
 
@@ -60,233 +180,382 @@
     <span style="font-size:11px;color:#858796;">Last refreshed: <span id="lastRefreshTime"></span></span>
   </div>
 
-  <!-- Scrollable -->
-  <div style="flex:1;overflow:auto;padding:20px;">
+  <!-- Stats strip -->
+  <div class="stats-strip" id="statsStrip"></div>
 
-    <!-- Stats -->
-    <div class="stats-grid" id="statsGrid">
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,0.1)">📦</div><div><div class="stat-label">Total Orders</div><div class="stat-value" style="color:#4e73df" id="statTotal">0</div></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,0.1)">🏷️</div><div><div class="stat-label">Booked</div><div class="stat-value" style="color:#4e73df" id="statBooked">0</div></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(133,135,150,0.1)">⏳</div><div><div class="stat-label">Un-Booked</div><div class="stat-value" style="color:#858796" id="statUnbooked">0</div></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(28,200,138,0.1)">✅</div><div><div class="stat-label">Delivered</div><div class="stat-value" style="color:#1cc88a" id="statDelivered">0</div></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(231,74,59,0.1)">↩</div><div><div class="stat-label">Returned</div><div class="stat-value" style="color:#e74a3b" id="statReturned">0</div></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(212,168,0,0.1)">💰</div><div><div class="stat-label">Total Value</div><div class="stat-value" style="color:#d4a800;font-size:15px;" id="statValue">Rs 0</div></div></div>
+  <!-- Bulk selection bar -->
+  <div class="bulk-bar" id="bulkBar">
+    <span class="bulk-count" id="bulkCount">0 selected</span>
+    <div class="bulk-actions">
+      <button class="bulk-btn" onclick="bulkMark('Delivered')">✅ Delivered</button>
+      <button class="bulk-btn" onclick="bulkMark('Returned')">↩ Returned</button>
+      <button class="bulk-btn" onclick="bulkMark('Booked')">🏷️ Booked</button>
+      <button class="bulk-btn" onclick="bulkMark('Out For Delivery')">🚚 Out For Delivery</button>
+      <button class="bulk-btn" onclick="bulkMark('Being Return')">📦 Being Return</button>
+      <button class="bulk-btn" onclick="bulkMark('Cancelled')">✕ Cancelled</button>
+    </div>
+    <button class="bulk-clear" onclick="clearSelection()">✕ Clear</button>
+  </div>
+
+  <!-- Scrollable body -->
+  <div style="flex:1;overflow:auto;" id="mainScroll">
+
+    <!-- Filter pills + Refresh -->
+    <div class="filter-strip">
+      {% for f in ['All','Booked','Un-Booked','Delivered','Out For Delivery','Being Return','RETURNED TO SHIPPER'] %}
+      <button class="fpill {% if loop.first %}active{% endif %}" data-filter="{{ f }}" onclick="setFilter(this)">{{ f }}</button>
+      {% endfor %}
+      <button class="refresh-btn" id="refreshTrackingBtn" onclick="refreshTracking()">
+        <span id="refreshIcon">🔄</span> Refresh Tracking
+      </button>
     </div>
 
     <!-- ── Shopify Section ── -->
-    <div class="section-card" style="margin-bottom:20px;">
-      <div class="section-header">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <div style="width:28px;height:28px;border-radius:7px;background:#96bf48;display:flex;align-items:center;justify-content:center;font-size:14px;">🛍</div>
-          <span style="font-size:14px;font-weight:700;color:#3a3b45;">Shopify Orders</span>
-          <span class="section-count" id="shopifyCount">0</span>
-        </div>
-        <div style="flex:1"></div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap;" id="filterPills">
-          {% for f in ['All','Booked','Un-Booked','Delivered','Out For Delivery','Being Return','RETURNED TO SHIPPER'] %}
-          <button class="filter-pill {% if loop.first %}active{% endif %}" data-filter="{{ f }}" onclick="setFilter(this)">{{ f }}</button>
-          {% endfor %}
-        </div>
-        <button id="applyDeliveredBtn" class="btn btn-success" onclick="applyDeliveredToAll()">✅ Apply Delivered to All</button>
-        <button id="applyReturnedBtn" class="btn btn-danger" onclick="applyReturnedToAll()">↩ Apply Returned to All</button>
-        <button id="refreshTrackingBtn" class="btn btn-outline" onclick="refreshTracking()">
-          <span id="refreshIcon">🔄</span> Refresh Tracking
-        </button>
-      </div>
-
-      <!-- Column headers (desktop only) -->
-      <div class="col-headers col-headers-track" style="grid-template-columns:110px 1fr 1fr 70px 90px 120px 160px;">
-        <div>Order</div><div>Customer + Address</div><div>Tags</div>
-        <div>Payment</div><div style="text-align:right">Total</div><div>Status</div><div>Actions</div>
-      </div>
-
-      <div class="order-list" id="shopifyOrderList">
-        {% for order in order_details %}
-        {% set item0 = order.line_items[0] if order.line_items else {} %}
-        {% set name  = item0.get('name') or order.customer_details.get('name') or '' %}
-        {% set city  = item0.get('city') or order.customer_details.get('city') or '' %}
-        {% set phone = item0.get('phone') or order.customer_details.get('phone') or '' %}
-        {% set addr  = order.customer_details.get('address') or item0.get('address') or '' %}
-        {% set s = order.status or '' %}
-
-        <div class="order-card" data-status="{{ s }}"
-             data-search="{{ order.order_id }} {{ name }} {{ city }} {% for i in order.line_items %}{{ i.product_title }} {{ i.tracking_number }} {% endfor %}">
-
-          <!-- Desktop header -->
-          <div class="order-header">
-            <!-- Order ID + date -->
-            <div>
-              <a href="{{ order.order_link }}" target="_blank" style="font-size:13px;font-weight:700;font-family:'DM Mono',monospace;color:#4e73df;text-decoration:none;">#{{ order.order_id }}</a>
-              <div style="font-size:10px;color:#858796;margin-top:1px;">{{ order.created_at[:10] }}</div>
-            </div>
-            <!-- Customer -->
-            <div style="display:flex;align-items:flex-start;gap:8px;min-width:0;">
-              <div class="tb-avatar" data-name="{{ name }}" style="width:30px;height:30px;font-size:11px;"></div>
-              <div style="min-width:0;">
-                <div style="font-size:12px;font-weight:600;color:#3a3b45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ name }}</div>
-                <div style="font-size:11px;color:#858796;">{{ city or '—' }}</div>
-                {% if phone %}<div style="font-size:11px;font-family:'DM Mono',monospace;color:#4e73df;margin-top:1px;">{{ phone }}</div>{% endif %}
-                {% if addr %}<div style="font-size:10px;color:#858796;margin-top:2px;line-height:1.4;max-width:220px;">📍 {{ addr }}</div>{% endif %}
-              </div>
-            </div>
-            <!-- Tags -->
-            <div style="display:flex;flex-wrap:wrap;gap:3px;padding-top:3px;">
-              {% for tag in order.tags %}<span class="tag-badge" style="{{ tag_style(tag) }}">{{ tag }}</span>{% endfor %}
-            </div>
-            <!-- Payment -->
-            <div style="padding-top:3px;">
-              <span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:99px;background:#fef8e4;color:#7a5c00;">{{ order.financial_status or 'Pending' }}</span>
-            </div>
-            <!-- Total -->
-            <div style="text-align:right;padding-top:3px;">
-              <div style="font-size:13px;font-weight:700;color:#3a3b45;">{{ order.total_price|float|int|format_number }}</div>
-              <div style="font-size:9px;color:#858796;">PKR</div>
-            </div>
-            <!-- Status -->
-            <div style="padding-top:3px;">{{ status_badge(s) }}</div>
-            <!-- Actions -->
-            <div style="display:flex;gap:4px;align-items:center;padding-top:3px;">
-              {% if phone %}
-              <a href="tel:{{ phone }}" title="Call" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;color:#4e73df;text-decoration:none;font-size:11px;">📞</a>
-              <div class="tb-dd">
-                <button data-dd-trigger style="width:28px;height:28px;border-radius:6px;border:1.5px solid #e3e6f0;background:none;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;">💬</button>
-                <div class="tb-dd-menu">
-                  {% set wa = 'https://wa.me/' ~ phone|replace('+','') %}
-                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' from TickBags.com has been dispatched and is expected to be delivered in 3-7 working days.' | urlencode }}" target="_blank">📦 Dispatch Message</a>
-                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' has been delayed. We are trying our best to deliver it at earliest.' | urlencode }}" target="_blank">⏳ Delay Message</a>
-                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', Logistics attempted delivery of order#' ~ order.order_id ~ ' but address was closed. Please advise re-delivery.' | urlencode }}" target="_blank">🏠 Address Closed</a>
-                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', You refused delivery of order#' ~ order.order_id ~ '. Let us know if you\'re still interested.' | urlencode }}" target="_blank">🚫 Refused Message</a>
-                  <a class="tb-dd-item" href="{{ wa }}?text={{ 'Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' was delivered. Please share your feedback!' | urlencode }}" target="_blank">⭐ Feedback</a>
-                </div>
-              </div>
-              {% endif %}
-              <div class="tb-dd">
-                <button data-dd-trigger class="btn btn-primary" style="font-size:11px;padding:5px 10px;">Mark As <span style="font-size:9px;">▾</span></button>
-                <div class="tb-dd-menu">
-                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Delivered')">✅ Delivered</button>
-                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Returned')">↩ Returned</button>
-                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Cancelled')">✕ Cancelled</button>
-                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Confirmed')">✓ Confirmed</button>
-                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Call Not Attended')">📵 Call Not Attended</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Mobile header -->
-          <div class="order-header-mobile">
-            <div class="row1">
-              <a href="{{ order.order_link }}" target="_blank" style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:#4e73df;text-decoration:none;">#{{ order.order_id }}</a>
-              {{ status_badge(s) }}
-              <div style="flex:1"></div>
-              <span style="font-size:12px;font-weight:700;color:#3a3b45;">{{ order.total_price|float|int|format_number }} <span style="font-size:9px;color:#858796;">PKR</span></span>
-              <div class="tb-dd">
-                <button data-dd-trigger class="btn btn-primary" style="font-size:11px;padding:5px 10px;">Mark ▾</button>
-                <div class="tb-dd-menu">
-                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Delivered')">✅ Delivered</button>
-                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Returned')">↩ Returned</button>
-                  <button class="tb-dd-item danger" onclick="markOrder('{{ order.id }}','Cancelled')">✕ Cancelled</button>
-                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Confirmed')">✓ Confirmed</button>
-                  <button class="tb-dd-item" onclick="markOrder('{{ order.id }}','Call Not Attended')">📵 Call Not Attended</button>
-                </div>
-              </div>
-            </div>
-            <div class="row2">
-              <div class="tb-avatar" data-name="{{ name }}" style="width:24px;height:24px;font-size:9px;"></div>
-              <div>
-                <div style="font-size:12px;font-weight:600;color:#3a3b45;">{{ name or '—' }}</div>
-                <div style="font-size:11px;color:#858796;">{{ city or '—' }}{% if phone %} · {{ phone }}{% endif %}</div>
-              </div>
-            </div>
-            {% if order.tags %}
-            <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;">
-              {% for tag in order.tags %}<span class="tag-badge" style="{{ tag_style(tag) }}">{{ tag }}</span>{% endfor %}
-            </div>
-            {% endif %}
-            {% if addr %}<div style="font-size:10px;color:#858796;margin-top:5px;display:flex;gap:4px;">📍 <span>{{ addr }}</span></div>{% endif %}
-          </div>
-
-          <!-- Items — always visible -->
-          {% if order.line_items %}
-          <div class="order-items-section">
-            {% for item in order.line_items %}
-            <div class="item-row">
-              <div class="item-img">
-                {% if item.image_src and item.image_src != 'None' %}<img src="{{ item.image_src }}" alt="">{% else %}IMG{% endif %}
-              </div>
-              <div style="flex:1;min-width:0;">
-                <div class="item-title" title="{{ item.product_title }}">{{ item.product_title }}</div>
-                <div class="item-qty">Qty: <strong>{{ item.quantity }}</strong></div>
-              </div>
-              {% if item.tracking_number and item.tracking_number != 'N/A' %}
-              <a href="#" class="item-cn">{{ item.tracking_number }}</a>
-              {% else %}
-              <span class="item-no-cn">No tracking</span>
-              {% endif %}
-              {{ status_badge(item.status) }}
-              <div class="tb-dd">
-                <button data-dd-trigger style="padding:3px 8px;border-radius:5px;border:1.5px solid #e3e6f0;background:white;color:#36b9cc;cursor:pointer;font-size:11px;font-weight:600;display:flex;align-items:center;gap:3px;font-family:'DM Sans',sans-serif;flex-shrink:0;">✉ <span style="font-size:9px;">▾</span></button>
-                <div class="tb-dd-menu">
-                  <button class="tb-dd-item" onclick="sendEmail('delay','{{ item.tracking_number }}')">📧 Delay Notice</button>
-                  <button class="tb-dd-item" onclick="sendEmail('incomplete','{{ item.tracking_number }}')">📧 Incomplete Address</button>
-                  <button class="tb-dd-item" onclick="sendEmail('refusal','{{ item.tracking_number }}')">📧 Fake Refusal</button>
-                </div>
-              </div>
-            </div>
-            {% endfor %}
-          </div>
-          {% endif %}
-        </div>
-        {% else %}
-        <div style="text-align:center;padding:40px 0;color:#858796;font-size:13px;">No orders loaded yet. Data refreshes 30 seconds after startup.</div>
-        {% endfor %}
-      </div>
-    </div><!-- /shopify section -->
-
-    <!-- ── Daraz Section ── -->
-    <div class="section-card">
-      <div class="section-header">
-        <div style="width:28px;height:28px;border-radius:7px;background:#f85c2c;display:flex;align-items:center;justify-content:center;font-size:14px;">🛒</div>
-        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Daraz Orders</span>
-        <span style="background:rgba(248,92,44,0.1);color:#f85c2c;font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;">{{ darazOrders|length }}</span>
-      </div>
-      <div style="display:grid;grid-template-columns:120px 220px 100px 90px 90px 1fr;gap:12px;padding:8px 16px;border-bottom:1px solid #e3e6f0;font-size:10px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.05em;background:#f8f9fc;" class="daraz-col-headers">
-        <div>Order ID</div><div>Customer</div><div>Status</div><div>Date</div><div>Total</div><div>Items</div>
-      </div>
-      <div class="order-list">
-        {% for order in darazOrders %}
-        <div class="daraz-row">
-          <div style="font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:#f85c2c;">{{ order.order_id }}</div>
-          <div>
-            <div style="font-size:12px;font-weight:600;color:#3a3b45;">{{ order.customer.name }}</div>
-            <div style="font-size:11px;color:#858796;margin-top:1px;">{{ order.customer.phone }}</div>
-            <div style="font-size:10px;color:#858796;margin-top:1px;">{{ order.customer.address }}</div>
-          </div>
-          <div>{{ status_badge(order.status) }}</div>
-          <div style="font-size:12px;color:#858796;">{{ order.date[:10] }}</div>
-          <div style="font-size:13px;font-weight:700;color:#3a3b45;">Rs {{ order.total_price|float|int|format_number }}</div>
-          <div style="display:flex;flex-direction:column;gap:5px;">
-            {% for item in order.items_list %}
-            <div class="item-row">
-              <div class="item-img">
-                {% if item.item_image and item.item_image != 'N/A' %}<img src="{{ item.item_image }}" alt="">{% else %}IMG{% endif %}
-              </div>
-              <div style="flex:1;min-width:0;">
-                <div class="item-title">{{ item.item_title }}</div>
-                <div class="item-qty">Qty: <strong>{{ item.quantity }}</strong></div>
-              </div>
-              {{ status_badge(item.status) }}
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-        {% else %}
-        <div style="text-align:center;padding:40px 0;color:#858796;font-size:13px;">No Daraz orders.</div>
-        {% endfor %}
-      </div>
+    <div style="padding:10px 14px 0;display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <div style="width:24px;height:24px;border-radius:6px;background:#96bf48;display:flex;align-items:center;justify-content:center;font-size:12px;">🛍</div>
+      <span style="font-size:13px;font-weight:700;color:#3a3b45;">Shopify Orders</span>
+      <span class="section-count" id="shopifyCount">0</span>
     </div>
 
-  </div><!-- /scrollable -->
+    <div style="padding:0 14px;display:flex;flex-direction:column;gap:10px;max-width:960px;" id="shopifyOrderList">
+      {% for order in order_details %}
+      {% set item0 = order.line_items[0] if order.line_items else {} %}
+      {% set name  = item0.get('name') or order.customer_details.get('name') or '' %}
+      {% set city  = item0.get('city') or order.customer_details.get('city') or '' %}
+      {% set phone = item0.get('phone') or order.customer_details.get('phone') or '' %}
+      {% set addr  = order.customer_details.get('address') or item0.get('address') or '' %}
+      {% set s = order.status or '' %}
+      {% set wa_phone = phone | replace('+','') %}
+
+      {% if s == 'Booked' %}{% set badge_cls = 'sb-booked' %}{% set dot_col = '#4e73df' %}
+      {% elif s == 'Un-Booked' %}{% set badge_cls = 'sb-unbooked' %}{% set dot_col = '#aaa' %}
+      {% elif s == 'Delivered' %}{% set badge_cls = 'sb-delivered' %}{% set dot_col = '#1cc88a' %}
+      {% elif s == 'Out For Delivery' %}{% set badge_cls = 'sb-ofd' %}{% set dot_col = '#f6c23e' %}
+      {% else %}{% set badge_cls = 'sb-return' %}{% set dot_col = '#e74a3b' %}{% endif %}
+
+      <div class="card" id="order-card-{{ order.id }}"
+           data-status="{{ s }}"
+           data-search="{{ order.order_id }} {{ name }} {{ city }} {% for i in order.line_items %}{{ i.product_title }} {{ i.tracking_number }} {% endfor %}">
+
+        <!-- Header: checkbox | order# | date | status | amount -->
+        <div class="card-head">
+          <label class="cb-wrap" onclick="event.stopPropagation()">
+            <input type="checkbox" onchange="toggleSelect('{{ order.id }}')"/>
+            <div class="cb-box"></div>
+          </label>
+          <div>
+            <a class="card-id" href="{{ order.order_link }}" target="_blank">#{{ order.order_id }}</a>
+            <div class="card-date">{{ order.created_at[:10] }}</div>
+          </div>
+          <div class="ch-spacer"></div>
+          <span class="sbadge {{ badge_cls }}">
+            <svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="{{ dot_col }}"/></svg>
+            {{ s or 'Un-Booked' }}
+          </span>
+          <span class="card-amount">{{ order.total_price|float|int|format_number }}<span class="card-amount-cur">PKR</span></span>
+        </div>
+
+        <!-- Body: products | desktop-info | desktop-actions -->
+        <div class="card-body">
+
+          <!-- Product thumbnails -->
+          <div class="products">
+            {% for item in order.line_items %}
+            <div class="product">
+              <div class="product-img">
+                {% if item.image_src and item.image_src != 'None' %}<img src="{{ item.image_src }}" alt="">{% else %}📦{% endif %}
+              </div>
+              <div class="product-name" title="{{ item.product_title }}">{{ item.product_title }}</div>
+              <div class="product-qty">×{{ item.quantity }}</div>
+              {% if item.tracking_number and item.tracking_number != 'N/A' %}
+              <a class="product-track" href="https://dashboard.tickbags.com/track/{{ item.tracking_number }}" target="_blank">{{ item.tracking_number }}</a>
+              {% else %}
+              <span class="product-notrack">No tracking</span>
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+
+          <!-- Desktop: customer info -->
+          <div class="desktop-info">
+            <div class="info-block">
+              {% if name %}
+              <div class="info-row">
+                <span class="info-lbl">Customer</span>
+                <span class="info-val" style="font-weight:600">{{ name }}{% if city %}, <span style="font-weight:400;color:#8a8b96">{{ city }}</span>{% endif %}</span>
+              </div>
+              {% endif %}
+              {% if phone %}
+              <div class="info-row">
+                <span class="info-lbl">Phone</span>
+                <span class="info-val" style="font-family:'DM Mono',monospace;color:#4e73df">{{ phone }}</span>
+              </div>
+              {% endif %}
+              {% if addr %}
+              <div class="info-row">
+                <span class="info-lbl">Address</span>
+                <span class="info-val" style="color:#8a8b96;font-size:10px">📍 {{ addr }}</span>
+              </div>
+              {% endif %}
+              {% if order.tags %}
+              <div class="info-row">
+                <span class="info-lbl">Tags</span>
+                <span class="info-val">
+                  <div class="tags-wrap">
+                    {% for tag in order.tags %}<span class="tag-badge" style="{{ tag_style(tag) }}">{{ tag }}</span>{% endfor %}
+                  </div>
+                </span>
+              </div>
+              {% endif %}
+              <div class="info-row">
+                <span class="info-lbl">Payment</span>
+                <span class="info-val">{{ order.financial_status or 'Pending' }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Desktop: action buttons -->
+          <div class="desktop-actions">
+            <div class="mark-as-wrap">
+              <button class="mark-as-btn" onclick="toggleDD(event,'dta-{{ order.id }}')">
+                Mark As <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="dropdown-menu" id="dta-{{ order.id }}" style="top:110%;right:0;left:auto;">
+                <button class="dd-item" onclick="markOrder('{{ order.id }}','Delivered');closeDD()">✅ Delivered</button>
+                <button class="dd-item danger" onclick="markOrder('{{ order.id }}','Returned');closeDD()">↩ Returned</button>
+                <button class="dd-item danger" onclick="markOrder('{{ order.id }}','Cancelled');closeDD()">✕ Cancelled</button>
+                <button class="dd-item" onclick="markOrder('{{ order.id }}','Confirmed');closeDD()">✓ Confirmed</button>
+                <button class="dd-item" onclick="markOrder('{{ order.id }}','Call Not Attended');closeDD()">📵 Call Not Attended</button>
+              </div>
+            </div>
+            {% if phone %}
+            <a class="icon-btn" href="tel:{{ phone }}" title="Call">📞</a>
+            <div class="mark-as-wrap">
+              <button class="icon-btn" onclick="toggleDD(event,'dtw-{{ order.id }}')" title="WhatsApp">💬</button>
+              <div class="dropdown-menu" id="dtw-{{ order.id }}" style="top:110%;right:0;left:auto;">
+                <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' from TickBags.com has been dispatched and is expected to be delivered in 3-7 working days.') | urlencode }}" target="_blank">📦 Dispatch Message</a>
+                <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' has been delayed. We are trying our best to deliver it at earliest.') | urlencode }}" target="_blank">⏳ Delay Message</a>
+                <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', Logistics attempted delivery of order#' ~ order.order_id ~ ' but address was closed. Please advise re-delivery.') | urlencode }}" target="_blank">🏠 Address Closed</a>
+                <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', You refused delivery of order#' ~ order.order_id ~ '. Let us know if you\'re still interested.') | urlencode }}" target="_blank">🚫 Refused Message</a>
+                <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' was delivered. Please share your feedback!') | urlencode }}" target="_blank">⭐ Feedback</a>
+              </div>
+            </div>
+            {% endif %}
+          </div>
+        </div><!-- /card-body -->
+
+        <!-- Mobile: expandable detail -->
+        <div class="mobile-detail" id="md-{{ order.id }}">
+          <div class="info-block">
+            {% if name %}
+            <div class="info-row">
+              <span class="info-lbl">Customer</span>
+              <span class="info-val" style="font-weight:600">{{ name }}{% if city %}, <span style="font-weight:400;color:#8a8b96">{{ city }}</span>{% endif %}</span>
+            </div>
+            {% endif %}
+            {% if phone %}
+            <div class="info-row"><span class="info-lbl">Phone</span><span class="info-val" style="font-family:'DM Mono',monospace;color:#4e73df">{{ phone }}</span></div>
+            {% endif %}
+            {% if addr %}
+            <div class="info-row"><span class="info-lbl">Address</span><span class="info-val" style="color:#8a8b96;font-size:10px">📍 {{ addr }}</span></div>
+            {% endif %}
+            {% if order.tags %}
+            <div class="info-row">
+              <span class="info-lbl">Tags</span>
+              <span class="info-val"><div class="tags-wrap">{% for tag in order.tags %}<span class="tag-badge" style="{{ tag_style(tag) }}">{{ tag }}</span>{% endfor %}</div></span>
+            </div>
+            {% endif %}
+            <div class="info-row"><span class="info-lbl">Payment</span><span class="info-val">{{ order.financial_status or 'Pending' }}</span></div>
+          </div>
+          <!-- Per-item detail with email -->
+          {% for item in order.line_items %}
+          <div class="detail-item">
+            <div class="detail-item-img">
+              {% if item.image_src and item.image_src != 'None' %}<img src="{{ item.image_src }}" alt="">{% else %}📦{% endif %}
+            </div>
+            <div style="flex:1;min-width:0;">
+              <div class="detail-item-name" title="{{ item.product_title }}">{{ item.product_title }}</div>
+              <div class="detail-item-qty">Qty: {{ item.quantity }}</div>
+            </div>
+            {% if item.tracking_number and item.tracking_number != 'N/A' %}
+            <a href="https://dashboard.tickbags.com/track/{{ item.tracking_number }}" target="_blank" style="font-family:'DM Mono',monospace;font-size:9px;color:#3a3b45;background:#e8eaef;padding:2px 6px;border-radius:3px;text-decoration:none;white-space:nowrap;">{{ item.tracking_number }}</a>
+            <div class="mark-as-wrap">
+              <button class="icon-btn" onclick="toggleDD(event,'eml-{{ order.id }}-{{ loop.index }}')" title="Send Email" style="font-size:11px;">✉</button>
+              <div class="dropdown-menu" id="eml-{{ order.id }}-{{ loop.index }}" style="bottom:110%;right:0;left:auto;">
+                <button class="dd-item" onclick="sendEmail('delay','{{ item.tracking_number }}');closeDD()">📧 Delay Notice</button>
+                <button class="dd-item" onclick="sendEmail('incomplete','{{ item.tracking_number }}');closeDD()">📧 Incomplete Address</button>
+                <button class="dd-item" onclick="sendEmail('refusal','{{ item.tracking_number }}');closeDD()">📧 Fake Refusal</button>
+              </div>
+            </div>
+            {% endif %}
+            {{ status_badge(item.status) }}
+          </div>
+          {% endfor %}
+        </div><!-- /mobile-detail -->
+
+        <!-- Mobile actions (right-aligned) -->
+        <div class="mobile-actions">
+          <button class="mobile-expand" id="exp-{{ order.id }}" onclick="toggleMobile('{{ order.id }}')" title="Details">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 4L6 8L10 4" stroke="#8a8b96" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="mark-as-wrap">
+            <button class="mark-as-btn" onclick="toggleDD(event,'mba-{{ order.id }}')">
+              Mark As <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="dropdown-menu" id="mba-{{ order.id }}">
+              <button class="dd-item" onclick="markOrder('{{ order.id }}','Delivered');closeDD()">✅ Delivered</button>
+              <button class="dd-item danger" onclick="markOrder('{{ order.id }}','Returned');closeDD()">↩ Returned</button>
+              <button class="dd-item danger" onclick="markOrder('{{ order.id }}','Cancelled');closeDD()">✕ Cancelled</button>
+              <button class="dd-item" onclick="markOrder('{{ order.id }}','Confirmed');closeDD()">✓ Confirmed</button>
+              <button class="dd-item" onclick="markOrder('{{ order.id }}','Call Not Attended');closeDD()">📵 Call Not Attended</button>
+            </div>
+          </div>
+          {% if phone %}
+          <a class="icon-btn" href="tel:{{ phone }}" title="Call">📞</a>
+          <div class="mark-as-wrap">
+            <button class="icon-btn" onclick="toggleDD(event,'mbw-{{ order.id }}')" title="WhatsApp">💬</button>
+            <div class="dropdown-menu" id="mbw-{{ order.id }}">
+              <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' from TickBags.com has been dispatched and is expected to be delivered in 3-7 working days.') | urlencode }}" target="_blank">📦 Dispatch Message</a>
+              <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' has been delayed. We are trying our best to deliver it at earliest.') | urlencode }}" target="_blank">⏳ Delay Message</a>
+              <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', Logistics attempted delivery of order#' ~ order.order_id ~ ' but address was closed. Please advise re-delivery.') | urlencode }}" target="_blank">🏠 Address Closed</a>
+              <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', You refused delivery of order#' ~ order.order_id ~ '. Let us know if you\'re still interested.') | urlencode }}" target="_blank">🚫 Refused Message</a>
+              <a class="dd-item" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ name ~ ', Your order#' ~ order.order_id ~ ' was delivered. Please share your feedback!') | urlencode }}" target="_blank">⭐ Feedback</a>
+            </div>
+          </div>
+          {% endif %}
+        </div><!-- /mobile-actions -->
+
+      </div><!-- /card -->
+      {% else %}
+      <div style="text-align:center;padding:40px 0;color:#858796;font-size:13px;">No orders loaded yet. Data refreshes 30 seconds after startup.</div>
+      {% endfor %}
+    </div><!-- /shopifyOrderList -->
+
+    <!-- ── Daraz Section ── -->
+    <div style="padding:20px 14px 8px;display:flex;align-items:center;gap:8px;">
+      <div style="width:24px;height:24px;border-radius:6px;background:#f85c2c;display:flex;align-items:center;justify-content:center;font-size:12px;">🛒</div>
+      <span style="font-size:13px;font-weight:700;color:#3a3b45;">Daraz Orders</span>
+      <span style="background:rgba(248,92,44,0.1);color:#f85c2c;font-size:11px;font-weight:700;padding:1px 8px;border-radius:99px;">{{ darazOrders|length }}</span>
+    </div>
+
+    <div style="padding:0 14px 20px;display:flex;flex-direction:column;gap:10px;max-width:960px;">
+      {% for order in darazOrders %}
+      {% set ds = order.status or '' %}
+
+      <div class="card">
+
+        <!-- Header: order ID | date | status | amount -->
+        <div class="card-head">
+          <div>
+            <span style="font-family:'DM Mono',monospace;font-size:13px;font-weight:700;color:#f85c2c;">{{ order.order_id }}</span>
+            <div class="card-date">{{ order.date[:10] }}</div>
+          </div>
+          <div class="ch-spacer"></div>
+          {{ status_badge(ds) }}
+          <span class="card-amount">{{ order.total_price|float|int|format_number }}<span class="card-amount-cur">PKR</span></span>
+        </div>
+
+        <!-- Body: thumbnails | desktop customer info -->
+        <div class="card-body">
+
+          <!-- Product thumbnails -->
+          <div class="products">
+            {% for item in order.items_list %}
+            <div class="product">
+              <div class="product-img">
+                {% if item.item_image and item.item_image != 'N/A' %}<img src="{{ item.item_image }}" alt="">{% else %}📦{% endif %}
+              </div>
+              <div class="product-name" title="{{ item.item_title }}">{{ item.item_title }}</div>
+              <div class="product-qty">×{{ item.quantity }}</div>
+              <span style="font-size:8px;color:#b0b2be;">{{ status_badge(item.status) }}</span>
+            </div>
+            {% endfor %}
+          </div>
+
+          <!-- Desktop: customer info (no actions column for Daraz) -->
+          <div class="desktop-info">
+            <div class="info-block">
+              {% if order.customer.name %}
+              <div class="info-row">
+                <span class="info-lbl">Customer</span>
+                <span class="info-val" style="font-weight:600">{{ order.customer.name }}</span>
+              </div>
+              {% endif %}
+              {% if order.customer.phone %}
+              <div class="info-row">
+                <span class="info-lbl">Phone</span>
+                <span class="info-val" style="font-family:'DM Mono',monospace;color:#4e73df">{{ order.customer.phone }}</span>
+              </div>
+              {% endif %}
+              {% if order.customer.address %}
+              <div class="info-row">
+                <span class="info-lbl">Address</span>
+                <span class="info-val" style="color:#8a8b96;font-size:10px">📍 {{ order.customer.address }}</span>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+
+          <!-- Desktop: call button only (no mark-as for Daraz) -->
+          {% if order.customer.phone %}
+          <div class="desktop-actions" style="width:auto;">
+            <a class="icon-btn" href="tel:{{ order.customer.phone }}" title="Call">📞</a>
+          </div>
+          {% endif %}
+
+        </div><!-- /card-body -->
+
+        <!-- Mobile: expandable customer detail -->
+        <div class="mobile-detail" id="dzmd-{{ loop.index }}">
+          <div class="info-block">
+            {% if order.customer.name %}
+            <div class="info-row">
+              <span class="info-lbl">Customer</span>
+              <span class="info-val" style="font-weight:600">{{ order.customer.name }}</span>
+            </div>
+            {% endif %}
+            {% if order.customer.phone %}
+            <div class="info-row">
+              <span class="info-lbl">Phone</span>
+              <span class="info-val" style="font-family:'DM Mono',monospace;color:#4e73df">{{ order.customer.phone }}</span>
+            </div>
+            {% endif %}
+            {% if order.customer.address %}
+            <div class="info-row">
+              <span class="info-lbl">Address</span>
+              <span class="info-val" style="color:#8a8b96;font-size:10px">📍 {{ order.customer.address }}</span>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Mobile actions: expand + call -->
+        <div class="mobile-actions">
+          <button class="mobile-expand" id="dzexp-{{ loop.index }}" onclick="toggleMobileDz({{ loop.index }})" title="Details">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 4L6 8L10 4" stroke="#8a8b96" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          {% if order.customer.phone %}
+          <a class="icon-btn" href="tel:{{ order.customer.phone }}" title="Call">📞</a>
+          {% endif %}
+        </div>
+
+      </div><!-- /card -->
+      {% else %}
+      <div style="text-align:center;padding:40px 0;color:#858796;font-size:13px;">No Daraz orders.</div>
+      {% endfor %}
+    </div>
+
+  </div><!-- /mainScroll -->
+
+  <!-- Bottom bar -->
+  <div class="bottom-bar" id="bottomBar">
+    <button class="bottom-btn bb-green" id="btnDeliver" onclick="applyDeliveredToAll()">
+      ✅ <span id="deliverLabel">Mark All Delivered</span>
+    </button>
+    <button class="bottom-btn bb-red" id="btnReturn" onclick="applyReturnedToAll()">
+      ↩ <span id="returnLabel">Mark All Returned</span>
+    </button>
+  </div>
 
   <!-- Token banner -->
   <div id="token-banner">
@@ -298,41 +567,90 @@
     </a>
   </div>
 
-</div><!-- /main column -->
+</div><!-- /flex column -->
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// ── Inject order data for JS use ──
 const ORDER_DATA = {{ order_details | tojson }};
 
-// ── Stats ──
-(function() {
-  const orders = ORDER_DATA;
-  let booked=0, unbooked=0, delivered=0, returned=0, total=0;
-  orders.forEach(o => {
-    const s = (o.status||'').toUpperCase();
-    if (s === 'BOOKED') booked++;
-    else if (s === 'UN-BOOKED') unbooked++;
-    if (s.includes('DELIVERED')) delivered++;
-    if (s.includes('RETURN')) returned++;
-    total += Number(o.total_price||0);
+// ── Stats strip ──
+function renderStats() {
+  const counts = {}, totals = {};
+  let grandTotal = 0;
+  ORDER_DATA.forEach(o => {
+    const s = o.status || 'Un-Booked';
+    counts[s] = (counts[s] || 0) + 1;
+    totals[s] = (totals[s] || 0) + Number(o.total_price || 0);
+    grandTotal += Number(o.total_price || 0);
   });
-  document.getElementById('statTotal').textContent = orders.length;
-  document.getElementById('statBooked').textContent = booked;
-  document.getElementById('statUnbooked').textContent = unbooked;
-  document.getElementById('statDelivered').textContent = delivered;
-  document.getElementById('statReturned').textContent = returned;
-  document.getElementById('statValue').textContent = 'Rs ' + Math.round(total).toLocaleString('en-PK');
-  document.getElementById('shopifyCount').textContent = orders.length;
+  const fmt = n => n >= 1000 ? Math.round(n / 1000) + 'k' : Math.round(n).toString();
+  const retCnt = (counts['Being Return'] || 0) + (counts['RETURNED TO SHIPPER'] || 0);
+  const retAmt = (totals['Being Return'] || 0) + (totals['RETURNED TO SHIPPER'] || 0);
+
+  document.getElementById('statsStrip').innerHTML = `
+    <div class="stat">
+      <span class="stat-val" style="color:#4e73df">${ORDER_DATA.length}</span>
+      <span class="stat-pkr">Rs ${fmt(grandTotal)}</span>
+      <span class="stat-lbl">Total</span>
+    </div>
+    <div class="stat-div"></div>
+    <div class="stat">
+      <span class="stat-val" style="color:#4e73df">${counts['Booked']||0}</span>
+      <span class="stat-pkr">Rs ${fmt(totals['Booked']||0)}</span>
+      <span class="stat-lbl">Booked</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val" style="color:#8a8b96">${counts['Un-Booked']||0}</span>
+      <span class="stat-pkr">Rs ${fmt(totals['Un-Booked']||0)}</span>
+      <span class="stat-lbl">Un-Booked</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val" style="color:#f6c23e">${counts['Out For Delivery']||0}</span>
+      <span class="stat-pkr">Rs ${fmt(totals['Out For Delivery']||0)}</span>
+      <span class="stat-lbl">Out For Del.</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val" style="color:#1cc88a">${counts['Delivered']||0}</span>
+      <span class="stat-pkr">Rs ${fmt(totals['Delivered']||0)}</span>
+      <span class="stat-lbl">Delivered</span>
+    </div>
+    <div class="stat">
+      <span class="stat-val" style="color:#e74a3b">${retCnt}</span>
+      <span class="stat-pkr">Rs ${fmt(retAmt)}</span>
+      <span class="stat-lbl">Returned</span>
+    </div>
+    <div class="stat-div"></div>
+    <div class="stat">
+      <span class="stat-val" style="color:#d4a800;font-size:13px">${Math.round(grandTotal).toLocaleString('en-PK')}</span>
+      <span class="stat-pkr">&nbsp;</span>
+      <span class="stat-lbl">PKR Total</span>
+    </div>
+  `;
+  document.getElementById('shopifyCount').textContent = ORDER_DATA.length;
   document.getElementById('lastRefreshTime').textContent = new Date().toLocaleTimeString();
-})();
+}
+
+// ── Bottom bar ──
+let ofdCount = ORDER_DATA.filter(o => o.status === 'Out For Delivery').length;
+let rtsCount = ORDER_DATA.filter(o => o.status === 'RETURNED TO SHIPPER').length;
+
+function updateBottomBar() {
+  const btnD = document.getElementById('btnDeliver');
+  const btnR = document.getElementById('btnReturn');
+  const bar  = document.getElementById('bottomBar');
+  document.getElementById('deliverLabel').textContent = `Mark All Delivered (${ofdCount} Orders)`;
+  document.getElementById('returnLabel').textContent  = `Mark All Returned (${rtsCount} Orders)`;
+  btnD.style.display = ofdCount > 0 ? 'flex' : 'none';
+  btnR.style.display = rtsCount > 0 ? 'flex' : 'none';
+  bar.classList.toggle('visible', ofdCount > 0 || rtsCount > 0);
+}
 
 // ── Filter + Search ──
 let currentFilter = 'All';
 
 function setFilter(btn) {
-  document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.fpill').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   currentFilter = btn.dataset.filter;
   applyFilterSearch();
@@ -347,7 +665,7 @@ function filterOrders() {
 function applyFilterSearch() {
   const q = document.getElementById('orderSearch').value.toLowerCase();
   let visible = 0;
-  document.querySelectorAll('#shopifyOrderList .order-card').forEach(card => {
+  document.querySelectorAll('#shopifyOrderList .card').forEach(card => {
     const status = card.dataset.status || '';
     const search = card.dataset.search || '';
     const matchFilter = currentFilter === 'All' || status === currentFilter || status.includes(currentFilter);
@@ -359,7 +677,7 @@ function applyFilterSearch() {
   document.getElementById('shopifyCount').textContent = visible;
 }
 
-// ── Mark As ──
+// ── Mark single order ──
 function markOrder(orderId, tag) {
   fetch('/apply_tag', {
     method: 'POST',
@@ -371,43 +689,103 @@ function markOrder(orderId, tag) {
   .catch(() => showToast('Request failed'));
 }
 
-// ── Apply Delivered to All ──
-async function applyDeliveredToAll() {
-  const btn = document.getElementById('applyDeliveredBtn');
-  const delivered = ORDER_DATA.filter(o => (o.status||'').toUpperCase().includes('DELIVERED'));
-  if (!delivered.length) { showToast('No delivered orders found'); return; }
-  btn.disabled = true;
-  for (let i = 0; i < delivered.length; i++) {
-    btn.textContent = `Applying ${i+1}/${delivered.length}…`;
-    try { await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: delivered[i].id, tag:'Delivered'}) }); }
-    catch(e) {}
-    await new Promise(r => setTimeout(r, 600));
+// ── Bulk selection ──
+const selectedOrders = new Set();
+
+function toggleSelect(orderId) {
+  const card = document.getElementById('order-card-' + orderId);
+  if (selectedOrders.has(orderId)) {
+    selectedOrders.delete(orderId);
+    if (card) card.classList.remove('selected');
+  } else {
+    selectedOrders.add(orderId);
+    if (card) card.classList.add('selected');
   }
-  btn.textContent = `Done (${delivered.length})`;
-  showToast(`Applied "Delivered" to ${delivered.length} orders`);
-  setTimeout(() => { btn.disabled = false; btn.textContent = '✅ Apply Delivered to All'; }, 3000);
+  updateBulkBar();
 }
 
-// ── Apply Returned to All ──
-async function applyReturnedToAll() {
-  const btn = document.getElementById('applyReturnedBtn');
-  const returned = ORDER_DATA.filter(o => (o.status||'').toUpperCase().includes('RETURN'));
-  if (!returned.length) { showToast('No returned orders found'); return; }
+function updateBulkBar() {
+  const bar = document.getElementById('bulkBar');
+  const cnt = document.getElementById('bulkCount');
+  bar.classList.toggle('visible', selectedOrders.size > 0);
+  cnt.textContent = `${selectedOrders.size} order${selectedOrders.size > 1 ? 's' : ''} selected`;
+}
+
+function clearSelection() {
+  selectedOrders.forEach(id => {
+    const card = document.getElementById('order-card-' + id);
+    if (card) {
+      card.classList.remove('selected');
+      const cb = card.querySelector('input[type=checkbox]');
+      if (cb) cb.checked = false;
+    }
+  });
+  selectedOrders.clear();
+  updateBulkBar();
+}
+
+async function bulkMark(tag) {
+  const ids = [...selectedOrders];
+  if (!ids.length) return;
+  const cnt = document.getElementById('bulkCount');
+  for (let i = 0; i < ids.length; i++) {
+    cnt.textContent = `Applying ${i+1}/${ids.length}…`;
+    try {
+      await fetch('/apply_tag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: ids[i], tag })
+      });
+    } catch(e) {}
+    await new Promise(r => setTimeout(r, 400));
+  }
+  showToast(`Applied "${tag}" to ${ids.length} orders`);
+  clearSelection();
+}
+
+// ── Apply Delivered to All (Out For Delivery → Delivered) ──
+async function applyDeliveredToAll() {
+  const btn = document.getElementById('btnDeliver');
+  const lbl = document.getElementById('deliverLabel');
+  const toDeliver = ORDER_DATA.filter(o => o.status === 'Out For Delivery');
+  if (!toDeliver.length) return;
   btn.disabled = true;
-  for (let i = 0; i < returned.length; i++) {
-    btn.textContent = `Applying ${i+1}/${returned.length}…`;
-    try { await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: returned[i].id, tag:'Returned'}) }); }
-    catch(e) {}
+  for (let i = 0; i < toDeliver.length; i++) {
+    lbl.textContent = `Applying ${i+1}/${toDeliver.length}…`;
+    try {
+      await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: toDeliver[i].id, tag:'Delivered'}) });
+    } catch(e) {}
     await new Promise(r => setTimeout(r, 600));
   }
-  btn.textContent = `Done (${returned.length})`;
-  showToast(`Applied "Returned" to ${returned.length} orders`);
-  setTimeout(() => { btn.disabled = false; btn.textContent = '↩ Apply Returned to All'; }, 3000);
+  showToast(`Applied "Delivered" to ${toDeliver.length} orders`);
+  ofdCount = 0;
+  updateBottomBar();
+  btn.disabled = false;
+}
+
+// ── Apply Returned to All (RETURNED TO SHIPPER → Returned) ──
+async function applyReturnedToAll() {
+  const btn = document.getElementById('btnReturn');
+  const lbl = document.getElementById('returnLabel');
+  const toReturn = ORDER_DATA.filter(o => o.status === 'RETURNED TO SHIPPER');
+  if (!toReturn.length) return;
+  btn.disabled = true;
+  for (let i = 0; i < toReturn.length; i++) {
+    lbl.textContent = `Applying ${i+1}/${toReturn.length}…`;
+    try {
+      await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: toReturn[i].id, tag:'Returned'}) });
+    } catch(e) {}
+    await new Promise(r => setTimeout(r, 600));
+  }
+  showToast(`Applied "Returned" to ${toReturn.length} orders`);
+  rtsCount = 0;
+  updateBottomBar();
+  btn.disabled = false;
 }
 
 // ── Refresh Tracking ──
 function refreshTracking() {
-  const btn = document.getElementById('refreshTrackingBtn');
+  const btn  = document.getElementById('refreshTrackingBtn');
   const icon = document.getElementById('refreshIcon');
   btn.disabled = true;
   icon.style.animation = 'spin 1s linear infinite';
@@ -433,9 +811,9 @@ setInterval(() => {
 // ── Email ──
 function sendEmail(type, trackingNumber) {
   const templates = {
-    delay: { subject: 'Delay in Delivery', body: `Dear Team,\n\nPlease note that there has been significant delay in delivery of CN# ${trackingNumber}, Please arrange urgent delivery.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com` },
+    delay:      { subject: 'Delay in Delivery', body: `Dear Team,\n\nPlease note that there has been significant delay in delivery of CN# ${trackingNumber}, Please arrange urgent delivery.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com` },
     incomplete: { subject: 'FAKE DELIVERY REASON', body: `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says incomplete address even though the address is 100% accurate and phone number is completely accessible. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com` },
-    refusal: { subject: 'URGENT - FAKE ORDER REFUSAL', body: `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says that customer has refused the delivery. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com` },
+    refusal:    { subject: 'URGENT - FAKE ORDER REFUSAL', body: `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says that customer has refused the delivery. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com` },
   };
   const t = templates[type];
   fetch('/send-email', {
@@ -444,12 +822,42 @@ function sendEmail(type, trackingNumber) {
   }).then(r => showToast(r.ok ? 'Email sent' : 'Email failed')).catch(() => showToast('Email error'));
 }
 
+// ── Dropdowns ──
+function toggleDD(e, id) {
+  e.stopPropagation();
+  const m = document.getElementById(id);
+  if (!m) return;
+  const was = m.classList.contains('open');
+  closeDD();
+  if (!was) m.classList.add('open');
+}
+function closeDD() { document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('open')); }
+document.addEventListener('click', closeDD);
+
+// ── Mobile expand (Shopify) ──
+function toggleMobile(orderId) {
+  const md  = document.getElementById('md-' + orderId);
+  const btn = document.getElementById('exp-' + orderId);
+  if (!md || !btn) return;
+  const open = md.classList.toggle('open');
+  btn.style.transform = open ? 'rotate(180deg)' : '';
+}
+
+// ── Mobile expand (Daraz) ──
+function toggleMobileDz(idx) {
+  const md  = document.getElementById('dzmd-' + idx);
+  const btn = document.getElementById('dzexp-' + idx);
+  if (!md || !btn) return;
+  const open = md.classList.toggle('open');
+  btn.style.transform = open ? 'rotate(180deg)' : '';
+}
+
 // ── Daraz token banner ──
 fetch('/daraz/token-status').then(r => r.json()).then(d => {
   const banner = document.getElementById('token-banner');
-  const icon = document.getElementById('token-icon');
-  const msg  = document.getElementById('token-message');
-  const btn  = document.getElementById('reauth-btn');
+  const icon   = document.getElementById('token-icon');
+  const msg    = document.getElementById('token-message');
+  const btn    = document.getElementById('reauth-btn');
   if (d.status === 'missing') {
     banner.style.display = 'flex'; banner.style.background = '#fce4ec'; banner.style.borderTop = '1px solid #e74a3b'; banner.style.color = '#8b1a10';
     icon.textContent = '🔴'; msg.textContent = 'Daraz not authenticated.'; btn.style.display = 'inline-block';
@@ -458,5 +866,9 @@ fetch('/daraz/token-status').then(r => r.json()).then(d => {
     icon.textContent = '⚠️'; msg.textContent = `Daraz token expires in ${d.days_left} day(s).`; btn.style.display = 'inline-block';
   }
 }).catch(() => {});
+
+// ── Init ──
+renderStats();
+updateBottomBar();
 </script>
 {% endblock %}

@@ -28,6 +28,8 @@ from shopify_protected_data import (
     create_oauth_state,
     exchange_oauth_code_for_token,
     fetch_protected_order_details,
+    get_graphql_endpoint,
+    get_graphql_token,
     get_install_url,
     get_protected_data_config_status,
     get_shop_domain,
@@ -418,11 +420,18 @@ async def process_order(order, tracking_cache):
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
 
         for info in tracking_info_list:
+            unit_price = 0
+            try:
+                unit_price = float(line_item.price or 0)
+            except Exception:
+                unit_price = 0
             order_info['line_items'].append({
                 'fulfillment_status': line_item.fulfillment_status,
                 'image_src':          image_src,
                 'product_title':      line_item.title + (" - " + variant_name if variant_name else ""),
                 'quantity':           info['quantity'],
+                'unit_price':         unit_price,
+                'line_total':         unit_price * float(info['quantity'] or 0),
                 'tracking_number':    info['tracking_number'],
                 'status':             info['status'],
                 'name':               info.get('name', 'N/A'),
@@ -725,6 +734,157 @@ def find_shopify_order_by_order_name(order_id):
     return None
 
 
+def split_customer_name(name):
+    parts = [part for part in str(name or '').strip().split() if part]
+    if not parts:
+        return '', 'Customer'
+    if len(parts) == 1:
+        return parts[0], 'Customer'
+    return parts[0], " ".join(parts[1:])
+
+
+def format_employee_order_note(payment_method, delivery_method, customer_phone, discount_amount, custom_items, extra_notes=''):
+    lines = [
+        'Created from Tick Bags employee portal.',
+        f'Payment method: {payment_method or "Not specified"}',
+        f'Delivery method: {delivery_method or "Not specified"}',
+        f'Phone: {customer_phone or "Not provided"}',
+    ]
+    if discount_amount:
+        lines.append(f'Discount amount: PKR {discount_amount}')
+    if custom_items:
+        lines.append('Custom items:')
+        for item in custom_items:
+            lines.append(
+                f"- {item.get('title', 'Custom item')} | Qty {item.get('quantity', 1)} | "
+                f"PKR {item.get('price', 0)} | Image {item.get('image', 'N/A')}"
+            )
+    if extra_notes:
+        lines.append(f'Notes: {extra_notes}')
+    return "\n".join(lines)
+
+
+def get_active_shopify_products(limit=120):
+    try:
+        products = shopify.Product.find(limit=limit, published_status='published')
+    except Exception as e:
+        print(f"Could not fetch Shopify products: {e}")
+        return []
+
+    results = []
+    for product in products:
+        if getattr(product, 'status', 'active') != 'active':
+            continue
+        base_image = product.image.src if getattr(product, 'image', None) else ''
+        for variant in getattr(product, 'variants', []) or []:
+            variant_title = getattr(variant, 'title', '') or ''
+            display_title = product.title if variant_title in {'Default Title', ''} else f"{product.title} - {variant_title}"
+            results.append({
+                'product_id': getattr(product, 'id', None),
+                'variant_id': getattr(variant, 'id', None),
+                'title': display_title,
+                'product_title': getattr(product, 'title', ''),
+                'variant_title': variant_title,
+                'price': float(getattr(variant, 'price', 0) or 0),
+                'image': base_image,
+                'sku': getattr(variant, 'sku', '') or '',
+            })
+    return results
+
+
+def create_shopify_draft_order(payload):
+    customer_name = (payload.get('customer_name') or '').strip()
+    phone = (payload.get('phone') or '').strip()
+    discount_amount = float(payload.get('discount_amount') or 0)
+    payment_method = (payload.get('payment_method') or '').strip()
+    delivery_method = (payload.get('delivery_method') or '').strip()
+    catalog_items = payload.get('catalog_items') or []
+    custom_items = payload.get('custom_items') or []
+    extra_notes = (payload.get('notes') or '').strip()
+
+    first_name, last_name = split_customer_name(customer_name)
+
+    line_items = []
+    for item in catalog_items:
+        variant_id = item.get('variant_id')
+        quantity = int(item.get('quantity') or 1)
+        if not variant_id or quantity < 1:
+            continue
+        line_items.append({
+            'variant_id': int(variant_id),
+            'quantity': quantity,
+        })
+
+    normalized_custom_items = []
+    for item in custom_items:
+        title = (item.get('title') or '').strip()
+        if not title:
+            continue
+        price = float(item.get('price') or 0)
+        quantity = int(item.get('quantity') or 1)
+        normalized_custom_items.append({
+            'title': title,
+            'price': price,
+            'quantity': quantity,
+            'image': (item.get('image') or '').strip(),
+        })
+        line_items.append({
+            'title': title,
+            'original_unit_price': price,
+            'quantity': quantity,
+        })
+
+    if not line_items:
+        raise ValueError('At least one product is required.')
+
+    note = format_employee_order_note(
+        payment_method=payment_method,
+        delivery_method=delivery_method,
+        customer_phone=phone,
+        discount_amount=discount_amount,
+        custom_items=normalized_custom_items,
+        extra_notes=extra_notes,
+    )
+
+    draft_order = shopify.DraftOrder()
+    draft_order.line_items = line_items
+    draft_order.note = note
+    draft_order.tags = 'Employee Portal Draft'
+    draft_order.use_customer_default_address = False
+    draft_order.shipping_address = {
+        'first_name': first_name,
+        'last_name': last_name or 'Customer',
+        'phone': phone,
+        'address1': (payload.get('address') or '').strip(),
+        'city': (payload.get('city') or '').strip(),
+        'country': 'Pakistan',
+    }
+    draft_order.billing_address = draft_order.shipping_address
+    draft_order.customer = {
+        'first_name': first_name,
+        'last_name': last_name or 'Customer',
+        'phone': phone,
+    }
+
+    if discount_amount > 0:
+        draft_order.applied_discount = {
+            'description': 'Employee portal discount',
+            'value_type': 'fixed_amount',
+            'value': discount_amount,
+            'amount': discount_amount,
+            'title': 'Employee portal discount',
+        }
+
+    if not draft_order.save():
+        raise RuntimeError(json.dumps(getattr(draft_order, 'errors', {}) or {'error': 'Could not save draft order'}))
+
+    return {
+        'id': getattr(draft_order, 'id', None),
+        'invoice_url': getattr(draft_order, 'invoice_url', ''),
+        'name': getattr(draft_order, 'name', ''),
+    }
+
+
 def serialize_shopify_order_for_employee(order):
     customer = order.get('customer_details') or {}
     line_items = order.get('line_items') or []
@@ -812,6 +972,10 @@ def build_pending_orders_mobile_data():
                 'order_id':   daraz_order['order_id'],
                 'status':     daraz_order['status'],
                 'date':       daraz_order['date'],
+                'customer_name': (daraz_order.get('customer') or {}).get('name', ''),
+                'customer_phone': (daraz_order.get('customer') or {}).get('phone', ''),
+                'customer_address': (daraz_order.get('customer') or {}).get('address', ''),
+                'customer_city': '',
                 'items_list': items_with_status,
                 'total_price': daraz_order['total_price']
             })
@@ -830,15 +994,21 @@ def build_pending_orders_mobile_data():
                     'item_image':     item['image_src'],
                     'item_title':     item['product_title'],
                     'quantity':       item['quantity'],
+                    'unit_price':     item.get('unit_price', 0),
+                    'line_total':     item.get('line_total', 0),
                     'tracking_number': track_num,
                     'status':         item['status'],
                     'applied_status': statuses.get(key, "")
                 })
             all_orders.append({
                 'order_via':  'Shopify',
+                'shopify_id': shopify_order.get('id'),
                 'order_id':   shopify_order['order_id'],
                 'status':     shopify_order['status'],
                 'tags':       filtered_tags,
+                'customer_name': (shopify_order.get('customer_details') or {}).get('name', ''),
+                'customer_phone': (shopify_order.get('customer_details') or {}).get('phone', ''),
+                'customer_address': (shopify_order.get('customer_details') or {}).get('address', ''),
                 'customer_city': customer_city,
                 'is_lahore':  is_lahore_city(customer_city),
                 'date':       shopify_order['created_at'],
@@ -863,6 +1033,22 @@ def build_employee_approval_items():
             if applied_status not in approval_statuses:
                 continue
 
+            customer_name = (
+                customer.get('name')
+                or item.get('name')
+                or ''
+            )
+            customer_city = (
+                customer.get('city')
+                or item.get('city')
+                or ''
+            )
+            customer_phone = (
+                customer.get('phone')
+                or item.get('phone')
+                or ''
+            )
+
             approvals.append({
                 'shopify_id': shopify_order.get('id'),
                 'order_id': shopify_order.get('order_id'),
@@ -871,9 +1057,9 @@ def build_employee_approval_items():
                 'item_title': item.get('product_title', ''),
                 'item_image': item.get('image_src', ''),
                 'quantity': item.get('quantity', 0),
-                'customer_name': customer.get('name', ''),
-                'customer_city': customer.get('city', ''),
-                'customer_phone': customer.get('phone', ''),
+                'customer_name': customer_name,
+                'customer_city': customer_city,
+                'customer_phone': customer_phone,
                 'total_price': shopify_order.get('total_price', 0),
                 'date': shopify_order.get('created_at', ''),
                 'tags': shopify_order.get('tags', []),
@@ -933,6 +1119,53 @@ def shopify_rest_headers():
         'Content-Type': 'application/json',
         'Accept': 'application/json',
     }
+
+
+def mark_shopify_order_as_paid(order_id):
+    token = get_graphql_token()
+    endpoint = get_graphql_endpoint()
+    if not token or not endpoint:
+        raise RuntimeError('Shopify GraphQL payment auth is not configured.')
+
+    mutation = """
+    mutation MarkOrderAsPaid($input: OrderMarkAsPaidInput!) {
+      orderMarkAsPaid(input: $input) {
+        order {
+          id
+          displayFinancialStatus
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    """
+    variables = {
+        'input': {
+            'id': f'gid://shopify/Order/{int(order_id)}',
+        }
+    }
+    response = requests.post(
+        endpoint,
+        headers={
+            'Content-Type': 'application/json',
+            'X-Shopify-Access-Token': token,
+        },
+        json={'query': mutation, 'variables': variables},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    errors = payload.get('errors') or []
+    if errors:
+        raise RuntimeError("; ".join(error.get('message', 'Unknown Shopify GraphQL error') for error in errors))
+
+    result = (payload.get('data') or {}).get('orderMarkAsPaid') or {}
+    user_errors = result.get('userErrors') or []
+    if user_errors:
+        raise RuntimeError("; ".join(error.get('message', 'Unknown Shopify user error') for error in user_errors))
+    return result.get('order') or {}
 
 
 def capture_shopify_payment(order):
@@ -1012,9 +1245,13 @@ def fulfill_shopify_order(order):
 def approve_shopify_delivery(order):
     warnings = []
     try:
-        warnings.extend(capture_shopify_payment(order))
+        mark_shopify_order_as_paid(order.id)
     except Exception as e:
-        warnings.append(f'Could not capture payment: {e}')
+        try:
+            warnings.extend(capture_shopify_payment(order))
+        except Exception as capture_error:
+            warnings.append(f'Could not mark order as paid: {e}')
+            warnings.append(f'Could not capture payment: {capture_error}')
 
     try:
         warnings.extend(fulfill_shopify_order(order))
@@ -1370,6 +1607,32 @@ def employee_portal_orders():
     if not employee_portal_is_authenticated():
         return redirect(url_for('employee_portal', next='/employee_portal/orders'))
     return render_template('orders.html', all_orders=build_pending_orders_mobile_data(), employee_portal_mode=True)
+
+
+@app.route('/employee_portal/products')
+def employee_portal_products():
+    if not employee_portal_is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+    return jsonify({'success': True, 'products': get_active_shopify_products()})
+
+
+@app.route('/employee_portal/create-order', methods=['POST'])
+def employee_portal_create_order():
+    if not employee_portal_is_authenticated():
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    data = request.get_json() or {}
+    try:
+        result = create_shopify_draft_order(data)
+        return jsonify({
+            'success': True,
+            'draft_order_id': result.get('id'),
+            'draft_order_name': result.get('name'),
+            'invoice_url': result.get('invoice_url', ''),
+        })
+    except Exception as e:
+        print(f"Employee draft order create failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
 
 
 @app.route('/employee_portal/logout', methods=['POST'])

@@ -175,6 +175,11 @@
     }
     .order-card {
       padding: 16px;
+      cursor: pointer;
+    }
+    .order-card.lahore-order {
+      border-color: rgba(242, 182, 50, 0.34);
+      box-shadow: 0 18px 40px rgba(242, 182, 50, 0.12);
     }
     .order-head {
       display: flex;
@@ -205,6 +210,7 @@
     .badge.shopify { background: rgba(42, 157, 91, 0.12); color: #1b6f41; }
     .badge.daraz { background: rgba(242, 182, 50, 0.18); color: #8b5a00; }
     .badge.pending { background: rgba(20, 33, 61, 0.08); color: var(--ink); }
+    .badge.lahore { background: rgba(242, 182, 50, 0.2); color: #8b5a00; }
     .order-meta {
       display: flex;
       align-items: center;
@@ -371,6 +377,231 @@
       display: none;
       z-index: 30;
     }
+    .modal-shell {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 33, 61, 0.42);
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 14px;
+      z-index: 40;
+    }
+    .modal-shell.open { display: flex; }
+    .modal-card {
+      width: min(720px, 100%);
+      max-height: calc(100vh - 28px);
+      overflow: auto;
+      background: rgba(255, 252, 247, 0.98);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: 0 24px 50px rgba(20, 33, 61, 0.22);
+      padding: 18px;
+    }
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .modal-title {
+      font-size: 22px;
+      font-weight: 800;
+      line-height: 1.05;
+    }
+    .modal-close {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      color: var(--ink);
+    }
+    .invoice-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .invoice-panel {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(20, 33, 61, 0.03);
+      padding: 14px;
+    }
+    .invoice-label {
+      font-size: 10px;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+    }
+    .invoice-value {
+      font-size: 14px;
+      line-height: 1.45;
+      color: var(--ink);
+    }
+    .invoice-products {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .invoice-item {
+      display: grid;
+      grid-template-columns: 54px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.8);
+      border: 1px solid rgba(20, 33, 61, 0.08);
+    }
+    .invoice-item img {
+      width: 54px;
+      height: 54px;
+      border-radius: 12px;
+      object-fit: cover;
+      background: #e9e4dc;
+    }
+    .invoice-item-title {
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    .invoice-item-sub {
+      margin-top: 3px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .invoice-item-price {
+      text-align: right;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--ink);
+    }
+    .invoice-totals {
+      margin-top: 12px;
+      border-top: 1px solid rgba(20, 33, 61, 0.08);
+      padding-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .invoice-total-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 13px;
+    }
+    .invoice-total-row strong {
+      font-size: 16px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .field,
+    .line-card {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .field label {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 11px 12px;
+      font: inherit;
+      color: var(--ink);
+      background: #fff;
+    }
+    .field textarea { min-height: 90px; resize: vertical; }
+    .line-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .line-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(20, 33, 61, 0.03);
+      padding: 12px;
+    }
+    .line-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .line-card-title {
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .mini-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 12px;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .mini-btn.danger {
+      color: var(--red);
+      border-color: rgba(207, 63, 63, 0.22);
+      background: rgba(207, 63, 63, 0.06);
+    }
+    .submit-row {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+    .lahore-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(242, 182, 50, 0.18);
+      color: #8b5a00;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    @media (max-width: 640px) {
+      .invoice-grid,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+      .invoice-item {
+        grid-template-columns: 46px 1fr;
+      }
+      .invoice-item-price {
+        grid-column: 2;
+        text-align: left;
+      }
+    }
   </style>
 </head>
 <body>
@@ -386,6 +617,7 @@
       <div class="hero-toolbar">
         {% if employee_portal_mode %}
           <button class="utility-btn hero-icon-btn" type="button" onclick="window.location.href='/employee_portal'" title="Back to Scanner" aria-label="Back to Scanner">←</button>
+          <button class="utility-btn hero-icon-btn" type="button" id="addOrderBtn" title="Add Order" aria-label="Add Order">＋</button>
           <button class="utility-btn hero-icon-btn" type="button" id="installBtn" hidden title="Install App" aria-label="Install App">＋</button>
           <button class="utility-btn hero-icon-btn" type="button" id="notifyBtn" title="Enable Notifications" aria-label="Enable Notifications">🔔</button>
           <span class="status-pill" id="notifyStatus" title="Notification status" aria-label="Notification status"><span class="dot"></span><span>Notifications off</span></span>
@@ -415,17 +647,22 @@
 
     <section class="orders" id="ordersContainer">
       {% for order in all_orders %}
-        <article class="order-card"
+        <article class="order-card {% if order.is_lahore %}lahore-order{% endif %}"
           data-order-id="{{ order.order_id }}"
           data-date="{{ order.date }}"
           data-order-via="{{ order.order_via|lower }}"
-          data-lahore="{{ 'true' if order.is_lahore else 'false' }}">
+          data-lahore="{{ 'true' if order.is_lahore else 'false' }}"
+          data-order-index="{{ loop.index0 }}"
+          onclick="openOrderInvoice({{ loop.index0 }}, event)">
           <div class="order-head">
             <div>
               <div class="order-no">#{{ order.order_id }}</div>
               <div class="muted">{{ order.date }}</div>
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+              {% if order.is_lahore %}
+                <span class="badge lahore">Lahore</span>
+              {% endif %}
               <span class="badge {{ 'shopify' if order.order_via == 'Shopify' else 'daraz' }}">{{ order.order_via }}</span>
               <span class="badge pending pending-badge"></span>
             </div>
@@ -503,10 +740,106 @@
 
   <div class="toast" id="toast"></div>
 
+  <div class="modal-shell" id="invoiceModal" onclick="closeModalOnShell(event, 'invoiceModal')">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Customer View</div>
+          <div class="modal-title" id="invoiceOrderTitle">Order</div>
+        </div>
+        <button class="modal-close" type="button" onclick="closeModal('invoiceModal')">×</button>
+      </div>
+      <div class="invoice-grid">
+        <div class="invoice-panel">
+          <div class="invoice-label">Customer</div>
+          <div class="invoice-value" id="invoiceCustomerBlock"></div>
+        </div>
+        <div class="invoice-panel">
+          <div class="invoice-label">Summary</div>
+          <div class="invoice-value" id="invoiceSummaryBlock"></div>
+        </div>
+      </div>
+      <div class="invoice-panel">
+        <div class="invoice-label">Products</div>
+        <div class="invoice-products" id="invoiceProducts"></div>
+        <div class="invoice-totals">
+          <div class="invoice-total-row"><span>Items</span><span id="invoiceItemsCount">0</span></div>
+          <div class="invoice-total-row"><span>Total</span><strong id="invoiceTotal">PKR 0</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-shell" id="addOrderModal" onclick="closeModalOnShell(event, 'addOrderModal')">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">New Shopify Draft</div>
+          <div class="modal-title">Add order.</div>
+        </div>
+        <button class="modal-close" type="button" onclick="closeModal('addOrderModal')">×</button>
+      </div>
+
+      <div class="form-grid">
+        <div class="field">
+          <label for="draftCustomerName">Customer Name</label>
+          <input id="draftCustomerName" type="text" placeholder="Customer name">
+        </div>
+        <div class="field">
+          <label for="draftPhone">Phone</label>
+          <input id="draftPhone" type="text" placeholder="03xx...">
+        </div>
+        <div class="field">
+          <label for="draftCity">City</label>
+          <input id="draftCity" type="text" placeholder="Lahore">
+        </div>
+        <div class="field">
+          <label for="draftAddress">Address</label>
+          <input id="draftAddress" type="text" placeholder="Street, block, area">
+        </div>
+        <div class="field">
+          <label for="draftPaymentMethod">Payment Method</label>
+          <select id="draftPaymentMethod">
+            <option value="Full">Full</option>
+            <option value="Partial">Partial</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="draftDeliveryMethod">Delivery Method</label>
+          <select id="draftDeliveryMethod">
+            <option value="Home Delivery">Home Delivery</option>
+            <option value="Self Pickup">Self Pickup</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="draftDiscount">Discount Amount</label>
+          <input id="draftDiscount" type="number" min="0" step="0.01" value="0">
+        </div>
+        <div class="field">
+          <label for="draftNotes">Notes</label>
+          <textarea id="draftNotes" placeholder="Any extra details that should go to notes..."></textarea>
+        </div>
+      </div>
+
+      <div class="line-list" id="catalogLineList"></div>
+      <button class="mini-btn" type="button" onclick="addCatalogLine()">Add product</button>
+
+      <div class="line-list" id="customLineList" style="margin-top:14px;"></div>
+      <button class="mini-btn" type="button" onclick="addCustomLine()">Add custom item</button>
+
+      <div class="submit-row">
+        <button class="mini-btn" type="button" onclick="closeModal('addOrderModal')">Close</button>
+        <button class="mini-btn" type="button" id="submitDraftOrderBtn" onclick="submitDraftOrder()">Create Draft & Invoice</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const EMPLOYEE_PORTAL_MODE = {{ employee_portal_mode|tojson }};
     const KNOWN_ORDER_STORAGE_KEY = 'tbEmployeePortalKnownOrders';
     const EMPLOYEE_ORDER_UI_STATE_KEY = 'tbEmployeeOrdersUiState';
+    const ORDER_LIST_DATA = {{ all_orders|tojson }};
+    let ACTIVE_PRODUCTS = [];
     let deferredInstallPrompt = null;
 
     function showToast(message, success) {
@@ -518,6 +851,213 @@
       toast._timer = setTimeout(() => {
         toast.style.display = 'none';
       }, 2200);
+    }
+
+    function formatMoney(value) {
+      const amount = Number(value || 0);
+      return `PKR ${amount.toLocaleString('en-PK', { maximumFractionDigits: 2, minimumFractionDigits: 0 })}`;
+    }
+
+    function openModal(id) {
+      document.getElementById(id)?.classList.add('open');
+    }
+
+    function closeModal(id) {
+      document.getElementById(id)?.classList.remove('open');
+    }
+
+    function closeModalOnShell(event, id) {
+      if (event.target.id === id) {
+        closeModal(id);
+      }
+    }
+
+    function openOrderInvoice(index, event) {
+      if (event && event.target.closest('button, a, input, select, textarea, label')) {
+        return;
+      }
+      const order = ORDER_LIST_DATA[index];
+      if (!order) return;
+
+      const customerLines = [];
+      customerLines.push(`<strong>${order.customer_name || 'Customer not set'}</strong>`);
+      if (order.customer_phone) customerLines.push(order.customer_phone);
+      if (order.customer_address) customerLines.push(order.customer_address);
+      if (order.customer_city) customerLines.push(order.customer_city);
+
+      document.getElementById('invoiceOrderTitle').textContent = `#${order.order_id}`;
+      document.getElementById('invoiceCustomerBlock').innerHTML = customerLines.join('<br>');
+      document.getElementById('invoiceSummaryBlock').innerHTML = `
+        <div>${order.order_via} order</div>
+        <div>${order.status}</div>
+        ${order.is_lahore ? '<div class="lahore-pill" style="margin-top:8px;">Lahore order</div>' : ''}
+      `;
+
+      const productsHtml = (order.items_list || []).map((item) => {
+        const qty = Number(item.quantity || 0);
+        const lineTotal = Number(item.line_total || (Number(item.unit_price || 0) * qty) || 0);
+        const unitPrice = Number(item.unit_price || 0);
+        return `
+          <div class="invoice-item">
+            <img src="${item.item_image || ''}" alt="">
+            <div>
+              <div class="invoice-item-title">${item.item_title || 'Item'}</div>
+              <div class="invoice-item-sub">Qty ${qty}${item.tracking_number && item.tracking_number !== 'N/A' ? ` • ${item.tracking_number}` : ''}</div>
+              ${unitPrice ? `<div class="invoice-item-sub">${formatMoney(unitPrice)} each</div>` : ''}
+            </div>
+            <div class="invoice-item-price">${lineTotal ? formatMoney(lineTotal) : ''}</div>
+          </div>
+        `;
+      }).join('');
+
+      document.getElementById('invoiceProducts').innerHTML = productsHtml || '<div class="invoice-item-sub">No products available.</div>';
+      document.getElementById('invoiceItemsCount').textContent = (order.items_list || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+      document.getElementById('invoiceTotal').textContent = formatMoney(order.total_price || 0);
+      openModal('invoiceModal');
+    }
+
+    function buildProductOptions() {
+      return ACTIVE_PRODUCTS.map((product) => (
+        `<option value="${product.variant_id}">${product.title} • ${formatMoney(product.price)}</option>`
+      )).join('');
+    }
+
+    function addCatalogLine(prefill) {
+      const container = document.getElementById('catalogLineList');
+      const row = document.createElement('div');
+      row.className = 'line-card';
+      row.innerHTML = `
+        <div class="line-card-head">
+          <div class="line-card-title">Catalog product</div>
+          <button class="mini-btn danger" type="button">Remove</button>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Product</label>
+            <select class="catalog-product-select">${buildProductOptions()}</select>
+          </div>
+          <div class="field">
+            <label>Quantity</label>
+            <input class="catalog-qty-input" type="number" min="1" step="1" value="${prefill?.quantity || 1}">
+          </div>
+        </div>
+      `;
+      row.querySelector('.mini-btn.danger').addEventListener('click', () => row.remove());
+      if (prefill?.variant_id) {
+        row.querySelector('.catalog-product-select').value = String(prefill.variant_id);
+      }
+      container.appendChild(row);
+    }
+
+    function addCustomLine(prefill) {
+      const container = document.getElementById('customLineList');
+      const row = document.createElement('div');
+      row.className = 'line-card';
+      row.innerHTML = `
+        <div class="line-card-head">
+          <div class="line-card-title">Custom item</div>
+          <button class="mini-btn danger" type="button">Remove</button>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Title</label>
+            <input class="custom-title-input" type="text" placeholder="Custom product name" value="${prefill?.title || ''}">
+          </div>
+          <div class="field">
+            <label>Image URL</label>
+            <input class="custom-image-input" type="text" placeholder="https://..." value="${prefill?.image || ''}">
+          </div>
+          <div class="field">
+            <label>Price</label>
+            <input class="custom-price-input" type="number" min="0" step="0.01" value="${prefill?.price || 0}">
+          </div>
+          <div class="field">
+            <label>Quantity</label>
+            <input class="custom-qty-input" type="number" min="1" step="1" value="${prefill?.quantity || 1}">
+          </div>
+        </div>
+      `;
+      row.querySelector('.mini-btn.danger').addEventListener('click', () => row.remove());
+      container.appendChild(row);
+    }
+
+    async function loadActiveProducts() {
+      if (!EMPLOYEE_PORTAL_MODE || ACTIVE_PRODUCTS.length) return;
+      const response = await fetch('/employee_portal/products', { credentials: 'same-origin' });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'Could not load active products');
+      }
+      ACTIVE_PRODUCTS = payload.products || [];
+    }
+
+    async function openAddOrderModal() {
+      try {
+        await loadActiveProducts();
+        if (!document.getElementById('catalogLineList').children.length) {
+          addCatalogLine();
+        }
+        openModal('addOrderModal');
+      } catch (error) {
+        showToast(error.message || 'Could not load products', false);
+      }
+    }
+
+    function collectCatalogItems() {
+      return Array.from(document.querySelectorAll('#catalogLineList .line-card')).map((row) => ({
+        variant_id: row.querySelector('.catalog-product-select')?.value,
+        quantity: row.querySelector('.catalog-qty-input')?.value || 1,
+      })).filter((item) => item.variant_id);
+    }
+
+    function collectCustomItems() {
+      return Array.from(document.querySelectorAll('#customLineList .line-card')).map((row) => ({
+        title: row.querySelector('.custom-title-input')?.value || '',
+        image: row.querySelector('.custom-image-input')?.value || '',
+        price: row.querySelector('.custom-price-input')?.value || 0,
+        quantity: row.querySelector('.custom-qty-input')?.value || 1,
+      })).filter((item) => item.title.trim());
+    }
+
+    async function submitDraftOrder() {
+      const button = document.getElementById('submitDraftOrderBtn');
+      button.disabled = true;
+      button.textContent = 'Creating...';
+      const payload = {
+        customer_name: document.getElementById('draftCustomerName').value.trim(),
+        phone: document.getElementById('draftPhone').value.trim(),
+        city: document.getElementById('draftCity').value.trim(),
+        address: document.getElementById('draftAddress').value.trim(),
+        payment_method: document.getElementById('draftPaymentMethod').value,
+        delivery_method: document.getElementById('draftDeliveryMethod').value,
+        discount_amount: document.getElementById('draftDiscount').value || 0,
+        notes: document.getElementById('draftNotes').value.trim(),
+        catalog_items: collectCatalogItems(),
+        custom_items: collectCustomItems(),
+      };
+
+      try {
+        const response = await fetch('/employee_portal/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(payload),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || 'Could not create draft order');
+        }
+        closeModal('addOrderModal');
+        showToast(`Draft ${result.draft_order_name || ''} created`, true);
+        if (result.invoice_url) {
+          window.open(result.invoice_url, '_blank');
+        }
+      } catch (error) {
+        showToast(error.message || 'Could not create draft order', false);
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Create Draft & Invoice';
+      }
     }
 
     function updateOrderSummary() {
@@ -807,6 +1347,7 @@
       });
       document.getElementById('lahoreOnlyToggle').addEventListener('change', applyLahoreFilter);
       if (EMPLOYEE_PORTAL_MODE) {
+        document.getElementById('addOrderBtn').addEventListener('click', openAddOrderModal);
         document.getElementById('notifyBtn').addEventListener('click', enableNotifications);
         updateNotificationStatus();
         setupInstallPrompt();

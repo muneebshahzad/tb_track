@@ -9,6 +9,7 @@ import requests
 
 
 _token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
+_last_token_error: str = ""
 
 
 def _clean(value: Any) -> str:
@@ -44,18 +45,22 @@ def get_graphql_api_version() -> str:
 
 
 def get_graphql_token() -> str:
+    global _last_token_error
     static_token = _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"))
     if static_token:
+        _last_token_error = ""
         return static_token
 
     now = time.time()
     if _token_cache["token"] and now < float(_token_cache["expires_at"] or 0):
+        _last_token_error = ""
         return str(_token_cache["token"])
 
     client_id = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_ID"))
     client_secret = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_SECRET"))
     shop_domain = get_shop_domain()
     if not (client_id and client_secret and shop_domain):
+        _last_token_error = ""
         return ""
 
     try:
@@ -76,11 +81,27 @@ def get_graphql_token() -> str:
         if access_token:
             _token_cache["token"] = access_token
             _token_cache["expires_at"] = now + max(0, expires_in - 300)
+            _last_token_error = ""
+        else:
+            _last_token_error = _clean(payload.get("error_description")) or _clean(payload.get("error")) or "Shopify returned no access token"
         return access_token
     except Exception as exc:
         _token_cache["token"] = ""
         _token_cache["expires_at"] = 0.0
-        print(f"Shopify token exchange failed: {exc}")
+        response = getattr(exc, "response", None)
+        detail = ""
+        if response is not None:
+            try:
+                payload = response.json()
+                detail = (
+                    _clean(payload.get("error_description"))
+                    or _clean(payload.get("error"))
+                    or _clean(payload.get("message"))
+                )
+            except Exception:
+                detail = _clean(getattr(response, "text", ""))
+        _last_token_error = detail or str(exc)
+        print(f"Shopify token exchange failed: {_last_token_error}")
         return ""
 
 
@@ -114,6 +135,7 @@ def get_protected_data_config_status() -> dict[str, Any]:
         "has_client_secret": bool(client_secret),
         "has_access_token": bool(token),
         "token_source_ready": bool(static_token) or bool(client_id and client_secret),
+        "token_error": _last_token_error if not token else "",
     }
 
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 import secrets
 import time
@@ -85,16 +84,27 @@ def get_install_url(state: str) -> str:
     return f"https://{get_shop_domain()}/admin/oauth/authorize?{urlencode(params)}"
 
 
-def verify_oauth_hmac(params: dict[str, str]) -> bool:
-    received_hmac = _clean(params.get("hmac"))
-    if not received_hmac or not get_client_secret():
+def verify_oauth_hmac(query_string: bytes | str) -> bool:
+    if not query_string or not get_client_secret():
         return False
 
-    message_parts = []
-    for key in sorted(k for k in params.keys() if k not in {"hmac", "signature"}):
-        value = params.get(key)
-        message_parts.append(f"{key}={value}")
-    message = "&".join(message_parts)
+    raw_query = query_string.decode("utf-8") if isinstance(query_string, bytes) else str(query_string)
+    parts = [part for part in raw_query.split("&") if part]
+    received_hmac = ""
+    filtered_parts = []
+
+    for part in parts:
+        if part.startswith("hmac="):
+            received_hmac = part.split("=", 1)[1]
+            continue
+        if part.startswith("signature="):
+            continue
+        filtered_parts.append(part)
+
+    if not received_hmac:
+        return False
+
+    message = "&".join(sorted(filtered_parts))
 
     digest = hmac.new(
         get_client_secret().encode("utf-8"),

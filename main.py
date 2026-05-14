@@ -561,8 +561,7 @@ def shopify_install():
 
 @app.route('/shopify/callback')
 def shopify_callback():
-    params = {key: value for key, value in request.args.items()}
-    if not verify_oauth_hmac(params):
+    if not verify_oauth_hmac(request.query_string):
         return jsonify({"success": False, "error": "Invalid Shopify callback signature"}), 400
 
     expected_state = session.get(SHOPIFY_OAUTH_STATE_SESSION_KEY)

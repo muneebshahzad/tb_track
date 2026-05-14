@@ -1,3 +1,4 @@
+import base64
 import smtplib
 import sys
 import threading
@@ -22,7 +23,16 @@ import json
 from apscheduler.schedulers.background import BackgroundScheduler
 from token_manager import get_access_token, save_tokens
 from campaigns import campaigns_bp, init_campaign_dirs
-from shopify_protected_data import fetch_protected_order_details, get_protected_data_config_status
+from shopify_protected_data import (
+    create_oauth_state,
+    exchange_oauth_code_for_token,
+    fetch_protected_order_details,
+    get_install_url,
+    get_protected_data_config_status,
+    get_shop_domain,
+    save_offline_token,
+    verify_oauth_hmac,
+)
 import ssl
 import certifi
 
@@ -43,6 +53,7 @@ app.register_blueprint(campaigns_bp)
 
 EMPLOYEE_PORTAL_PASSWORD = os.getenv('EMPLOYEE_PORTAL_PASSWORD', '@@@t')
 EMPLOYEE_PORTAL_SESSION_KEY = 'employee_portal_authenticated'
+SHOPIFY_OAUTH_STATE_SESSION_KEY = 'shopify_oauth_state'
 
 # ── Jinja2 helpers ────────────────────────────────────────────────────────────
 
@@ -539,6 +550,40 @@ def refresh_data():
 @app.route('/shopify/protected-data/status')
 def shopify_protected_data_status():
     return jsonify(get_protected_data_config_status())
+
+
+@app.route('/shopify/install')
+def shopify_install():
+    state = create_oauth_state()
+    session[SHOPIFY_OAUTH_STATE_SESSION_KEY] = state
+    return redirect(get_install_url(state))
+
+
+@app.route('/shopify/callback')
+def shopify_callback():
+    params = {key: value for key, value in request.args.items()}
+    if not verify_oauth_hmac(params):
+        return jsonify({"success": False, "error": "Invalid Shopify callback signature"}), 400
+
+    expected_state = session.get(SHOPIFY_OAUTH_STATE_SESSION_KEY)
+    provided_state = request.args.get('state', '')
+    if not expected_state or expected_state != provided_state:
+        return jsonify({"success": False, "error": "Invalid Shopify OAuth state"}), 400
+
+    shop = (request.args.get('shop') or '').strip().lower()
+    code = (request.args.get('code') or '').strip()
+    if not shop or shop != get_shop_domain():
+        return jsonify({"success": False, "error": "OAuth callback shop does not match configured shop"}), 400
+    if not code:
+        return jsonify({"success": False, "error": "Missing Shopify OAuth code"}), 400
+
+    try:
+        payload = exchange_oauth_code_for_token(shop, code)
+        save_offline_token(shop, payload)
+        session.pop(SHOPIFY_OAUTH_STATE_SESSION_KEY, None)
+        return redirect('/shopify/protected-data/status?connected=1')
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Shopify token exchange failed: {e}"}), 400
 
 
 @app.route('/api/refresh-tracking', methods=['POST'])

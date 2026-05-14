@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import os
+import secrets
 import time
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 
+from db import get_app_setting, set_app_setting
+
+
+SHOPIFY_TOKEN_SETTING_KEY = "shopify_offline_access_token"
+SHOPIFY_SCOPE_SETTING_KEY = "shopify_offline_access_scopes"
+SHOPIFY_INSTALLED_SHOP_KEY = "shopify_installed_shop_domain"
+SHOPIFY_INSTALLED_AT_KEY = "shopify_installed_at"
 
 _token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
 _last_token_error: str = ""
@@ -44,8 +55,90 @@ def get_graphql_api_version() -> str:
     return _clean(os.getenv("SHOPIFY_GRAPHQL_API_VERSION")) or "2026-04"
 
 
+def get_client_id() -> str:
+    return _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_ID"))
+
+
+def get_client_secret() -> str:
+    return _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_SECRET"))
+
+
+def get_app_base_url() -> str:
+    explicit = _clean(os.getenv("SHOPIFY_APP_BASE_URL"))
+    return explicit.rstrip("/") if explicit else "https://dashboard.tickbags.com"
+
+
+def get_oauth_scopes() -> list[str]:
+    scopes = _clean(os.getenv("SHOPIFY_GRAPHQL_SCOPES")) or "read_orders,read_customers"
+    return [scope.strip() for scope in scopes.split(",") if scope.strip()]
+
+
+def get_install_url(state: str) -> str:
+    params = {
+        "client_id": get_client_id(),
+        "scope": ",".join(get_oauth_scopes()),
+        "redirect_uri": f"{get_app_base_url()}/shopify/callback",
+        "state": state,
+        "grant_options[]": "per-user",
+        "access_mode": "offline",
+    }
+    return f"https://{get_shop_domain()}/admin/oauth/authorize?{urlencode(params)}"
+
+
+def verify_oauth_hmac(params: dict[str, str]) -> bool:
+    received_hmac = _clean(params.get("hmac"))
+    if not received_hmac or not get_client_secret():
+        return False
+
+    message_parts = []
+    for key in sorted(k for k in params.keys() if k not in {"hmac", "signature"}):
+        value = params.get(key)
+        message_parts.append(f"{key}={value}")
+    message = "&".join(message_parts)
+
+    digest = hmac.new(
+        get_client_secret().encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(digest, received_hmac)
+
+
+def create_oauth_state() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def exchange_oauth_code_for_token(shop: str, code: str) -> dict[str, Any]:
+    response = requests.post(
+        f"https://{shop}/admin/oauth/access_token",
+        json={
+            "client_id": get_client_id(),
+            "client_secret": get_client_secret(),
+            "code": code,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def save_offline_token(shop: str, payload: dict[str, Any]) -> None:
+    token = _clean(payload.get("access_token"))
+    scopes = payload.get("scope") or payload.get("associated_user_scope") or ""
+    if not token:
+        raise ValueError("Shopify did not return an access token")
+
+    set_app_setting(SHOPIFY_TOKEN_SETTING_KEY, token)
+    set_app_setting(SHOPIFY_SCOPE_SETTING_KEY, _clean(scopes))
+    set_app_setting(SHOPIFY_INSTALLED_SHOP_KEY, shop)
+    set_app_setting(SHOPIFY_INSTALLED_AT_KEY, str(int(time.time())))
+    _token_cache["token"] = token
+    _token_cache["expires_at"] = time.time() + 86400 * 365
+
+
 def get_graphql_token() -> str:
     global _last_token_error
+
     static_token = _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"))
     if static_token:
         _last_token_error = ""
@@ -56,60 +149,19 @@ def get_graphql_token() -> str:
         _last_token_error = ""
         return str(_token_cache["token"])
 
-    client_id = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_ID"))
-    client_secret = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_SECRET"))
-    shop_domain = get_shop_domain()
-    if not (client_id and client_secret and shop_domain):
+    stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
+    if stored_token:
+        _token_cache["token"] = stored_token
+        _token_cache["expires_at"] = now + 3600
         _last_token_error = ""
-        return ""
+        return stored_token
 
-    try:
-        response = requests.post(
-            f"https://{shop_domain}/admin/oauth/access_token",
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        access_token = _clean(payload.get("access_token"))
-        expires_in = int(payload.get("expires_in") or 0)
-        if access_token:
-            _token_cache["token"] = access_token
-            _token_cache["expires_at"] = now + max(0, expires_in - 300)
-            _last_token_error = ""
-        else:
-            _last_token_error = _clean(payload.get("error_description")) or _clean(payload.get("error")) or "Shopify returned no access token"
-        return access_token
-    except Exception as exc:
-        _token_cache["token"] = ""
-        _token_cache["expires_at"] = 0.0
-        response = getattr(exc, "response", None)
-        detail = ""
-        if response is not None:
-            try:
-                payload = response.json()
-                detail = (
-                    _clean(payload.get("error_description"))
-                    or _clean(payload.get("error"))
-                    or _clean(payload.get("message"))
-                )
-            except Exception:
-                detail = _clean(getattr(response, "text", ""))
-        _last_token_error = detail or str(exc)
-        print(f"Shopify token exchange failed: {_last_token_error}")
-        return ""
+    _last_token_error = ""
+    return ""
 
 
 def is_graphql_configured() -> bool:
-    static_token = _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"))
-    client_id = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_ID"))
-    client_secret = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_SECRET"))
-    return bool(get_shop_domain() and (static_token or (client_id and client_secret)))
+    return bool(get_shop_domain() and (get_graphql_token() or (get_client_id() and get_client_secret())))
 
 
 def get_graphql_endpoint() -> str:
@@ -122,20 +174,31 @@ def get_graphql_endpoint() -> str:
 
 def get_protected_data_config_status() -> dict[str, Any]:
     static_token = _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"))
-    client_id = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_ID"))
-    client_secret = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_SECRET"))
+    stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
     token = get_graphql_token()
+    auth_mode = "unconfigured"
+    if static_token:
+        auth_mode = "static_token"
+    elif stored_token:
+        auth_mode = "oauth_offline_token"
+    elif get_client_id() and get_client_secret():
+        auth_mode = "oauth_ready"
+
     return {
         "enabled": is_graphql_configured(),
         "shop_domain": get_shop_domain(),
         "api_version": get_graphql_api_version(),
-        "auth_mode": "static_token" if static_token else ("client_credentials" if client_id and client_secret else "unconfigured"),
+        "auth_mode": auth_mode,
         "has_static_access_token": bool(static_token),
-        "has_client_id": bool(client_id),
-        "has_client_secret": bool(client_secret),
+        "has_client_id": bool(get_client_id()),
+        "has_client_secret": bool(get_client_secret()),
+        "has_stored_oauth_token": bool(stored_token),
         "has_access_token": bool(token),
-        "token_source_ready": bool(static_token) or bool(client_id and client_secret),
+        "token_source_ready": bool(static_token or stored_token or (get_client_id() and get_client_secret())),
+        "oauth_scopes": get_app_setting(SHOPIFY_SCOPE_SETTING_KEY),
+        "installed_shop": get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY),
         "token_error": _last_token_error if not token else "",
+        "install_url": f"{get_app_base_url()}/shopify/install",
     }
 
 

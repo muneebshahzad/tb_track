@@ -1,67 +1,69 @@
-# Shopify Custom App Setup
+# Shopify Protected Customer Data Setup
 
-This repo now supports a Shopify custom app for protected customer data.
+This app now uses Shopify's OAuth install flow to obtain an offline Admin API token for protected customer data.
 
-## What this unlocks
+## What the repo needs
 
-When configured, the app will use Shopify Admin GraphQL to enrich Shopify orders with:
-
-- customer phone
-- shipping/billing address
-- customer city
-
-This is meant to fill the gaps when your current Shopify plan/API response redacts customer details.
-
-## Shopify-side steps
-
-1. In Shopify Admin, create a **custom app** for this store.
-2. Grant Admin API access for order/customer data needed by operations.
-3. Request/enable **protected customer data** for address and phone.
-4. Install or release the custom app.
-5. Use either the **Client ID + Secret** or a direct **Admin API access token**, depending on what Shopify shows for your app.
-
-## Environment variables
-
-### Option A: Dev Dashboard credentials
-
-If Shopify shows a **Client ID** and **Secret** for the app, add these to Railway or your local environment:
+Set these Railway variables:
 
 ```env
 SHOPIFY_GRAPHQL_STORE_DOMAIN=tick-bags-best-bean-bags-in-pakistan.myshopify.com
 SHOPIFY_GRAPHQL_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxx
-SHOPIFY_GRAPHQL_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
+SHOPIFY_GRAPHQL_CLIENT_SECRET=shpss_xxxxxxxxxxxxxxxxx
 SHOPIFY_GRAPHQL_API_VERSION=2026-04
-```
-
-The app will exchange these for an Admin access token automatically.
-
-### Option B: Direct Admin API token
-
-If Shopify gives you a direct token, use:
-
-```env
-SHOPIFY_GRAPHQL_STORE_DOMAIN=tick-bags-best-bean-bags-in-pakistan.myshopify.com
-SHOPIFY_GRAPHQL_ACCESS_TOKEN=shpat_xxxxxxxxxxxxxxxxx
-SHOPIFY_GRAPHQL_API_VERSION=2026-04
+SHOPIFY_APP_BASE_URL=https://dashboard.tickbags.com
 ```
 
 Notes:
 
-- `SHOPIFY_GRAPHQL_STORE_DOMAIN` should be the `.myshopify.com` domain only.
-- If omitted, the code will try to derive the shop domain from `SHOP_URL`.
-- If the token or client credentials are missing, the app keeps working and simply skips protected-data enrichment.
+- `SHOPIFY_GRAPHQL_STORE_DOMAIN` must be the `.myshopify.com` domain only.
+- `SHOPIFY_APP_BASE_URL` should be the public base URL of this Flask app.
+- The offline access token is stored in the app database after OAuth completes.
 
-## How it behaves in this repo
+## Shopify app configuration
 
-- Shopify orders are still fetched through the existing integration.
-- After fetch, the app calls Shopify GraphQL for the same order IDs.
-- If protected data is returned, it overwrites blank/redacted customer fields in `customer_details` and parcel line items.
-- If Shopify denies the fields or the app is not configured, the current fallback behavior remains unchanged.
+In Shopify Dev Dashboard:
+
+1. Set **App URL** to:
+   `https://dashboard.tickbags.com`
+2. Add this **Redirect URL**:
+   `https://dashboard.tickbags.com/shopify/callback`
+3. Add scopes:
+   - `read_orders`
+   - `read_customers`
+4. Request protected customer data access for:
+   - `Address`
+   - `Phone`
+5. Install the app on the store.
+
+## Connect the app
+
+Once Railway variables are set and the app is deployed, open:
+
+`https://dashboard.tickbags.com/shopify/install`
+
+That starts Shopify OAuth. After approval, Shopify redirects back to:
+
+`/shopify/callback`
+
+The app exchanges the code for an offline token and stores it in PostgreSQL.
 
 ## Status endpoint
 
-You can verify configuration at:
+Check connection state at:
 
-`/shopify/protected-data/status`
+`https://dashboard.tickbags.com/shopify/protected-data/status`
 
-It returns whether the GraphQL bridge is configured, which auth mode it is using, and which shop/API version it will use.
+Useful fields:
+
+- `auth_mode`: should become `oauth_offline_token`
+- `has_stored_oauth_token`: should become `true`
+- `has_access_token`: should become `true`
+- `oauth_scopes`: shows the scopes returned by Shopify
+- `install_url`: quick link to start OAuth again if needed
+
+## How the repo uses it
+
+- Existing Shopify order fetch remains unchanged.
+- After fetch, the app requests protected customer data through Admin GraphQL.
+- Missing customer phone/address/city fields are enriched from the protected-data response.

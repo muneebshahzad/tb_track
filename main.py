@@ -799,9 +799,32 @@ def get_active_shopify_products(limit=120):
         if getattr(product, 'status', 'active') != 'active':
             continue
         base_image = product.image.src if getattr(product, 'image', None) else ''
+        product_images = list(getattr(product, 'images', []) or [])
+        fetched_images = False
         for variant in getattr(product, 'variants', []) or []:
             variant_title = getattr(variant, 'title', '') or ''
             display_title = product.title if variant_title in {'Default Title', ''} else f"{product.title} - {variant_title}"
+            variant_image = base_image
+            variant_image_id = getattr(variant, 'image_id', None)
+
+            if variant_image_id and not product_images and not fetched_images:
+                try:
+                    product_images = list(shopify.Image.find(product_id=getattr(product, 'id', None)) or [])
+                except Exception as e:
+                    print(f"Could not fetch images for Shopify product {getattr(product, 'id', None)}: {e}")
+                    product_images = []
+                fetched_images = True
+
+            if variant_image_id and product_images:
+                for image in product_images:
+                    if getattr(image, 'id', None) == variant_image_id:
+                        variant_image = getattr(image, 'src', '') or base_image
+                        break
+                    attached_variant_ids = getattr(image, 'variant_ids', None) or []
+                    if getattr(variant, 'id', None) in attached_variant_ids:
+                        variant_image = getattr(image, 'src', '') or base_image
+                        break
+
             results.append({
                 'product_id': getattr(product, 'id', None),
                 'variant_id': getattr(variant, 'id', None),
@@ -809,7 +832,7 @@ def get_active_shopify_products(limit=120):
                 'product_title': getattr(product, 'title', ''),
                 'variant_title': variant_title,
                 'price': float(getattr(variant, 'price', 0) or 0),
-                'image': base_image,
+                'image': variant_image,
                 'sku': getattr(variant, 'sku', '') or '',
             })
     return results

@@ -571,7 +571,7 @@ def build_admin_mobile_sections():
         {'id': 'dashboard', 'label': 'Dashboard', 'icon': '🏠', 'src': '/?embedded=1'},
         {'id': 'payments', 'label': 'Payments', 'icon': '💰', 'src': '/payments?embedded=1'},
         {'id': 'scanner', 'label': 'Scanner', 'icon': '🔍', 'src': '/employee_portal'},
-        {'id': 'employee-orders', 'label': 'Queue', 'icon': '🧾', 'src': '/employee_portal/orders'},
+        {'id': 'employee-orders', 'label': 'Orders', 'icon': '🧾', 'src': '/employee_portal/orders'},
         {'id': 'pending', 'label': 'Pending', 'icon': '📋', 'src': '/pending?embedded=1'},
         {'id': 'undelivered', 'label': 'Undelivered', 'icon': '🚚', 'src': '/?embedded=1&preset=undelivered'},
     ]

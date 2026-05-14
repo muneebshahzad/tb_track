@@ -1651,6 +1651,7 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+      const urlParams = new URLSearchParams(window.location.search);
       const uiState = loadUiState();
       const sortSelect = document.getElementById('sortSelect');
       const lahoreToggle = document.getElementById('lahoreOnlyToggle');
@@ -1684,6 +1685,9 @@
         ensureServiceWorker();
         pollForNewOrders(true);
         window.setInterval(() => pollForNewOrders(false), 60000);
+        if (urlParams.get('show_add_order') === '1') {
+          window.setTimeout(() => openAddOrderModal(), 120);
+        }
       }
     });
   </script>

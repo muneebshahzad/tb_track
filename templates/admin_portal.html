@@ -32,7 +32,7 @@
         radial-gradient(circle at top left, rgba(242, 182, 50, 0.24), transparent 30%),
         radial-gradient(circle at top right, rgba(38, 103, 255, 0.16), transparent 28%),
         linear-gradient(180deg, #fbf7f0 0%, #f4efe6 55%, #efe6da 100%);
-      padding: 14px 12px 20px;
+      padding: 14px 12px 92px;
     }
     .shell {
       max-width: 760px;
@@ -179,13 +179,7 @@
     .hero-topline {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-    .viewer-icon-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      justify-content: flex-start;
     }
     .login-field {
       width: 100%;
@@ -203,8 +197,50 @@
       color: var(--red);
       font-weight: 700;
     }
+    .bottom-nav {
+      position: fixed;
+      left: 12px;
+      right: 12px;
+      bottom: 12px;
+      z-index: 40;
+      background: rgba(255, 252, 247, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      padding: 8px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .bottom-nav-btn {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      color: var(--ink);
+      min-height: 58px;
+      padding: 7px 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      text-align: center;
+      transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+    .bottom-nav-btn.active {
+      background: rgba(38, 103, 255, 0.08);
+      border-color: rgba(38, 103, 255, 0.35);
+      box-shadow: 0 10px 24px rgba(20, 33, 61, 0.1);
+      transform: translateY(-1px);
+    }
+    .bottom-nav .tab-icon {
+      font-size: 17px;
+    }
+    .bottom-nav .tab-label {
+      font-size: 10px;
+    }
     @media (max-width: 640px) {
-      .tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .viewer-frame { height: calc(100vh - 180px); min-height: 500px; }
     }
   </style>
@@ -227,23 +263,20 @@
     {% else %}
       <section class="hero card">
         <div class="hero-topline">
-          <a class="brand-lockup" href="#">
+          <button class="brand-lockup" type="button" id="logoHomeBtn" style="background:none;border:none;padding:0;cursor:pointer;">
             <img src="/static/tickbags-logo.png" alt="TickBags logo">
-          </a>
-          <div class="hero-actions">
-            <button class="icon-btn" id="installBtn" type="button" hidden title="Install App">＋</button>
-            <a class="icon-btn" id="openCurrentBtn" href="/" target="_blank" rel="noopener" title="Open Current Tool">↗</a>
-            <form method="post" action="/admin_portal/logout" style="margin:0;">
-              <button class="icon-btn" type="submit" title="Logout">⎋</button>
-            </form>
-          </div>
+          </button>
         </div>
       </section>
 
-      <section class="card tabs" id="tabGrid">
+      <section class="card iframe-card">
+        <iframe id="toolFrame" class="viewer-frame" title="Admin portal tool view" src=""></iframe>
+      </section>
+
+      <nav class="bottom-nav" id="tabGrid" aria-label="Admin navigation">
         {% for section in sections %}
           <button
-            class="tab-btn{% if section.id == selected_section %} active{% endif %}"
+            class="bottom-nav-btn{% if section.id == selected_section %} active{% endif %}"
             type="button"
             data-section="{{ section.id }}"
             data-src="{{ section.src }}"
@@ -253,16 +286,7 @@
             <span class="tab-label">{{ section.label }}</span>
           </button>
         {% endfor %}
-      </section>
-
-      <section class="card iframe-card">
-        <div class="viewer-toolbar">
-          <div class="viewer-icon-row">
-            <a class="icon-btn" id="viewerOpenBtn" href="/" target="_blank" rel="noopener" title="Open Current Tool">↗</a>
-          </div>
-        </div>
-        <iframe id="toolFrame" class="viewer-frame" title="Admin portal tool view" src=""></iframe>
-      </section>
+      </nav>
     {% endif %}
   </div>
 
@@ -271,17 +295,14 @@
       const sections = {{ sections|tojson }};
       const defaultSection = {{ selected_section|tojson }};
       const toolFrame = document.getElementById('toolFrame');
-      const openCurrentBtn = document.getElementById('openCurrentBtn');
-      const viewerOpenBtn = document.getElementById('viewerOpenBtn');
-      const installBtn = document.getElementById('installBtn');
-      let deferredInstallPrompt = null;
+      const logoHomeBtn = document.getElementById('logoHomeBtn');
 
       function getSectionById(id) {
         return sections.find(section => section.id === id) || sections[0];
       }
 
       function updateActiveTab(sectionId) {
-        document.querySelectorAll('.tab-btn').forEach(button => {
+        document.querySelectorAll('.bottom-nav-btn').forEach(button => {
           button.classList.toggle('active', button.dataset.section === sectionId);
         });
       }
@@ -289,8 +310,6 @@
       function openSection(sectionId, persist = true) {
         const section = getSectionById(sectionId);
         toolFrame.src = section.src;
-        openCurrentBtn.href = section.src;
-        viewerOpenBtn.href = section.src;
         updateActiveTab(section.id);
         if (persist) {
           localStorage.setItem('tbAdminPortalSection', section.id);
@@ -298,36 +317,15 @@
         }
       }
 
-      document.querySelectorAll('.tab-btn').forEach(button => {
+      document.querySelectorAll('.bottom-nav-btn').forEach(button => {
         button.addEventListener('click', () => openSection(button.dataset.section));
       });
-
-      window.addEventListener('beforeinstallprompt', event => {
-        event.preventDefault();
-        deferredInstallPrompt = event;
-        installBtn.hidden = false;
-      });
-
-      window.addEventListener('appinstalled', () => {
-        deferredInstallPrompt = null;
-        installBtn.hidden = true;
-      });
-
-      installBtn?.addEventListener('click', async () => {
-        if (!deferredInstallPrompt) return;
-        deferredInstallPrompt.prompt();
-        await deferredInstallPrompt.userChoice;
-        deferredInstallPrompt = null;
-        installBtn.hidden = true;
-      });
-
-      if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
-        installBtn.hidden = true;
-      }
 
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/admin_portal-sw.js').catch(() => {});
       }
+
+      logoHomeBtn?.addEventListener('click', () => openSection('dashboard'));
 
       const remembered = localStorage.getItem('tbAdminPortalSection');
       openSection(remembered || defaultSection, false);

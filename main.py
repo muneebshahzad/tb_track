@@ -743,7 +743,23 @@ def split_customer_name(name):
     return parts[0], " ".join(parts[1:])
 
 
-def format_employee_order_note(payment_method, delivery_method, customer_phone, discount_amount, custom_items, extra_notes=''):
+def parse_money(value, default=0.0):
+    try:
+        return round(float(value or default), 2)
+    except (TypeError, ValueError):
+        return round(float(default), 2)
+
+
+def format_employee_order_note(
+    payment_method,
+    delivery_method,
+    customer_phone,
+    discount_amount,
+    delivery_charges,
+    advance_amount,
+    custom_items,
+    extra_notes='',
+):
     lines = [
         'Created from Tick Bags employee portal.',
         f'Payment method: {payment_method or "Not specified"}',
@@ -752,12 +768,16 @@ def format_employee_order_note(payment_method, delivery_method, customer_phone, 
     ]
     if discount_amount:
         lines.append(f'Discount amount: PKR {discount_amount}')
+    if delivery_charges:
+        lines.append(f'Delivery charges: PKR {delivery_charges}')
+    if advance_amount:
+        lines.append(f'Advance paid by customer: PKR {advance_amount}')
     if custom_items:
         lines.append('Custom items:')
         for item in custom_items:
             lines.append(
                 f"- {item.get('title', 'Custom item')} | Qty {item.get('quantity', 1)} | "
-                f"PKR {item.get('price', 0)} | Image {item.get('image', 'N/A')}"
+                f"PKR {item.get('price', 0)} | Image {'Uploaded in portal' if item.get('image') else 'N/A'}"
             )
     if extra_notes:
         lines.append(f'Notes: {extra_notes}')
@@ -792,15 +812,95 @@ def get_active_shopify_products(limit=120):
     return results
 
 
-def create_shopify_draft_order(payload):
+def build_employee_invoice_payload(
+    order_name,
+    customer_name,
+    phone,
+    city,
+    address,
+    payment_method,
+    delivery_method,
+    catalog_items,
+    custom_items,
+    discount_amount,
+    delivery_charges,
+    advance_amount,
+):
+    items = []
+    subtotal = 0.0
+
+    for item in catalog_items:
+        quantity = int(item.get('quantity') or 1)
+        unit_price = parse_money(item.get('price'))
+        line_total = round(unit_price * quantity, 2)
+        subtotal += line_total
+        items.append({
+            'title': item.get('title') or 'Product',
+            'quantity': quantity,
+            'image': item.get('image') or '',
+            'unit_price': unit_price,
+            'line_total': line_total,
+        })
+
+    for item in custom_items:
+        quantity = int(item.get('quantity') or 1)
+        unit_price = parse_money(item.get('price'))
+        line_total = round(unit_price * quantity, 2)
+        subtotal += line_total
+        items.append({
+            'title': item.get('title') or 'Custom product',
+            'quantity': quantity,
+            'image': item.get('image') or '',
+            'unit_price': unit_price,
+            'line_total': line_total,
+        })
+
+    total = round(subtotal - discount_amount + delivery_charges, 2)
+    balance_due = round(max(total - advance_amount, 0), 2)
+    return {
+        'order_id': order_name,
+        'customer_name': customer_name,
+        'customer_phone': phone,
+        'customer_city': city,
+        'customer_address': address,
+        'status': 'Created',
+        'summary_lines': [
+            'Shopify order',
+            f'Payment: {payment_method or "Not specified"}',
+            f'Delivery: {delivery_method or "Not specified"}',
+        ],
+        'items': items,
+        'totals': {
+            'subtotal': round(subtotal, 2),
+            'discount': round(discount_amount, 2),
+            'delivery_charges': round(delivery_charges, 2),
+            'total': round(total, 2),
+            'advance_paid': round(advance_amount, 2),
+            'balance_due': round(balance_due, 2),
+        },
+    }
+
+
+def create_shopify_employee_order(payload):
     customer_name = (payload.get('customer_name') or '').strip()
     phone = (payload.get('phone') or '').strip()
-    discount_amount = float(payload.get('discount_amount') or 0)
+    city = (payload.get('city') or '').strip()
+    address = (payload.get('address') or '').strip()
+    discount_amount = parse_money(payload.get('discount_amount'))
+    delivery_charges = parse_money(payload.get('delivery_charges'))
     payment_method = (payload.get('payment_method') or '').strip()
     delivery_method = (payload.get('delivery_method') or '').strip()
+    advance_amount = parse_money(payload.get('advance_amount'))
     catalog_items = payload.get('catalog_items') or []
     custom_items = payload.get('custom_items') or []
     extra_notes = (payload.get('notes') or '').strip()
+
+    if not customer_name:
+        raise ValueError('Customer name is required.')
+    if not phone:
+        raise ValueError('Phone number is required.')
+    if payment_method.lower() == 'partial' and advance_amount <= 0:
+        raise ValueError('Enter the advance paid amount for partial payment.')
 
     first_name, last_name = split_customer_name(customer_name)
 
@@ -810,17 +910,21 @@ def create_shopify_draft_order(payload):
         quantity = int(item.get('quantity') or 1)
         if not variant_id or quantity < 1:
             continue
-        line_items.append({
+        line_item = {
             'variant_id': int(variant_id),
             'quantity': quantity,
-        })
+        }
+        override_price = parse_money(item.get('price'))
+        if override_price > 0:
+            line_item['original_unit_price'] = override_price
+        line_items.append(line_item)
 
     normalized_custom_items = []
     for item in custom_items:
         title = (item.get('title') or '').strip()
         if not title:
             continue
-        price = float(item.get('price') or 0)
+        price = parse_money(item.get('price'))
         quantity = int(item.get('quantity') or 1)
         normalized_custom_items.append({
             'title': title,
@@ -837,11 +941,22 @@ def create_shopify_draft_order(payload):
     if not line_items:
         raise ValueError('At least one product is required.')
 
+    estimated_total = 0.0
+    for item in catalog_items:
+        estimated_total += parse_money(item.get('price')) * int(item.get('quantity') or 1)
+    for item in normalized_custom_items:
+        estimated_total += parse_money(item.get('price')) * int(item.get('quantity') or 1)
+    estimated_total = round(estimated_total - discount_amount + delivery_charges, 2)
+    if advance_amount > estimated_total:
+        raise ValueError('Advance paid cannot be greater than the order total.')
+
     note = format_employee_order_note(
         payment_method=payment_method,
         delivery_method=delivery_method,
         customer_phone=phone,
         discount_amount=discount_amount,
+        delivery_charges=delivery_charges,
+        advance_amount=advance_amount,
         custom_items=normalized_custom_items,
         extra_notes=extra_notes,
     )
@@ -849,14 +964,14 @@ def create_shopify_draft_order(payload):
     draft_order = shopify.DraftOrder()
     draft_order.line_items = line_items
     draft_order.note = note
-    draft_order.tags = 'Employee Portal Draft'
+    draft_order.tags = 'Employee Portal'
     draft_order.use_customer_default_address = False
     draft_order.shipping_address = {
         'first_name': first_name,
         'last_name': last_name or 'Customer',
         'phone': phone,
-        'address1': (payload.get('address') or '').strip(),
-        'city': (payload.get('city') or '').strip(),
+        'address1': address,
+        'city': city,
         'country': 'Pakistan',
     }
     draft_order.billing_address = draft_order.shipping_address
@@ -875,13 +990,52 @@ def create_shopify_draft_order(payload):
             'title': 'Employee portal discount',
         }
 
+    if delivery_charges > 0:
+        draft_order.shipping_line = {
+            'title': 'Delivery Charges',
+            'price': delivery_charges,
+            'custom': True,
+        }
+
     if not draft_order.save():
         raise RuntimeError(json.dumps(getattr(draft_order, 'errors', {}) or {'error': 'Could not save draft order'}))
 
+    complete_params = {}
+    if payment_method.lower() == 'partial':
+        complete_params['payment_pending'] = True
+    draft_order.complete(complete_params)
+
+    order_id = getattr(draft_order, 'order_id', None)
+    order_name = getattr(draft_order, 'name', '') or ''
+    if not order_id:
+        raise RuntimeError('Shopify created a draft order but did not return a completed order ID.')
+
+    if payment_method.lower() == 'full':
+        try:
+            mark_shopify_order_as_paid(order_id)
+        except Exception as e:
+            print(f"Could not immediately mark employee order {order_id} as paid: {e}")
+
+    invoice_payload = build_employee_invoice_payload(
+        order_name=order_name,
+        customer_name=customer_name,
+        phone=phone,
+        city=city,
+        address=address,
+        payment_method=payment_method,
+        delivery_method=delivery_method,
+        catalog_items=catalog_items,
+        custom_items=normalized_custom_items,
+        discount_amount=discount_amount,
+        delivery_charges=delivery_charges,
+        advance_amount=advance_amount if payment_method.lower() == 'partial' else 0,
+    )
+
     return {
-        'id': getattr(draft_order, 'id', None),
-        'invoice_url': getattr(draft_order, 'invoice_url', ''),
-        'name': getattr(draft_order, 'name', ''),
+        'draft_order_id': getattr(draft_order, 'id', None),
+        'order_id': order_id,
+        'order_name': order_name,
+        'invoice': invoice_payload,
     }
 
 
@@ -1623,15 +1777,16 @@ def employee_portal_create_order():
 
     data = request.get_json() or {}
     try:
-        result = create_shopify_draft_order(data)
+        result = create_shopify_employee_order(data)
         return jsonify({
             'success': True,
-            'draft_order_id': result.get('id'),
-            'draft_order_name': result.get('name'),
-            'invoice_url': result.get('invoice_url', ''),
+            'draft_order_id': result.get('draft_order_id'),
+            'order_id': result.get('order_id'),
+            'order_name': result.get('order_name'),
+            'invoice': result.get('invoice'),
         })
     except Exception as e:
-        print(f"Employee draft order create failed: {e}")
+        print(f"Employee order create failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 400
 
 

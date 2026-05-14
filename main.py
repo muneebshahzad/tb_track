@@ -192,7 +192,7 @@ async def fetch_tracking_data_bulk(session, tracking_numbers):
 
 
 def parse_leopards_status(packet, tracking_number):
-    """Extract human-readable status + customer info from a Leopards packet dict."""
+    """Extract human-readable shipment status from a Leopards packet dict."""
     if not packet:
         return {
             'tracking_number': tracking_number,
@@ -239,7 +239,7 @@ def parse_leopards_status(packet, tracking_number):
 
 
 def process_line_item(line_item, fulfillments, tracking_cache, billing):
-    """Returns list of tracking dicts for a line item. Falls back to billing address."""
+    """Returns tracking/status data for a line item while keeping Shopify as the customer source."""
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
         return []
 
@@ -262,10 +262,10 @@ def process_line_item(line_item, fulfillments, tracking_cache, billing):
                     'tracking_number': tracking_number,
                     'status':   parsed['status'],
                     'quantity': item.quantity,
-                    'name':     parsed['name']    or billing.get('name',    'N/A'),
-                    'address':  parsed['address'] or billing.get('address', 'N/A'),
-                    'city':     parsed['city']    or billing.get('city',    'N/A'),
-                    'phone':    parsed['phone']   or billing.get('phone',   'N/A'),
+                    'name':     billing.get('name',    'N/A'),
+                    'address':  billing.get('address', 'N/A'),
+                    'city':     billing.get('city',    'N/A'),
+                    'phone':    billing.get('phone',   'N/A'),
                 })
 
     return tracking_info if tracking_info else [{
@@ -287,6 +287,31 @@ def merge_customer_details(base: dict[str, str], override: dict[str, str]) -> di
         "address": override.get("address") or base.get("address", ""),
         "city": override.get("city") or base.get("city", ""),
         "phone": override.get("phone") or base.get("phone", ""),
+    }
+
+
+def extract_shopify_customer_details(order) -> dict[str, str]:
+    def safe_attr(obj, attr):
+        try:
+            value = getattr(obj, attr)
+            return value or ""
+        except AttributeError:
+            return ""
+
+    shipping = getattr(order, 'shipping_address', None)
+    billing = getattr(order, 'billing_address', None)
+
+    shipping_name = safe_attr(shipping, 'name')
+    billing_name = safe_attr(billing, 'name')
+    first_name = safe_attr(shipping, 'first_name') or safe_attr(billing, 'first_name')
+    last_name = safe_attr(shipping, 'last_name') or safe_attr(billing, 'last_name')
+    composed_name = " ".join(part for part in [first_name, last_name] if part).strip()
+
+    return {
+        "name": shipping_name or billing_name or composed_name,
+        "address": safe_attr(shipping, 'address1') or safe_attr(billing, 'address1'),
+        "city": safe_attr(shipping, 'city') or safe_attr(billing, 'city'),
+        "phone": safe_attr(shipping, 'phone') or safe_attr(billing, 'phone'),
     }
 
 
@@ -337,28 +362,8 @@ async def process_order(order, tracking_cache):
     except:
         status = "Un-fulfilled"
 
-    try:
-        name = order.billing_address.name
-    except AttributeError:
-        name = ""
-
-    try:
-        address = order.billing_address.address1
-    except AttributeError:
-        address = ""
-
-    try:
-        city = order.billing_address.city
-    except AttributeError:
-        city = ""
-
-    try:
-        phone = order.billing_address.phone
-    except AttributeError:
-        phone = ""
-
-    billing = {"name": name, "address": address, "city": city, "phone": phone}
-    customer_details = billing
+    customer_details = extract_shopify_customer_details(order)
+    billing = customer_details
 
     order_info = {
         'order_link':         "https://admin.shopify.com/store/tick-bags-best-bean-bags-in-pakistan/orders/" + str(order.id),
@@ -649,14 +654,6 @@ def refresh_tracking_only():
             if cn and cn in tracking_cache:
                 parsed = parse_leopards_status(tracking_cache[cn], cn)
                 item['status'] = parsed['status']
-                if parsed['name']:
-                    item['name'] = parsed['name']
-                if parsed['address']:
-                    item['address'] = parsed['address']
-                if parsed['city']:
-                    item['city'] = parsed['city']
-                if parsed['phone']:
-                    item['phone'] = parsed['phone']
                 order['status'] = parsed['status']
                 updated += 1
 
@@ -1640,9 +1637,6 @@ def background_refresh():
                     if cn and cn in tracking_cache:
                         parsed = parse_leopards_status(tracking_cache[cn], cn)
                         item['status'] = parsed['status']
-                        if parsed['name']:   item['name'] = parsed['name']
-                        if parsed['city']:   item['city'] = parsed['city']
-                        if parsed['phone']:  item['phone'] = parsed['phone']
                         order['status'] = parsed['status']
 
         print("BACKGROUND REFRESH: Leopard tracking updated.")

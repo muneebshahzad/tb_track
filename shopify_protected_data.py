@@ -10,7 +10,7 @@ from urllib.parse import urlencode, urlparse
 
 import requests
 
-from db import get_app_setting, set_app_setting
+from db import get_app_setting, get_last_db_error, set_app_setting
 
 
 SHOPIFY_TOKEN_SETTING_KEY = "shopify_offline_access_token"
@@ -145,12 +145,12 @@ def save_offline_token(shop: str, payload: dict[str, Any]) -> None:
         set_app_setting(SHOPIFY_INSTALLED_AT_KEY, str(int(time.time()))),
     ])
     if not writes_ok:
-        raise RuntimeError("Could not persist Shopify OAuth token to database")
+        raise RuntimeError(f"Could not persist Shopify OAuth token to database: {get_last_db_error() or 'unknown database error'}")
 
     saved_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
     saved_shop = _clean(get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY))
     if saved_token != token or saved_shop != shop:
-        raise RuntimeError("Shopify OAuth token did not persist correctly")
+        raise RuntimeError(f"Shopify OAuth token did not persist correctly: {get_last_db_error() or 'verification failed'}")
 
     _token_cache["token"] = token
     _token_cache["expires_at"] = time.time() + 86400 * 365

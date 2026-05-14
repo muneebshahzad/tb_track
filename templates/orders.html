@@ -610,6 +610,63 @@
     .hidden {
       display: none !important;
     }
+    .product-search-wrap {
+      position: relative;
+    }
+    .product-search-results {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 6;
+      border: 1px solid rgba(20, 33, 61, 0.12);
+      border-radius: 16px;
+      background: rgba(255, 252, 247, 0.98);
+      box-shadow: 0 18px 32px rgba(20, 33, 61, 0.14);
+      overflow: hidden;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+    .product-search-option {
+      display: grid;
+      grid-template-columns: 52px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      padding: 10px 12px;
+      background: transparent;
+      border: 0;
+      border-bottom: 1px solid rgba(20, 33, 61, 0.08);
+      text-align: left;
+      color: var(--ink);
+      font: inherit;
+      cursor: pointer;
+    }
+    .product-search-option:last-child {
+      border-bottom: 0;
+    }
+    .product-search-option img {
+      width: 52px;
+      height: 52px;
+      border-radius: 12px;
+      object-fit: cover;
+      background: #e9e4dc;
+    }
+    .product-search-option-title {
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+    .product-search-option-sub {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .product-search-price {
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
     .submit-row {
       display: flex;
       gap: 10px;
@@ -1013,12 +1070,6 @@
       renderInvoiceData(buildInvoicePayloadFromOrder(order));
     }
 
-    function buildProductOptions() {
-      return ACTIVE_PRODUCTS.map((product) => (
-        `<option value="${product.variant_id}">${product.title} • ${formatMoney(product.price)}</option>`
-      )).join('');
-    }
-
     function buildCatalogPreview(product, selectedPrice) {
       if (!product) {
         return '';
@@ -1035,8 +1086,68 @@
       `;
     }
 
+    function searchProducts(query) {
+      const normalized = String(query || '').trim().toLowerCase();
+      if (!normalized) {
+        return ACTIVE_PRODUCTS.slice(0, 8);
+      }
+      return ACTIVE_PRODUCTS.filter((product) => {
+        const haystack = `${product.title} ${product.product_title || ''} ${product.variant_title || ''} ${product.sku || ''}`.toLowerCase();
+        return haystack.includes(normalized);
+      }).slice(0, 8);
+    }
+
+    function buildProductSearchResults(query) {
+      const results = searchProducts(query);
+      if (!results.length) {
+        return `<div class="product-search-option"><div></div><div><div class="product-search-option-title">No matching products</div><div class="product-search-option-sub">Try a shorter or different name.</div></div><div></div></div>`;
+      }
+      return results.map((product) => `
+        <button class="product-search-option" type="button" data-variant-id="${product.variant_id}">
+          <img src="${product.image || ''}" alt="">
+          <div>
+            <div class="product-search-option-title">${product.title}</div>
+            <div class="product-search-option-sub">${product.sku ? `SKU ${product.sku}` : 'Active Shopify product'}</div>
+          </div>
+          <div class="product-search-price">${formatMoney(product.price)}</div>
+        </button>
+      `).join('');
+    }
+
+    function closeProductSearchResults(row) {
+      const shell = row.querySelector('.product-search-results');
+      if (shell) {
+        shell.classList.add('hidden');
+      }
+    }
+
+    function selectCatalogProduct(row, product) {
+      row.querySelector('.catalog-variant-id').value = String(product.variant_id);
+      row.querySelector('.catalog-product-search').value = product.title;
+      const priceInput = row.querySelector('.catalog-price-input');
+      if (priceInput && (!priceInput.dataset.touched || !priceInput.value)) {
+        priceInput.value = product.price;
+      }
+      updateCatalogLinePreview(row);
+      closeProductSearchResults(row);
+    }
+
+    function updateProductSearchResults(row, query) {
+      const shell = row.querySelector('.product-search-results');
+      shell.innerHTML = buildProductSearchResults(query);
+      shell.classList.remove('hidden');
+      shell.querySelectorAll('.product-search-option[data-variant-id]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const product = findProductByVariantId(button.dataset.variantId);
+          if (product) {
+            selectCatalogProduct(row, product);
+          }
+        });
+      });
+    }
+
     function updateCatalogLinePreview(row) {
-      const product = findProductByVariantId(row.querySelector('.catalog-product-select')?.value);
+      const product = findProductByVariantId(row.querySelector('.catalog-variant-id')?.value);
       const priceInput = row.querySelector('.catalog-price-input');
       if (product && priceInput && (!priceInput.dataset.touched || !priceInput.value)) {
         priceInput.value = product.price;
@@ -1055,9 +1166,13 @@
           <button class="mini-btn danger" type="button">Remove</button>
         </div>
         <div class="form-grid">
-          <div class="field">
+          <div class="field span-2">
             <label>Product</label>
-            <select class="catalog-product-select">${buildProductOptions()}</select>
+            <div class="product-search-wrap">
+              <input class="catalog-product-search" type="text" placeholder="Type product name, color, or SKU">
+              <input class="catalog-variant-id" type="hidden" value="${prefill?.variant_id || ''}">
+              <div class="product-search-results hidden"></div>
+            </div>
           </div>
           <div class="field">
             <label>Price</label>
@@ -1071,19 +1186,27 @@
         <div class="catalog-preview-shell"></div>
       `;
       row.querySelector('.mini-btn.danger').addEventListener('click', () => row.remove());
-      if (prefill?.variant_id) {
-        row.querySelector('.catalog-product-select').value = String(prefill.variant_id);
-      }
       const priceInput = row.querySelector('.catalog-price-input');
       priceInput.addEventListener('input', () => {
         priceInput.dataset.touched = '1';
         updateCatalogLinePreview(row);
       });
-      row.querySelector('.catalog-product-select').addEventListener('change', () => {
-        priceInput.dataset.touched = '';
+      const searchInput = row.querySelector('.catalog-product-search');
+      searchInput.addEventListener('focus', () => {
+        updateProductSearchResults(row, searchInput.value);
+      });
+      searchInput.addEventListener('input', () => {
+        row.querySelector('.catalog-variant-id').value = '';
         updateCatalogLinePreview(row);
+        updateProductSearchResults(row, searchInput.value);
       });
       container.appendChild(row);
+      if (prefill?.variant_id) {
+        const product = findProductByVariantId(prefill.variant_id);
+        if (product) {
+          selectCatalogProduct(row, product);
+        }
+      }
       updateCatalogLinePreview(row);
     }
 
@@ -1168,6 +1291,10 @@
         }
         syncPaymentFields();
         openModal('addOrderModal');
+        const firstSearch = document.querySelector('#catalogLineList .catalog-product-search');
+        if (firstSearch && !firstSearch.value) {
+          firstSearch.focus();
+        }
       } catch (error) {
         showToast(error.message || 'Could not load products', false);
       }
@@ -1175,9 +1302,9 @@
 
     function collectCatalogItems() {
       return Array.from(document.querySelectorAll('#catalogLineList .line-card')).map((row) => ({
-        variant_id: row.querySelector('.catalog-product-select')?.value,
-        title: findProductByVariantId(row.querySelector('.catalog-product-select')?.value)?.title || '',
-        image: findProductByVariantId(row.querySelector('.catalog-product-select')?.value)?.image || '',
+        variant_id: row.querySelector('.catalog-variant-id')?.value,
+        title: findProductByVariantId(row.querySelector('.catalog-variant-id')?.value)?.title || '',
+        image: findProductByVariantId(row.querySelector('.catalog-variant-id')?.value)?.image || '',
         price: row.querySelector('.catalog-price-input')?.value || 0,
         quantity: row.querySelector('.catalog-qty-input')?.value || 1,
       })).filter((item) => item.variant_id);
@@ -1546,6 +1673,11 @@
         document.getElementById('addOrderBtn').addEventListener('click', openAddOrderModal);
         document.getElementById('draftPaymentMethod').addEventListener('change', syncPaymentFields);
         syncPaymentFields();
+        document.addEventListener('click', (event) => {
+          if (!event.target.closest('.product-search-wrap')) {
+            document.querySelectorAll('.product-search-results').forEach((node) => node.classList.add('hidden'));
+          }
+        });
         document.getElementById('notifyBtn').addEventListener('click', enableNotifications);
         updateNotificationStatus();
         setupInstallPrompt();

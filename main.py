@@ -1006,12 +1006,28 @@ def create_shopify_employee_order(payload):
     complete_params = {}
     if payment_method.lower() == 'partial':
         complete_params['payment_pending'] = True
-    draft_order.complete(complete_params)
+    try:
+        draft_order.complete(complete_params)
+    except Exception as e:
+        errors = getattr(draft_order, 'errors', None)
+        raise RuntimeError(
+            f"Shopify could not complete the employee order: {e or errors or 'Unknown completion error'}"
+        )
 
-    order_id = getattr(draft_order, 'order_id', None)
-    order_name = getattr(draft_order, 'name', '') or ''
+    try:
+        refreshed_draft_order = shopify.DraftOrder.find(draft_order.id)
+    except Exception:
+        refreshed_draft_order = draft_order
+
+    order_id = (
+        getattr(refreshed_draft_order, 'order_id', None)
+        or getattr(draft_order, 'order_id', None)
+    )
+    order_name = (
+        getattr(refreshed_draft_order, 'name', '') or getattr(draft_order, 'name', '') or ''
+    )
     if not order_id:
-        raise RuntimeError('Shopify created a draft order but did not return a completed order ID.')
+        raise RuntimeError('Shopify created the draft, but the completed order ID did not come back. Please check Draft Orders in Shopify.')
 
     if payment_method.lower() == 'full':
         try:

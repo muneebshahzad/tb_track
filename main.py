@@ -2333,17 +2333,32 @@ def leopards_track_packets():
 def leopards_shipper_advice():
     api_key = os.getenv('LEOPARD_API_KEY')
     api_password = os.getenv('LEOPARD_PASSWORD')
-    from_date = request.args.get('from_date') or (datetime.now() - dt.timedelta(days=30)).strftime('%Y-%m-%d')
-    to_date = request.args.get('to_date') or datetime.now().strftime('%Y-%m-%d')
+    from_date = request.args.get('from_date') or (datetime.now() - dt.timedelta(days=30)).strftime('%m/%d/%Y')
+    to_date = request.args.get('to_date') or datetime.now().strftime('%m/%d/%Y')
     origin_city = request.args.get('origin_city', '')
     destination_city = request.args.get('destination_city', '')
+    cn_number = request.args.get('cn_number', '')
+    product = request.args.get('product', '')
+    status_filter = request.args.get('status', '')
+    start = int(request.args.get('start', 0) or 0)
+    length = int(request.args.get('length', 100) or 100)
 
     payload = {
         'api_key': api_key,
         'api_password': api_password,
-        'from_date': from_date,
-        'to_date': to_date,
+        'product': product,
+        'status': status_filter,
+        'origionID': origin_city,
+        'destinationID': destination_city,
+        'dateFrom': from_date,
+        'toDate': to_date,
+        'Cn_number': cn_number,
+        'start': start,
+        'length': length,
     }
+    # Keep the older keys too because Leopards has published two payload variants.
+    payload['from_date'] = datetime.strptime(from_date, '%m/%d/%Y').strftime('%Y-%m-%d') if '/' in from_date else from_date
+    payload['to_date'] = datetime.strptime(to_date, '%m/%d/%Y').strftime('%Y-%m-%d') if '/' in to_date else to_date
     if origin_city:
         payload['origin_city'] = origin_city
     if destination_city:

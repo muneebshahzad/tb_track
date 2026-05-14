@@ -10,6 +10,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body { font-family: 'DM Sans', sans-serif; background: #f8f9fc; color: #3a3b45; -webkit-font-smoothing: antialiased; display: none; }
+    body.embedded { display: block; }
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #d1d3e2; border-radius: 99px; }
@@ -107,12 +108,19 @@
       #sidebar .sb-item { padding: 9px 0; justify-content: center; }
       #sidebar .sb-user { padding: 10px 0; justify-content: center; }
     }
+
+    body.embedded #sidebar { display: none; }
+    body.embedded #main { width: 100%; }
   </style>
 </head>
-<body>
+<body class="{% if embedded_mode %}embedded{% endif %}">
 
 <script>
 (function() {
+  {% if skip_base_password_prompt %}
+  document.body.style.display = 'block';
+  return;
+  {% endif %}
   const pw = 'security';
   const ttl = 10 * 60 * 1000;
   const last = localStorage.getItem('tbLastAccess');

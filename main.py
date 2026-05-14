@@ -56,6 +56,8 @@ app.register_blueprint(campaigns_bp)
 
 EMPLOYEE_PORTAL_PASSWORD = os.getenv('EMPLOYEE_PORTAL_PASSWORD', '@@@t')
 EMPLOYEE_PORTAL_SESSION_KEY = 'employee_portal_authenticated'
+ADMIN_PORTAL_PASSWORD = os.getenv('ADMIN_PORTAL_PASSWORD', 'security')
+ADMIN_PORTAL_SESSION_KEY = 'admin_portal_authenticated'
 SHOPIFY_OAUTH_STATE_SESSION_KEY = 'shopify_oauth_state'
 
 # ── Jinja2 helpers ────────────────────────────────────────────────────────────
@@ -111,7 +113,12 @@ def parse_date_filter(value):
 
 @app.context_processor
 def inject_now():
-    return {'now': dt.datetime.now()}
+    is_admin_portal = bool(session.get(ADMIN_PORTAL_SESSION_KEY))
+    return {
+        'now': dt.datetime.now(),
+        'skip_base_password_prompt': is_admin_portal,
+        'embedded_mode': request.args.get('embedded') == '1',
+    }
 
 order_details = []
 daraz_orders = []
@@ -557,6 +564,75 @@ def tracking():
         darazOrders=daraz_orders,
         employee_approvals=build_employee_approval_items(),
     )
+
+
+def build_admin_mobile_sections():
+    return [
+        {'id': 'dashboard', 'label': 'Dashboard', 'icon': '🏠', 'src': '/?embedded=1'},
+        {'id': 'orders', 'label': 'Orders', 'icon': '📦', 'src': '/orders?embedded=1'},
+        {'id': 'payments', 'label': 'Payments', 'icon': '💰', 'src': '/payments?embedded=1'},
+        {'id': 'campaigns', 'label': 'Campaigns', 'icon': '📣', 'src': '/campaigns/?embedded=1'},
+        {'id': 'scanner', 'label': 'Scanner', 'icon': '🔍', 'src': '/employee_portal'},
+        {'id': 'employee-orders', 'label': 'Queue', 'icon': '🧾', 'src': '/employee_portal/orders'},
+        {'id': 'pending', 'label': 'Pending', 'icon': '📋', 'src': '/pending?embedded=1'},
+        {'id': 'undelivered', 'label': 'Undelivered', 'icon': '🚚', 'src': '/undelivered?embedded=1'},
+        {'id': 'daraz', 'label': 'Daraz', 'icon': '🛒', 'src': '/daraz/orders?embedded=1'},
+    ]
+
+
+@app.route('/admin_portal', methods=['GET', 'POST'])
+def admin_portal():
+    selected = (request.values.get('section') or 'dashboard').strip().lower()
+    sections = build_admin_mobile_sections()
+    section_ids = {section['id'] for section in sections}
+    if selected not in section_ids:
+        selected = 'dashboard'
+
+    if request.method == 'POST':
+        submitted_password = (request.form.get('password') or '').strip()
+        if submitted_password == ADMIN_PORTAL_PASSWORD:
+            session[ADMIN_PORTAL_SESSION_KEY] = True
+            return redirect(url_for('admin_portal', section=selected))
+        return render_template(
+            'admin_portal.html',
+            view='login',
+            login_error='Wrong password. Try again.',
+            sections=sections,
+            selected_section=selected,
+        ), 401
+
+    if not admin_portal_is_authenticated():
+        return render_template(
+            'admin_portal.html',
+            view='login',
+            login_error='',
+            sections=sections,
+            selected_section=selected,
+        )
+
+    return render_template(
+        'admin_portal.html',
+        view='portal',
+        sections=sections,
+        selected_section=selected,
+        employee_approvals=build_employee_approval_items(),
+    )
+
+
+@app.route('/admin_portal/logout', methods=['POST'])
+def admin_portal_logout():
+    session.pop(ADMIN_PORTAL_SESSION_KEY, None)
+    return redirect(url_for('admin_portal'))
+
+
+@app.route('/admin_portal-manifest.webmanifest')
+def admin_portal_manifest():
+    return send_from_directory('static', 'admin-portal.webmanifest', mimetype='application/manifest+json')
+
+
+@app.route('/admin_portal-sw.js')
+def admin_portal_service_worker():
+    return send_from_directory('static', 'admin-portal-sw.js', mimetype='application/javascript')
 
 
 @app.route('/refresh', methods=['POST'])
@@ -1140,8 +1216,12 @@ def build_employee_portal_orders():
     return combined_orders
 
 
+def admin_portal_is_authenticated():
+    return bool(session.get(ADMIN_PORTAL_SESSION_KEY))
+
+
 def employee_portal_is_authenticated():
-    return bool(session.get(EMPLOYEE_PORTAL_SESSION_KEY))
+    return bool(session.get(EMPLOYEE_PORTAL_SESSION_KEY) or session.get(ADMIN_PORTAL_SESSION_KEY))
 
 
 def employee_portal_safe_next_url(candidate):

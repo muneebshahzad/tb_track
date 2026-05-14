@@ -1,0 +1,17 @@
+{
+  "name": "Tick Bags Admin Portal",
+  "short_name": "TB Admin",
+  "start_url": "/admin_portal",
+  "scope": "/admin_portal",
+  "display": "standalone",
+  "background_color": "#f4efe6",
+  "theme_color": "#14213d",
+  "icons": [
+    {
+      "src": "/static/employee-portal-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

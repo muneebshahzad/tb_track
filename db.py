@@ -26,10 +26,34 @@ def _ensure_app_settings_table(cur):
 
 
 def get_conn():
-    url = os.getenv('DATABASE_URL', '')
+    url = (
+        os.getenv('DATABASE_URL', '')
+        or os.getenv('POSTGRES_URL', '')
+        or os.getenv('POSTGRESQL_URL', '')
+    )
     if url.startswith('postgres://'):
         url = url.replace('postgres://', 'postgresql://', 1)
-    return psycopg2.connect(url)
+    if url:
+        return psycopg2.connect(url)
+
+    host = os.getenv('PGHOST') or os.getenv('POSTGRES_HOST')
+    port = os.getenv('PGPORT') or os.getenv('POSTGRES_PORT') or '5432'
+    user = os.getenv('PGUSER') or os.getenv('POSTGRES_USER')
+    password = os.getenv('PGPASSWORD') or os.getenv('POSTGRES_PASSWORD')
+    database = os.getenv('PGDATABASE') or os.getenv('POSTGRES_DB') or os.getenv('POSTGRES_DATABASE')
+
+    if host and user and database:
+        return psycopg2.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            dbname=database,
+        )
+
+    raise RuntimeError(
+        "Database configuration missing. Set DATABASE_URL (preferred) or PGHOST/PGUSER/PGPASSWORD/PGDATABASE."
+    )
 
 
 def init_db():

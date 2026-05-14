@@ -55,34 +55,17 @@
       position: sticky;
       top: 8px;
       z-index: 10;
+      padding: 12px 14px;
     }
     .brand-lockup {
-      width: 152px;
+      width: 118px;
       display: block;
-      margin: 0 0 10px;
+      margin: 0;
     }
     .brand-lockup img {
       width: 100%;
       display: block;
       height: auto;
-    }
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: rgba(20, 33, 61, 0.06);
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-    h1 {
-      margin: 10px 0 6px;
-      font-size: 30px;
-      line-height: 0.95;
     }
     .subcopy {
       margin: 0;
@@ -93,33 +76,10 @@
     .hero-actions {
       display: flex;
       gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 14px;
-    }
-    .hero-stats {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 12px;
-    }
-    .stat-pill, .status-pill {
-      display: inline-flex;
+      flex-wrap: nowrap;
       align-items: center;
-      gap: 6px;
-      border-radius: 999px;
-      background: rgba(20, 33, 61, 0.06);
-      color: var(--ink);
-      font-size: 12px;
-      font-weight: 700;
-      padding: 8px 12px;
+      justify-content: flex-end;
     }
-    .status-pill .dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: #b8b2aa;
-    }
-    .status-pill.active .dot { background: var(--green); }
     button, .text-btn {
       border: 0;
       cursor: pointer;
@@ -130,8 +90,8 @@
       color: var(--ink);
       border: 1px solid var(--line);
       border-radius: 14px;
-      min-height: 46px;
-      padding: 12px 14px;
+      min-height: 42px;
+      padding: 10px 12px;
       font-size: 14px;
       font-weight: 700;
       text-decoration: none;
@@ -146,30 +106,30 @@
       border-color: transparent;
     }
     .icon-btn {
-      width: 46px;
-      min-width: 46px;
+      width: 42px;
+      min-width: 42px;
       padding: 0;
-      font-size: 18px;
+      font-size: 16px;
     }
     .tabs {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
-      padding: 12px;
+      padding: 10px;
     }
     .tab-btn {
       border: 1px solid var(--line);
-      border-radius: 16px;
+      border-radius: 14px;
       background: #fff;
       color: var(--ink);
-      min-height: 76px;
-      padding: 10px 8px;
+      min-height: 64px;
+      padding: 8px 7px;
       display: flex;
       flex-direction: column;
-      align-items: flex-start;
+      align-items: center;
       justify-content: center;
-      gap: 6px;
-      text-align: left;
+      gap: 5px;
+      text-align: center;
       transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
     }
     .tab-btn.active {
@@ -183,7 +143,7 @@
       line-height: 1;
     }
     .tab-label {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 800;
       line-height: 1.05;
     }
@@ -192,21 +152,17 @@
       padding: 0;
     }
     .viewer-toolbar {
-      padding: 12px 14px;
+      padding: 10px 12px;
       border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-end;
       gap: 10px;
       flex-wrap: wrap;
     }
-    .viewer-title {
-      font-size: 14px;
-      font-weight: 800;
-    }
     .viewer-frame {
       width: 100%;
-      height: calc(100vh - 310px);
+      height: calc(100vh - 190px);
       min-height: 560px;
       border: 0;
       background: #fff;
@@ -220,6 +176,17 @@
       gap: 12px;
     }
     .login-card h1 { font-size: 32px; }
+    .hero-topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .viewer-icon-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .login-field {
       width: 100%;
       border-radius: 16px;
@@ -238,7 +205,7 @@
     }
     @media (max-width: 640px) {
       .tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .viewer-frame { height: calc(100vh - 352px); min-height: 500px; }
+      .viewer-frame { height: calc(100vh - 180px); min-height: 500px; }
     }
   </style>
 </head>
@@ -249,9 +216,8 @@
         <a class="brand-lockup" href="#">
           <img src="/static/tickbags-logo.png" alt="TickBags logo">
         </a>
-        <span class="eyebrow">Tick Bags Admin Portal</span>
         <h1>Admin mobile.</h1>
-        <p class="subcopy">One place for tracking, approvals, payments, campaigns, scanning, and employee queue work.</p>
+        <p class="subcopy">Password-protected mobile admin access.</p>
         {% if login_error %}
           <div class="error">{{ login_error }}</div>
         {% endif %}
@@ -260,23 +226,17 @@
       </form>
     {% else %}
       <section class="hero card">
-        <a class="brand-lockup" href="#">
-          <img src="/static/tickbags-logo.png" alt="TickBags logo">
-        </a>
-        <span class="eyebrow">Tick Bags Admin Portal</span>
-        <h1>Mobile control room.</h1>
-        <p class="subcopy">We’ve pulled the desktop admin tools and the employee tools into one phone-friendly shell, with the urgent stuff close at hand.</p>
-        <div class="hero-stats">
-          <span class="stat-pill">Admin + Employee</span>
-          <span class="stat-pill">Tracking + Orders + Payments</span>
-          <span class="status-pill active"><span class="dot"></span><span>Authenticated</span></span>
-        </div>
-        <div class="hero-actions">
-          <button class="text-btn" id="installBtn" type="button" hidden>Install App</button>
-          <a class="text-btn" id="openCurrentBtn" href="/" target="_blank" rel="noopener">Open Current Tool</a>
-          <form method="post" action="/admin_portal/logout" style="margin:0;">
-            <button class="icon-btn" type="submit" title="Logout">↗</button>
-          </form>
+        <div class="hero-topline">
+          <a class="brand-lockup" href="#">
+            <img src="/static/tickbags-logo.png" alt="TickBags logo">
+          </a>
+          <div class="hero-actions">
+            <button class="icon-btn" id="installBtn" type="button" hidden title="Install App">＋</button>
+            <a class="icon-btn" id="openCurrentBtn" href="/" target="_blank" rel="noopener" title="Open Current Tool">↗</a>
+            <form method="post" action="/admin_portal/logout" style="margin:0;">
+              <button class="icon-btn" type="submit" title="Logout">⎋</button>
+            </form>
+          </div>
         </div>
       </section>
 
@@ -297,8 +257,9 @@
 
       <section class="card iframe-card">
         <div class="viewer-toolbar">
-          <div class="viewer-title" id="viewerTitle">Dashboard</div>
-          <div class="subcopy" style="font-size:12px;">Same live tools, wrapped for mobile.</div>
+          <div class="viewer-icon-row">
+            <a class="icon-btn" id="viewerOpenBtn" href="/" target="_blank" rel="noopener" title="Open Current Tool">↗</a>
+          </div>
         </div>
         <iframe id="toolFrame" class="viewer-frame" title="Admin portal tool view" src=""></iframe>
       </section>
@@ -310,8 +271,8 @@
       const sections = {{ sections|tojson }};
       const defaultSection = {{ selected_section|tojson }};
       const toolFrame = document.getElementById('toolFrame');
-      const viewerTitle = document.getElementById('viewerTitle');
       const openCurrentBtn = document.getElementById('openCurrentBtn');
+      const viewerOpenBtn = document.getElementById('viewerOpenBtn');
       const installBtn = document.getElementById('installBtn');
       let deferredInstallPrompt = null;
 
@@ -327,9 +288,9 @@
 
       function openSection(sectionId, persist = true) {
         const section = getSectionById(sectionId);
-        viewerTitle.textContent = section.label;
         toolFrame.src = section.src;
         openCurrentBtn.href = section.src;
+        viewerOpenBtn.href = section.src;
         updateActiveTab(section.id);
         if (persist) {
           localStorage.setItem('tbAdminPortalSection', section.id);
@@ -347,6 +308,11 @@
         installBtn.hidden = false;
       });
 
+      window.addEventListener('appinstalled', () => {
+        deferredInstallPrompt = null;
+        installBtn.hidden = true;
+      });
+
       installBtn?.addEventListener('click', async () => {
         if (!deferredInstallPrompt) return;
         deferredInstallPrompt.prompt();
@@ -354,6 +320,10 @@
         deferredInstallPrompt = null;
         installBtn.hidden = true;
       });
+
+      if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+        installBtn.hidden = true;
+      }
 
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/admin_portal-sw.js').catch(() => {});

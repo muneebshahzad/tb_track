@@ -569,14 +569,11 @@ def tracking():
 def build_admin_mobile_sections():
     return [
         {'id': 'dashboard', 'label': 'Dashboard', 'icon': '🏠', 'src': '/?embedded=1'},
-        {'id': 'orders', 'label': 'Orders', 'icon': '📦', 'src': '/orders?embedded=1'},
         {'id': 'payments', 'label': 'Payments', 'icon': '💰', 'src': '/payments?embedded=1'},
-        {'id': 'campaigns', 'label': 'Campaigns', 'icon': '📣', 'src': '/campaigns/?embedded=1'},
         {'id': 'scanner', 'label': 'Scanner', 'icon': '🔍', 'src': '/employee_portal'},
         {'id': 'employee-orders', 'label': 'Queue', 'icon': '🧾', 'src': '/employee_portal/orders'},
         {'id': 'pending', 'label': 'Pending', 'icon': '📋', 'src': '/pending?embedded=1'},
-        {'id': 'undelivered', 'label': 'Undelivered', 'icon': '🚚', 'src': '/undelivered?embedded=1'},
-        {'id': 'daraz', 'label': 'Daraz', 'icon': '🛒', 'src': '/daraz/orders?embedded=1'},
+        {'id': 'undelivered', 'label': 'Undelivered', 'icon': '🚚', 'src': '/?embedded=1&preset=undelivered'},
     ]
 
 

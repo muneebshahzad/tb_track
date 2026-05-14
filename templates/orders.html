@@ -462,13 +462,13 @@
                   </div>
                   {% if not is_waiting_approval %}
                     <div class="actions">
-                      <button class="action-btn packed" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">Packed</button>
-                      <button class="action-btn manufactured" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">Manufactured</button>
+                      <button class="action-btn packed" onclick="updateStatus(this, '{{ order.order_id }}', '{{ item.tracking_number }}', 'Packed')">Packed</button>
+                      <button class="action-btn manufactured" onclick="updateStatus(this, '{{ order.order_id }}', '{{ item.tracking_number }}', 'Manufactured')">Manufactured</button>
                       {% if order.is_lahore %}
-                        <button class="action-btn lahore" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Delivered in Lahore')">Delivered in Lahore</button>
+                        <button class="action-btn lahore" onclick="updateStatus(this, '{{ order.order_id }}', '{{ item.tracking_number }}', 'Delivered in Lahore')">Delivered in Lahore</button>
                       {% endif %}
                       {% if order.order_via == 'Shopify' %}
-                        <button class="action-btn cancel" onclick="updateStatus('{{ order.order_id }}', '{{ item.tracking_number }}', 'Cancelled by Employee')">Cancelled</button>
+                        <button class="action-btn cancel" onclick="updateStatus(this, '{{ order.order_id }}', '{{ item.tracking_number }}', 'Cancelled by Employee')">Cancelled</button>
                       {% endif %}
                     </div>
                   {% endif %}
@@ -497,6 +497,7 @@
   <script>
     const EMPLOYEE_PORTAL_MODE = {{ employee_portal_mode|tojson }};
     const KNOWN_ORDER_STORAGE_KEY = 'tbEmployeePortalKnownOrders';
+    const EMPLOYEE_ORDER_UI_STATE_KEY = 'tbEmployeeOrdersUiState';
     let deferredInstallPrompt = null;
 
     function showToast(message, success) {
@@ -545,6 +546,23 @@
       sortedCards.forEach((card) => container.appendChild(card));
     }
 
+    function saveUiState() {
+      const sortSelect = document.getElementById('sortSelect');
+      const lahoreToggle = document.getElementById('lahoreOnlyToggle');
+      localStorage.setItem(EMPLOYEE_ORDER_UI_STATE_KEY, JSON.stringify({
+        sort: sortSelect ? sortSelect.value : 'pending',
+        lahoreOnly: Boolean(lahoreToggle && lahoreToggle.checked),
+      }));
+    }
+
+    function loadUiState() {
+      try {
+        return JSON.parse(localStorage.getItem(EMPLOYEE_ORDER_UI_STATE_KEY) || '{}');
+      } catch (error) {
+        return {};
+      }
+    }
+
     function applyLahoreFilter() {
       const lahoreOnly = document.getElementById('lahoreOnlyToggle')?.checked;
       document.querySelectorAll('.order-card').forEach((card) => {
@@ -552,6 +570,7 @@
         card.style.display = visible ? '' : 'none';
       });
       updateOrderSummary();
+      saveUiState();
     }
 
     function updateNotificationStatus() {
@@ -679,7 +698,55 @@
       });
     }
 
-    function updateStatus(orderId, trackingNumber, status) {
+    function renderEmployeeItemState(itemElement, status) {
+      if (!itemElement) return;
+      const statusRow = itemElement.querySelector('.status-row');
+      const actions = itemElement.querySelector('.actions');
+      let overlay = itemElement.querySelector('.item-overlay');
+
+      if (!statusRow) return;
+
+      if (status === 'Delivered in Lahore' || status === 'Cancelled by Employee') {
+        itemElement.classList.add('awaiting-lahore-approval');
+        if (actions) {
+          actions.remove();
+        }
+        if (status === 'Delivered in Lahore') {
+          statusRow.innerHTML = `
+            <span class="mini-badge awaiting">Marked Delivered in Lahore</span>
+            <span class="mini-badge awaiting">Shopify tag applied: Delivered in Lahore</span>
+          `;
+          if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'item-overlay';
+            itemElement.appendChild(overlay);
+          }
+          overlay.textContent = 'Marked Delivered in Lahore, waiting approval. Shopify tag applied: Delivered in Lahore.';
+        } else {
+          statusRow.innerHTML = `
+            <span class="mini-badge awaiting">Cancelled by Employee</span>
+          `;
+          if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'item-overlay';
+            itemElement.appendChild(overlay);
+          }
+          overlay.textContent = 'Cancelled by Employee, waiting approval.';
+        }
+        return;
+      }
+
+      if (overlay) {
+        overlay.remove();
+      }
+      itemElement.classList.remove('awaiting-lahore-approval');
+      statusRow.innerHTML = `<span class="mini-badge">${status}</span>`;
+    }
+
+    function updateStatus(button, orderId, trackingNumber, status) {
+      if (button) {
+        button.disabled = true;
+      }
       fetch('/update_status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -692,18 +759,38 @@
       .then((response) => response.json())
       .then((data) => {
         showToast(data.message || 'Status updated', true);
-        window.setTimeout(() => window.location.reload(), 500);
+        const itemElement = button ? button.closest('.item') : null;
+        renderEmployeeItemState(itemElement, status);
+        if (button && status !== 'Delivered in Lahore' && status !== 'Cancelled by Employee') {
+          button.disabled = false;
+        }
+        saveUiState();
       })
-      .catch(() => showToast('Could not update status', false));
+      .catch(() => {
+        if (button) {
+          button.disabled = false;
+        }
+        showToast('Could not update status', false);
+      });
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+      const uiState = loadUiState();
+      const sortSelect = document.getElementById('sortSelect');
+      const lahoreToggle = document.getElementById('lahoreOnlyToggle');
+      if (sortSelect && uiState.sort) {
+        sortSelect.value = uiState.sort;
+      }
+      if (lahoreToggle && typeof uiState.lahoreOnly === 'boolean') {
+        lahoreToggle.checked = uiState.lahoreOnly;
+      }
       refreshPendingBadges();
-      sortOrders('pending');
+      sortOrders(sortSelect ? sortSelect.value : 'pending');
       applyLahoreFilter();
       document.getElementById('sortSelect').addEventListener('change', function () {
         sortOrders(this.value);
         applyLahoreFilter();
+        saveUiState();
       });
       document.getElementById('lahoreOnlyToggle').addEventListener('change', applyLahoreFilter);
       if (EMPLOYEE_PORTAL_MODE) {

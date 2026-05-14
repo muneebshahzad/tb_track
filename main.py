@@ -2143,6 +2143,82 @@ def search():
 import requests as _req
 
 
+def build_tracking_lookup():
+    lookup = {}
+
+    for order in order_details:
+        customer = order.get('customer_details') or {}
+        for item in order.get('line_items', []) or []:
+            cn = str(item.get('tracking_number') or '').strip()
+            if not cn or cn == 'N/A' or cn in lookup:
+                continue
+            lookup[cn] = {
+                'order_via': 'Shopify',
+                'order_id': order.get('order_id', ''),
+                'order_link': order.get('order_link', ''),
+                'customer_name': customer.get('name') or item.get('name', ''),
+                'customer_phone': customer.get('phone') or item.get('phone', ''),
+                'customer_city': customer.get('city') or item.get('city', ''),
+                'item_title': item.get('product_title', ''),
+                'item_image': item.get('image_src', ''),
+                'amount': order.get('total_price', 0),
+                'status': order.get('status', ''),
+            }
+
+    for order in daraz_orders:
+        customer = order.get('customer') or {}
+        for item in order.get('items_list', []) or []:
+            cn = str(item.get('tracking_number') or '').strip()
+            if not cn or cn == 'N/A' or cn in lookup:
+                continue
+            lookup[cn] = {
+                'order_via': 'Daraz',
+                'order_id': order.get('order_id', ''),
+                'order_link': '',
+                'customer_name': customer.get('name', ''),
+                'customer_phone': customer.get('phone', ''),
+                'customer_city': '',
+                'item_title': item.get('item_title', ''),
+                'item_image': item.get('item_image', ''),
+                'amount': order.get('total_price', 0),
+                'status': order.get('status', ''),
+            }
+
+    return lookup
+
+
+def normalize_shipper_advice_items(payload):
+    raw_items = payload.get('data') or payload.get('packet_list') or []
+    if not isinstance(raw_items, list):
+        return []
+
+    tracking_lookup = build_tracking_lookup()
+    items = []
+    for item in raw_items:
+        cn = str(item.get('cn_number') or item.get('track_number') or '').strip()
+        match = tracking_lookup.get(cn, {})
+        advice_status = str(item.get('shipper_advice_status') or '').strip()
+        remarks = str(item.get('shipper_remarks') or item.get('remarks') or '').strip()
+        items.append({
+            'id': item.get('id'),
+            'cn_number': cn,
+            'status': item.get('status') or item.get('booked_packet_status') or '',
+            'reason': item.get('reason') or item.get('pending_reason') or '',
+            'product': item.get('product') or item.get('shipment_name_eng') or '',
+            'shipper_advice_status': advice_status,
+            'shipper_remarks': remarks,
+            'created_date': item.get('created_date') or item.get('advice_date_created') or item.get('booked_packet_date') or '',
+            'consignee_name': item.get('consignee_name') or item.get('consignment_name_eng') or '',
+            'consignee_address': item.get('consignee_address') or item.get('consignment_address') or '',
+            'consignee_mobile': item.get('consignee_mobile') or item.get('consignment_phone') or '',
+            'destination_city_name': item.get('destination_city_name') or '',
+            'matched_order': match,
+        })
+
+    items.sort(key=lambda entry: str(entry.get('created_date') or ''), reverse=True)
+    return items
+
+
 @app.route('/payments')
 def payments_page():
     return render_template('payments.html')
@@ -2251,6 +2327,88 @@ def leopards_track_packets():
         return jsonify(r.json())
     except Exception as e:
         return jsonify({"status": 0, "error": str(e)}), 500
+
+
+@app.route('/api/leopards/shipper-advice')
+def leopards_shipper_advice():
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+    from_date = request.args.get('from_date') or (datetime.now() - dt.timedelta(days=30)).strftime('%Y-%m-%d')
+    to_date = request.args.get('to_date') or datetime.now().strftime('%Y-%m-%d')
+    origin_city = request.args.get('origin_city', '')
+    destination_city = request.args.get('destination_city', '')
+
+    payload = {
+        'api_key': api_key,
+        'api_password': api_password,
+        'from_date': from_date,
+        'to_date': to_date,
+    }
+    if origin_city:
+        payload['origin_city'] = origin_city
+    if destination_city:
+        payload['destination_city'] = destination_city
+
+    try:
+        response = _req.post(
+            'https://merchantapi.leopardscourier.com/api/shipperAdviceList/format/json/',
+            json=payload,
+            verify=False,
+            timeout=45,
+        )
+        response.raise_for_status()
+        data = response.json()
+        items = normalize_shipper_advice_items(data)
+        return jsonify({
+            'status': data.get('status', 1),
+            'error': data.get('error', '0'),
+            'count': len(items),
+            'items': items,
+        })
+    except Exception as e:
+        return jsonify({'status': 0, 'error': str(e), 'items': []}), 500
+
+
+@app.route('/api/leopards/shipper-advice/update', methods=['POST'])
+def leopards_update_shipper_advice():
+    data = request.get_json() or {}
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+    advice_id = data.get('id')
+    cn_number = str(data.get('cn_number') or '').strip()
+    advice_status = str(data.get('shipper_advice_status') or '').strip().upper()
+    shipper_remarks = str(data.get('shipper_remarks') or '').strip()
+
+    if advice_status not in {'RA', 'RT'}:
+        return jsonify({'success': False, 'error': 'Allowed shipper advice statuses are RA or RT.'}), 400
+    if not advice_id or not cn_number:
+        return jsonify({'success': False, 'error': 'Advice id and CN number are required.'}), 400
+
+    payload = {
+        'api_key': api_key,
+        'api_password': api_password,
+        'data': [{
+            'id': advice_id,
+            'cn_number': cn_number,
+            'shipper_advice_status': advice_status,
+            'shipper_remarks': shipper_remarks,
+        }]
+    }
+
+    try:
+        response = _req.post(
+            'https://merchantapi.leopardscourier.com/api/updateShipperAdvice/format/json/',
+            json=payload,
+            verify=False,
+            timeout=45,
+        )
+        response.raise_for_status()
+        result = response.json()
+        if str(result.get('status')) != '1' or str(result.get('error', '0')) not in {'0', ''}:
+            return jsonify({'success': False, 'error': result.get('error') or 'Leopards rejected the shipper advice update.'}), 400
+        return jsonify({'success': True, 'message': result.get('data') or 'Shipper advice updated successfully.'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/track/<tracking_number>')

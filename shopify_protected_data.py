@@ -138,10 +138,20 @@ def save_offline_token(shop: str, payload: dict[str, Any]) -> None:
     if not token:
         raise ValueError("Shopify did not return an access token")
 
-    set_app_setting(SHOPIFY_TOKEN_SETTING_KEY, token)
-    set_app_setting(SHOPIFY_SCOPE_SETTING_KEY, _clean(scopes))
-    set_app_setting(SHOPIFY_INSTALLED_SHOP_KEY, shop)
-    set_app_setting(SHOPIFY_INSTALLED_AT_KEY, str(int(time.time())))
+    writes_ok = all([
+        set_app_setting(SHOPIFY_TOKEN_SETTING_KEY, token),
+        set_app_setting(SHOPIFY_SCOPE_SETTING_KEY, _clean(scopes)),
+        set_app_setting(SHOPIFY_INSTALLED_SHOP_KEY, shop),
+        set_app_setting(SHOPIFY_INSTALLED_AT_KEY, str(int(time.time()))),
+    ])
+    if not writes_ok:
+        raise RuntimeError("Could not persist Shopify OAuth token to database")
+
+    saved_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
+    saved_shop = _clean(get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY))
+    if saved_token != token or saved_shop != shop:
+        raise RuntimeError("Shopify OAuth token did not persist correctly")
+
     _token_cache["token"] = token
     _token_cache["expires_at"] = time.time() + 86400 * 365
 

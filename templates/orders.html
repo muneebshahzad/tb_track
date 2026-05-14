@@ -423,7 +423,7 @@
     }
     .invoice-grid {
       display: grid;
-      grid-template-columns: 1.1fr 0.9fr;
+      grid-template-columns: 1fr;
       gap: 12px;
       margin-bottom: 14px;
     }
@@ -795,10 +795,6 @@
           <div class="invoice-label">Customer</div>
           <div class="invoice-value" id="invoiceCustomerBlock"></div>
         </div>
-        <div class="invoice-panel">
-          <div class="invoice-label">Summary</div>
-          <div class="invoice-value" id="invoiceSummaryBlock"></div>
-        </div>
       </div>
       <div class="invoice-panel">
         <div class="invoice-label">Products</div>
@@ -942,20 +938,25 @@
           line_total: Number(item.line_total || (unitPrice * quantity) || 0),
         };
       });
+      const computedSubtotal = items.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
+      const storedSubtotal = Number(order.subtotal_price || 0);
+      const shippingCharges = Number(order.shipping_charges || 0);
+      const totalDiscounts = Number(order.total_discounts || 0);
+      const total = Number(order.total_price || 0);
+      const subtotal = storedSubtotal || computedSubtotal;
+      const derivedShipping = !shippingCharges && total > subtotal ? Math.max(total - subtotal + totalDiscounts, 0) : shippingCharges;
       return {
         order_id: `#${order.order_id}`,
         customer_name: order.customer_name || 'Customer not set',
         customer_phone: order.customer_phone || '',
         customer_address: order.customer_address || '',
         customer_city: order.customer_city || '',
-        summary_lines: [
-          `${order.order_via} order`,
-          order.status || 'Pending',
-          ...(order.is_lahore ? ['Lahore order'] : []),
-        ],
         items,
         totals: {
-          total: Number(order.total_price || 0),
+          subtotal,
+          discount: totalDiscounts,
+          delivery_charges: derivedShipping,
+          total,
         },
       };
     }
@@ -969,10 +970,6 @@
 
       document.getElementById('invoiceOrderTitle').textContent = invoice.order_id || 'Order';
       document.getElementById('invoiceCustomerBlock').innerHTML = customerLines.join('<br>');
-      document.getElementById('invoiceSummaryBlock').innerHTML = (invoice.summary_lines || [])
-        .filter(Boolean)
-        .map((line) => `<div>${line}</div>`)
-        .join('');
 
       const productsHtml = (invoice.items || []).map((item) => {
         const qty = Number(item.quantity || 0);
@@ -996,9 +993,9 @@
       const itemsCount = (invoice.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
       const totalsHtml = [
         `<div class="invoice-total-row"><span>Items</span><span>${itemsCount}</span></div>`,
-        totals.subtotal ? `<div class="invoice-total-row"><span>Subtotal</span><span>${formatMoney(totals.subtotal)}</span></div>` : '',
+        `<div class="invoice-total-row"><span>Subtotal</span><span>${formatMoney(totals.subtotal || 0)}</span></div>`,
         totals.discount ? `<div class="invoice-total-row"><span>Discount</span><span>- ${formatMoney(totals.discount)}</span></div>` : '',
-        totals.delivery_charges ? `<div class="invoice-total-row"><span>Delivery Charges</span><span>${formatMoney(totals.delivery_charges)}</span></div>` : '',
+        `<div class="invoice-total-row"><span>Shipping Charges</span><span>${formatMoney(totals.delivery_charges || 0)}</span></div>`,
         totals.advance_paid ? `<div class="invoice-total-row"><span>Advance Paid</span><span>${formatMoney(totals.advance_paid)}</span></div>` : '',
         totals.balance_due ? `<div class="invoice-total-row"><span>Balance Due</span><span>${formatMoney(totals.balance_due)}</span></div>` : '',
         `<div class="invoice-total-row"><span>Total</span><strong>${formatMoney(totals.total || 0)}</strong></div>`,

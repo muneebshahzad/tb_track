@@ -374,6 +374,9 @@ async def process_order(order, tracking_cache):
         'tracking_id':        'N/A',
         'created_at':         formatted_datetime,
         'total_price':        order.total_price,
+        'subtotal_price':     getattr(order, 'subtotal_price', 0) or 0,
+        'shipping_charges':   getattr(getattr(order, 'total_shipping_price_set', None), 'shop_money', None).amount if getattr(getattr(order, 'total_shipping_price_set', None), 'shop_money', None) else 0,
+        'total_discounts':    getattr(order, 'total_discounts', 0) or 0,
         'line_items':         [],
         'financial_status':   (order.financial_status).title(),
         'fulfillment_status': status,
@@ -1131,6 +1134,9 @@ def build_pending_orders_mobile_data():
                 'customer_address': (daraz_order.get('customer') or {}).get('address', ''),
                 'customer_city': '',
                 'items_list': items_with_status,
+                'subtotal_price': daraz_order['total_price'],
+                'shipping_charges': 0,
+                'total_discounts': 0,
                 'total_price': daraz_order['total_price']
             })
 
@@ -1167,6 +1173,9 @@ def build_pending_orders_mobile_data():
                 'is_lahore':  is_lahore_city(customer_city),
                 'date':       shopify_order['created_at'],
                 'items_list': shopify_items,
+                'subtotal_price': shopify_order.get('subtotal_price', 0),
+                'shipping_charges': shopify_order.get('shipping_charges', 0),
+                'total_discounts': shopify_order.get('total_discounts', 0),
                 'total_price': shopify_order['total_price']
             })
 

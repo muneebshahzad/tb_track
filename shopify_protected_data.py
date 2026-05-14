@@ -58,28 +58,37 @@ def get_graphql_token() -> str:
     if not (client_id and client_secret and shop_domain):
         return ""
 
-    response = requests.post(
-        f"https://{shop_domain}/admin/oauth/access_token",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        data={
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_secret,
-        },
-        timeout=30,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    access_token = _clean(payload.get("access_token"))
-    expires_in = int(payload.get("expires_in") or 0)
-    if access_token:
-        _token_cache["token"] = access_token
-        _token_cache["expires_at"] = now + max(0, expires_in - 300)
-    return access_token
+    try:
+        response = requests.post(
+            f"https://{shop_domain}/admin/oauth/access_token",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        access_token = _clean(payload.get("access_token"))
+        expires_in = int(payload.get("expires_in") or 0)
+        if access_token:
+            _token_cache["token"] = access_token
+            _token_cache["expires_at"] = now + max(0, expires_in - 300)
+        return access_token
+    except Exception as exc:
+        _token_cache["token"] = ""
+        _token_cache["expires_at"] = 0.0
+        print(f"Shopify token exchange failed: {exc}")
+        return ""
 
 
 def is_graphql_configured() -> bool:
-    return bool(get_shop_domain() and get_graphql_token())
+    static_token = _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"))
+    client_id = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_ID"))
+    client_secret = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_SECRET"))
+    return bool(get_shop_domain() and (static_token or (client_id and client_secret)))
 
 
 def get_graphql_endpoint() -> str:
@@ -94,6 +103,7 @@ def get_protected_data_config_status() -> dict[str, Any]:
     static_token = _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"))
     client_id = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_ID"))
     client_secret = _clean(os.getenv("SHOPIFY_GRAPHQL_CLIENT_SECRET"))
+    token = get_graphql_token()
     return {
         "enabled": is_graphql_configured(),
         "shop_domain": get_shop_domain(),
@@ -102,7 +112,8 @@ def get_protected_data_config_status() -> dict[str, Any]:
         "has_static_access_token": bool(static_token),
         "has_client_id": bool(client_id),
         "has_client_secret": bool(client_secret),
-        "has_access_token": bool(get_graphql_token()),
+        "has_access_token": bool(token),
+        "token_source_ready": bool(static_token) or bool(client_id and client_secret),
     }
 
 

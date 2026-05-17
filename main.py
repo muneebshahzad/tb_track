@@ -819,6 +819,21 @@ def split_customer_name(name):
     return parts[0], " ".join(parts[1:])
 
 
+def normalize_pk_phone(phone):
+    digits = ''.join(ch for ch in str(phone or '').strip() if ch.isdigit())
+    if not digits:
+        return ''
+    if digits.startswith('92'):
+        return f"+{digits}"
+    if digits.startswith('0'):
+        return f"+92{digits[1:]}"
+    if digits.startswith('3') and len(digits) == 10:
+        return f"+92{digits}"
+    if str(phone or '').strip().startswith('+'):
+        return str(phone or '').strip()
+    return f"+{digits}"
+
+
 def parse_money(value, default=0.0):
     try:
         return round(float(value or default), 2)
@@ -837,15 +852,13 @@ def format_employee_order_note(
     extra_notes='',
 ):
     lines = [
-        'Created from Tick Bags employee portal.',
-        f'Payment method: {payment_method or "Not specified"}',
         f'Delivery method: {delivery_method or "Not specified"}',
         f'Phone: {customer_phone or "Not provided"}',
     ]
+    if (payment_method or '').strip().lower() == 'partial':
+        lines.append('Payment method: Partial')
     if discount_amount:
         lines.append(f'Discount amount: PKR {discount_amount}')
-    if delivery_charges:
-        lines.append(f'Delivery charges: PKR {delivery_charges}')
     if advance_amount:
         lines.append(f'Advance paid by customer: PKR {advance_amount}')
     if custom_items:
@@ -982,12 +995,12 @@ def build_employee_invoice_payload(
 
 def create_shopify_employee_order(payload):
     customer_name = (payload.get('customer_name') or '').strip()
-    phone = (payload.get('phone') or '').strip()
+    phone = normalize_pk_phone(payload.get('phone'))
     city = (payload.get('city') or '').strip()
     address = (payload.get('address') or '').strip()
     discount_amount = parse_money(payload.get('discount_amount'))
     delivery_charges = parse_money(payload.get('delivery_charges'))
-    payment_method = (payload.get('payment_method') or '').strip()
+    payment_method = (payload.get('payment_method') or 'Unpaid').strip()
     delivery_method = (payload.get('delivery_method') or '').strip()
     advance_amount = parse_money(payload.get('advance_amount'))
     catalog_items = payload.get('catalog_items') or []
@@ -1000,6 +1013,8 @@ def create_shopify_employee_order(payload):
         raise ValueError('Phone number is required.')
     if payment_method.lower() == 'partial' and advance_amount <= 0:
         raise ValueError('Enter the advance paid amount for partial payment.')
+    if payment_method.lower() != 'partial':
+        advance_amount = 0
 
     first_name, last_name = split_customer_name(customer_name)
 
@@ -1063,7 +1078,6 @@ def create_shopify_employee_order(payload):
     draft_order = shopify.DraftOrder()
     draft_order.line_items = line_items
     draft_order.note = note
-    draft_order.tags = 'Employee Portal'
     draft_order.use_customer_default_address = False
     draft_order.shipping_address = {
         'first_name': first_name,
@@ -1099,11 +1113,8 @@ def create_shopify_employee_order(payload):
     if not draft_order.save():
         raise RuntimeError(json.dumps(getattr(draft_order, 'errors', {}) or {'error': 'Could not save draft order'}))
 
-    complete_params = {}
-    if payment_method.lower() == 'partial':
-        complete_params['payment_pending'] = True
     try:
-        draft_order.complete(complete_params)
+        draft_order.complete()
     except Exception as e:
         errors = getattr(draft_order, 'errors', None)
         raise RuntimeError(

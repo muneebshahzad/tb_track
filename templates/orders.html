@@ -908,13 +908,14 @@
           <label for="draftDeliveryCharges">Delivery Charges</label>
           <input id="draftDeliveryCharges" type="number" min="0" step="0.01" value="0">
         </div>
-        <div class="field">
-          <label for="draftPaymentMethod">Payment Method</label>
-          <select id="draftPaymentMethod">
-            <option value="Full">Full</option>
-            <option value="Partial">Partial</option>
-          </select>
-        </div>
+          <div class="field">
+            <label for="draftPaymentMethod">Payment Method</label>
+            <select id="draftPaymentMethod">
+              <option value="Unpaid" selected>No Advance (0%)</option>
+              <option value="Full">Full</option>
+              <option value="Partial">Partial</option>
+            </select>
+          </div>
         <div class="field hidden" id="draftAdvanceWrap">
           <label for="draftAdvanceAmount">Advance Paid</label>
           <input id="draftAdvanceAmount" type="number" min="0" step="0.01" value="0">
@@ -1370,7 +1371,7 @@
         document.getElementById('draftAddress').value = '';
         document.getElementById('draftDiscount').value = '0';
         document.getElementById('draftDeliveryCharges').value = '0';
-        document.getElementById('draftPaymentMethod').value = 'Full';
+        document.getElementById('draftPaymentMethod').value = 'Unpaid';
         document.getElementById('draftAdvanceAmount').value = '0';
         document.getElementById('draftDeliveryMethod').value = 'Home Delivery';
         document.getElementById('draftNotes').value = '';

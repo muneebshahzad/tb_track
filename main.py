@@ -2383,6 +2383,24 @@ def leopards_shipping_charges():
     return jsonify({"status": 1, "data": all_data})
 
 
+@app.route('/api/leopards/invoices')
+def leopards_invoices():
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+    url = (
+        f"https://merchantapi.leopardscourier.com/api/getInvoices/format/json/"
+        f"?api_key={api_key}&api_password={api_password}"
+        f"&start_date={start_date}&end_date={end_date}"
+    )
+    try:
+        r = _req.get(url, verify=False, timeout=30)
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"status": 0, "error": str(e), "data": []}), 500
+
+
 @app.route('/api/debug/finance')
 def debug_finance():
     cn = 'LE7523036243'

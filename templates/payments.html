@@ -14,6 +14,7 @@
   .fin-table tr:hover td { background: #f8f9fc; }
   .paid-badge   { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #d4f5e9; color: #0f6848; white-space: nowrap; }
   .unpaid-badge { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #fce8e6; color: #e74a3b; white-space: nowrap; }
+  .invoice-status-badge { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #fff3cd; color: #8b5a00; white-space: nowrap; text-transform: capitalize; }
   @media (max-width: 767px) { .kpi-grid { grid-template-columns: repeat(2,1fr); } .hide-mob { display: none !important; } }
 </style>
 
@@ -55,9 +56,36 @@
       <div class="kpi-card"><div class="kpi-bar" style="background:#e74a3b;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Unpaid Delivered</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiUnpaidDeliv">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">COD unsettled</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#f6c23e;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Unpaid Shipping</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiUnpaidShip">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">charges pending</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#6f42c1;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Net Receivable</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiNet">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">(Unpaid COD×96%) − Ship.</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#ff8c42;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Invoices Amount Pending</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiInvoicesPending">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiInvoicesPendingSub">0 invoices processing</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#20c997;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Total Receivable</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiTotalReceivable">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">Invoices pending + net receivable</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#1cc88a;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Delivered</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiDeliv">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiDelivSub">0 orders</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#e74a3b;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Returned</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiRet">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiRetSub">0 orders</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#f6c23e;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Pending</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiPend">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiPendSub">0 orders</div></div>
+    </div>
+
+    <div class="section-card" style="margin-bottom:16px;">
+      <div class="section-header" style="flex-wrap:wrap;">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Pending Invoices</span>
+        <span class="section-count" id="invoiceCount">0</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="fin-table">
+          <thead>
+            <tr>
+              <th>Invoice #</th>
+              <th>Cheque Date</th>
+              <th>Holder</th>
+              <th>Bank</th>
+              <th>Method</th>
+              <th>Amount</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="invoiceBody">
+            <tr><td colspan="7" style="padding:24px;text-align:center;color:#858796;font-size:13px;">Fetch data using the date range above.</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- Table -->
@@ -105,6 +133,7 @@
 {% block extra_js %}
 <script>
 let allRecords = [];
+let pendingInvoices = [];
 let curFilt = 'all';
 let sortCol = null;
 let sortDir = 1;
@@ -142,6 +171,25 @@ function makeChunks(arr, size) {
   return out;
 }
 
+function renderInvoices() {
+  document.getElementById('invoiceCount').textContent = pendingInvoices.length;
+  if (!pendingInvoices.length) {
+    document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:#858796;font-size:13px;">No processing invoices found for this date range.</td></tr>';
+    return;
+  }
+  document.getElementById('invoiceBody').innerHTML = pendingInvoices.map(invoice => `
+    <tr>
+      <td style="font-family:'DM Mono',monospace;font-weight:700;color:#4e73df;font-size:11px;">${invoice.invoice_cheque_no || '—'}</td>
+      <td style="font-size:11px;color:#3a3b45;white-space:nowrap;">${invoice.invoice_cheque_date || '—'}</td>
+      <td style="font-size:11px;color:#3a3b45;">${invoice.invoice_cheque_holder_name || '—'}</td>
+      <td style="font-size:11px;color:#3a3b45;">${invoice.bank_name || '—'}</td>
+      <td style="font-size:11px;color:#3a3b45;">${invoice.payment_method_name || '—'}</td>
+      <td style="font-family:'DM Mono',monospace;font-weight:600;color:#3a3b45;white-space:nowrap;">${fPKR(invoice.invoice_cheque_amount || 0)}</td>
+      <td><span class="invoice-status-badge">${invoice.pay_status_name || 'processing'}</span></td>
+    </tr>
+  `).join('');
+}
+
 async function fetchPayments() {
   const from = document.getElementById('fromDate').value;
   const to   = document.getElementById('toDate').value;
@@ -174,7 +222,7 @@ async function fetchPayments() {
       p.item_image = '';
     });
 
-    await enrichAndRender(packets, cnNums);
+    await enrichAndRender(packets, cnNums, from, to);
   } catch(e) {
     showToast('Failed to fetch data');
   } finally {
@@ -187,19 +235,20 @@ async function loadFromOrders() {
     const r    = await fetchChunk('/api/leopards/active-cns', 35000);
     if (!r) { showToast('Timed out loading orders'); return; }
     if (!r.cn_numbers || !r.cn_numbers.length) { showToast('No active CN numbers found.'); return; }
-    await enrichAndRender(r.order_map || [], r.cn_numbers);
+    await enrichAndRender(r.order_map || [], r.cn_numbers, document.getElementById('fromDate').value, document.getElementById('toDate').value);
     showToast('Loaded ' + (r.order_map||[]).length + ' records from active orders');
   } catch(e) {
     showToast('Failed to load orders');
   }
 }
 
-async function enrichAndRender(packetList, cnNums) {
+async function enrichAndRender(packetList, cnNums, from, to) {
   // Server handles batching internally — send all CNs in one request each
   const allCNs = cnNums.join(',');
-  const [payResult, chargesResult] = await Promise.all([
+  const [payResult, chargesResult, invoicesResult] = await Promise.all([
     fetchChunk('/api/leopards/payment-details?cn_numbers=' + allCNs, 120000),
-    fetchChunk('/api/leopards/shipping-charges?cn_numbers=' + allCNs, 120000)
+    fetchChunk('/api/leopards/shipping-charges?cn_numbers=' + allCNs, 120000),
+    fetchChunk(`/api/leopards/invoices?start_date=${from}&end_date=${to}`, 60000)
   ]);
 
   const payMap = {};
@@ -212,6 +261,13 @@ async function enrichAndRender(packetList, cnNums) {
   if (chargesResult && chargesResult.data) {
     chargesResult.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
   }
+
+  pendingInvoices = ((invoicesResult && invoicesResult.data) || [])
+    .filter(invoice => String(invoice.pay_status_name || '').trim().toLowerCase() === 'processing')
+    .map(invoice => ({
+      ...invoice,
+      invoice_cheque_amount: parseFloat(invoice.invoice_cheque_amount || 0) || 0,
+    }));
 
   allRecords = packetList.map(p => {
     const cn      = p.tracking_number || p.cn || '';
@@ -251,7 +307,7 @@ async function enrichAndRender(packetList, cnNums) {
       net,
     };
   });
-  renderTable(); updateKPIs();
+  renderInvoices(); renderTable(); updateKPIs();
 }
 
 function updateKPIs() {
@@ -268,13 +324,18 @@ function updateKPIs() {
     else if (isReturned) { returnedCount++;  returnedCOD  += x.cod; }
     else                 { pendingCount++;   pendingCOD   += x.cod; }
   });
+  const invoicesPendingTotal = pendingInvoices.reduce((sum, invoice) => sum + Number(invoice.invoice_cheque_amount || 0), 0);
   const netReceivable = (unpaidDeliveredCOD * 0.96) - unpaidShippingTotal;
+  const totalReceivable = netReceivable + invoicesPendingTotal;
   document.getElementById('kpiTotalCOD').textContent    = fPKR(totalCOD);
   document.getElementById('kpiTotalSub').textContent    = allRecords.length + ' orders';
   document.getElementById('kpiShip').textContent        = totalCharges ? fPKR(totalCharges) : '—';
   document.getElementById('kpiUnpaidDeliv').textContent = unpaidDeliveredCOD ? fPKR(unpaidDeliveredCOD) : '—';
   document.getElementById('kpiUnpaidShip').textContent  = unpaidShippingTotal ? fPKR(unpaidShippingTotal) : '—';
   document.getElementById('kpiNet').textContent         = fPKR(netReceivable);
+  document.getElementById('kpiInvoicesPending').textContent = invoicesPendingTotal ? fPKR(invoicesPendingTotal) : '—';
+  document.getElementById('kpiInvoicesPendingSub').textContent = `${pendingInvoices.length} invoice${pendingInvoices.length === 1 ? '' : 's'} processing`;
+  document.getElementById('kpiTotalReceivable').textContent = fPKR(totalReceivable);
   document.getElementById('kpiDeliv').textContent       = fPKR(deliveredCOD);
   document.getElementById('kpiDelivSub').textContent    = deliveredCount + ' orders';
   document.getElementById('kpiRet').textContent         = fPKR(returnedCOD);

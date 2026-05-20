@@ -34,7 +34,14 @@ In Shopify Dev Dashboard:
 4. Request protected customer data access for:
    - `Address`
    - `Phone`
-5. Install the app on the store.
+5. Add webhook subscriptions:
+   - `orders/create` -> `https://dashboard.tickbags.com/shopify/webhook/orders/create`
+   - `orders/updated` -> `https://dashboard.tickbags.com/shopify/webhook/orders/updated`
+   - `orders/cancelled` -> `https://dashboard.tickbags.com/shopify/webhook/orders/cancelled`
+   - `orders/delete` -> `https://dashboard.tickbags.com/shopify/webhook/orders/delete`
+6. Install the app on the store.
+
+Webhook HMAC verification uses `SHOPIFY_WEBHOOK_SECRET` when set. If it is not set, the app falls back to `SHOPIFY_GRAPHQL_CLIENT_SECRET`.
 
 ## Connect the app
 

@@ -1548,11 +1548,16 @@
           return;
         }
         const newIds = currentIds.filter((id) => !knownIds.includes(id));
+        const orderListChanged = currentIds.join('|') !== knownIds.join('|');
         if (!initial && newIds.length) {
           const latest = (payload.latest || []).filter((entry) => newIds.includes(entry.id));
           await showOrderNotification(latest.length ? latest : newIds.map((id) => ({ id, order_id: id.split(':')[1], source: id.split(':')[0] })));
         }
         localStorage.setItem(KNOWN_ORDER_STORAGE_KEY, JSON.stringify(currentIds.slice(0, 300)));
+        if (!initial && orderListChanged) {
+          showToast('Orders updated. Refreshing...', true);
+          window.setTimeout(() => window.location.reload(), 900);
+        }
       } catch (error) {
         return;
       }

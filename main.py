@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 from apscheduler.schedulers.background import BackgroundScheduler
 from token_manager import get_access_token, save_tokens
 from campaigns import campaigns_bp, init_campaign_dirs
+from whatsapp import send_order_confirmation, whatsapp_bp
 from shopify_protected_data import (
     create_oauth_state,
     exchange_oauth_code_for_token,
@@ -63,6 +64,7 @@ app.debug = False
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
 init_campaign_dirs()
 app.register_blueprint(campaigns_bp)
+app.register_blueprint(whatsapp_bp)
 
 EMPLOYEE_PORTAL_PASSWORD = os.getenv('EMPLOYEE_PORTAL_PASSWORD', '@@@t')
 EMPLOYEE_PORTAL_SESSION_KEY = 'employee_portal_authenticated'
@@ -133,6 +135,8 @@ def inject_now():
 order_details = []
 daraz_orders = []
 order_details_lock = threading.RLock()
+app.order_details_provider = lambda: order_details
+app.daraz_orders_provider = lambda: daraz_orders
 
 RATE_LIMIT = 2
 LAST_REQUEST_TIME = 0
@@ -580,6 +584,7 @@ def tracking():
 def build_admin_mobile_sections():
     return [
         {'id': 'dashboard', 'label': 'Dashboard', 'icon': '🏠', 'src': '/?embedded=1'},
+        {'id': 'inbox', 'label': 'Inbox', 'icon': '💬', 'src': '/whatsapp/inbox?embedded=1'},
         {'id': 'payments', 'label': 'Payments', 'icon': '💰', 'src': '/payments?embedded=1'},
         {'id': 'scanner', 'label': 'Scanner', 'icon': '🔍', 'src': '/employee_portal'},
         {'id': 'employee-orders', 'label': 'Orders', 'icon': '🧾', 'src': '/employee_portal/orders'},
@@ -2485,6 +2490,7 @@ def shopify_order_state():
 
 
 @app.route('/shopify/webhook/orders/create', methods=['POST'])
+@app.route('/shopify/webhook/orders/paid', methods=['POST'])
 @app.route('/shopify/webhook/orders/updated', methods=['POST'])
 @app.route('/shopify/webhook/orders/cancelled', methods=['POST'])
 @app.route('/shopify/webhook/orders/delete', methods=['POST'])
@@ -2541,6 +2547,8 @@ def shopify_order_updated():
 
         updated_order_info = asyncio.run(process_order(order, tracking_cache))
         updated_order_info = enrich_orders_with_protected_customer_data([updated_order_info])[0]
+        if (topic or '').lower() == 'orders/paid' or str(updated_order_info.get('financial_status', '')).lower() == 'paid':
+            send_order_confirmation(updated_order_info)
 
         updated = False
         updated_order_id = normalize_shopify_order_id(updated_order_info.get('id'))

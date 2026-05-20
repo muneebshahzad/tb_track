@@ -42,6 +42,72 @@ def _ensure_product_costs_table(cur):
     """)
 
 
+def _ensure_whatsapp_tables(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_conversations (
+            phone TEXT PRIMARY KEY,
+            customer_name TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'new',
+            last_message TEXT NOT NULL DEFAULT '',
+            last_direction TEXT NOT NULL DEFAULT '',
+            last_message_at TIMESTAMPTZ DEFAULT NOW(),
+            unread_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_messages (
+            id BIGSERIAL PRIMARY KEY,
+            phone TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            body TEXT NOT NULL,
+            provider_message_id TEXT NOT NULL DEFAULT '',
+            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_phone_created
+        ON whatsapp_messages (phone, created_at)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_rules (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            keywords TEXT NOT NULL DEFAULT '',
+            response TEXT NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            hold_for_review BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_templates (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            body TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'support',
+            approved BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_blasts (
+            id BIGSERIAL PRIMARY KEY,
+            template_id BIGINT,
+            template_name TEXT NOT NULL DEFAULT '',
+            segment TEXT NOT NULL DEFAULT '',
+            total_recipients INTEGER NOT NULL DEFAULT 0,
+            sent_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+
+
 def get_conn():
     url = (
         os.getenv('DATABASE_URL', '')
@@ -86,6 +152,7 @@ def init_db():
                 """)
                 _ensure_app_settings_table(cur)
                 _ensure_product_costs_table(cur)
+                _ensure_whatsapp_tables(cur)
             conn.commit()
         _set_last_db_error("")
         print("DB initialized.")
@@ -264,3 +331,303 @@ def upsert_product_cost(
         _set_last_db_error(str(e))
         print(f"DB upsert_product_cost error: {e}")
         return False
+
+
+def normalize_whatsapp_phone(phone: str) -> str:
+    digits = ''.join(ch for ch in str(phone or '').strip() if ch.isdigit())
+    if not digits:
+        return ''
+    if digits.startswith('92'):
+        return f"+{digits}"
+    if digits.startswith('0'):
+        return f"+92{digits[1:]}"
+    if digits.startswith('3') and len(digits) == 10:
+        return f"+92{digits}"
+    if str(phone or '').strip().startswith('+'):
+        return str(phone or '').strip()
+    return f"+{digits}"
+
+
+def save_whatsapp_message(
+    phone: str,
+    direction: str,
+    body: str,
+    customer_name: str = "",
+    provider_message_id: str = "",
+    metadata: dict | None = None,
+):
+    phone = normalize_whatsapp_phone(phone)
+    direction = (direction or '').strip().lower()
+    body = str(body or '').strip()
+    if not phone or direction not in {'inbound', 'outbound'} or not body:
+        return None
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    INSERT INTO whatsapp_messages (phone, direction, body, provider_message_id, metadata)
+                    VALUES (%s, %s, %s, %s, %s::jsonb)
+                    RETURNING id, phone, direction, body, provider_message_id, metadata, created_at
+                """, (
+                    phone,
+                    direction,
+                    body,
+                    provider_message_id or "",
+                    __import__('json').dumps(metadata or {}),
+                ))
+                message = dict(cur.fetchone())
+                unread_increment = 1 if direction == 'inbound' else 0
+                cur.execute("""
+                    INSERT INTO whatsapp_conversations (
+                        phone, customer_name, status, last_message, last_direction, unread_count
+                    )
+                    VALUES (%s, %s, 'new', %s, %s, %s)
+                    ON CONFLICT (phone) DO UPDATE SET
+                        customer_name = CASE
+                            WHEN EXCLUDED.customer_name <> '' THEN EXCLUDED.customer_name
+                            ELSE whatsapp_conversations.customer_name
+                        END,
+                        last_message = EXCLUDED.last_message,
+                        last_direction = EXCLUDED.last_direction,
+                        last_message_at = NOW(),
+                        unread_count = CASE
+                            WHEN EXCLUDED.last_direction = 'inbound'
+                            THEN whatsapp_conversations.unread_count + 1
+                            ELSE whatsapp_conversations.unread_count
+                        END,
+                        updated_at = NOW()
+                """, (phone, customer_name or "", body, direction, unread_increment))
+            conn.commit()
+        _set_last_db_error("")
+        return message
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB save_whatsapp_message error: {e}")
+        return None
+
+
+def list_whatsapp_conversations() -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    SELECT phone, customer_name, status, last_message, last_direction,
+                           last_message_at, unread_count, updated_at
+                    FROM whatsapp_conversations
+                    ORDER BY last_message_at DESC NULLS LAST, updated_at DESC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_whatsapp_conversations error: {e}")
+        return []
+
+
+def list_whatsapp_messages(phone: str, limit: int = 80) -> list[dict]:
+    phone = normalize_whatsapp_phone(phone)
+    if not phone:
+        return []
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    UPDATE whatsapp_conversations
+                    SET unread_count = 0, status = CASE WHEN status = 'new' THEN 'open' ELSE status END
+                    WHERE phone = %s
+                """, (phone,))
+                cur.execute("""
+                    SELECT id, phone, direction, body, provider_message_id, metadata, created_at
+                    FROM whatsapp_messages
+                    WHERE phone = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, (phone, limit))
+                rows = [dict(row) for row in cur.fetchall()]
+            conn.commit()
+        _set_last_db_error("")
+        return list(reversed(rows))
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_whatsapp_messages error: {e}")
+        return []
+
+
+def update_whatsapp_conversation_status(phone: str, status: str) -> bool:
+    phone = normalize_whatsapp_phone(phone)
+    status = (status or '').strip().lower()
+    if status not in {'new', 'open', 'resolved'}:
+        return False
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    UPDATE whatsapp_conversations
+                    SET status = %s, unread_count = CASE WHEN %s <> 'new' THEN 0 ELSE unread_count END, updated_at = NOW()
+                    WHERE phone = %s
+                """, (status, status, phone))
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_whatsapp_conversation_status error: {e}")
+        return False
+
+
+def list_whatsapp_rules() -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    SELECT id, name, keywords, response, enabled, hold_for_review, created_at, updated_at
+                    FROM whatsapp_rules
+                    ORDER BY enabled DESC, name ASC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_whatsapp_rules error: {e}")
+        return []
+
+
+def upsert_whatsapp_rule(payload: dict) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                rule_id = payload.get('id')
+                values = (
+                    (payload.get('name') or 'Keyword rule').strip(),
+                    (payload.get('keywords') or '').strip(),
+                    (payload.get('response') or '').strip(),
+                    bool(payload.get('enabled', True)),
+                    bool(payload.get('hold_for_review', False)),
+                )
+                if rule_id:
+                    cur.execute("""
+                        UPDATE whatsapp_rules
+                        SET name=%s, keywords=%s, response=%s, enabled=%s, hold_for_review=%s, updated_at=NOW()
+                        WHERE id=%s
+                        RETURNING id, name, keywords, response, enabled, hold_for_review, created_at, updated_at
+                    """, (*values, rule_id))
+                else:
+                    cur.execute("""
+                        INSERT INTO whatsapp_rules (name, keywords, response, enabled, hold_for_review)
+                        VALUES (%s, %s, %s, %s, %s)
+                        RETURNING id, name, keywords, response, enabled, hold_for_review, created_at, updated_at
+                    """, values)
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB upsert_whatsapp_rule error: {e}")
+        return None
+
+
+def list_whatsapp_templates() -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    SELECT id, name, body, category, approved, created_at, updated_at
+                    FROM whatsapp_templates
+                    ORDER BY approved DESC, name ASC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_whatsapp_templates error: {e}")
+        return []
+
+
+def upsert_whatsapp_template(payload: dict) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                template_id = payload.get('id')
+                values = (
+                    (payload.get('name') or 'WhatsApp template').strip(),
+                    (payload.get('body') or '').strip(),
+                    (payload.get('category') or 'support').strip(),
+                    bool(payload.get('approved', False)),
+                )
+                if template_id:
+                    cur.execute("""
+                        UPDATE whatsapp_templates
+                        SET name=%s, body=%s, category=%s, approved=%s, updated_at=NOW()
+                        WHERE id=%s
+                        RETURNING id, name, body, category, approved, created_at, updated_at
+                    """, (*values, template_id))
+                else:
+                    cur.execute("""
+                        INSERT INTO whatsapp_templates (name, body, category, approved)
+                        VALUES (%s, %s, %s, %s)
+                        RETURNING id, name, body, category, approved, created_at, updated_at
+                    """, values)
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB upsert_whatsapp_template error: {e}")
+        return None
+
+
+def create_whatsapp_blast(template_id, template_name: str, segment: str, total: int, sent: int, failed: int):
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    INSERT INTO whatsapp_blasts (
+                        template_id, template_name, segment, total_recipients, sent_count, failed_count, status
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, 'sent')
+                    RETURNING id, template_id, template_name, segment, total_recipients, sent_count, failed_count, status, created_at
+                """, (template_id, template_name, segment, total, sent, failed))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_whatsapp_blast error: {e}")
+        return None
+
+
+def list_whatsapp_blasts() -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    SELECT id, template_id, template_name, segment, total_recipients,
+                           sent_count, failed_count, status, created_at
+                    FROM whatsapp_blasts
+                    ORDER BY created_at DESC
+                    LIMIT 30
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_whatsapp_blasts error: {e}")
+        return []

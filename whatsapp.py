@@ -4,14 +4,17 @@ import hashlib
 import hmac
 import json
 import os
+from pathlib import Path
 from datetime import datetime
 from typing import Any
 
 import requests
 from flask import Blueprint, current_app, jsonify, render_template, request
+from werkzeug.utils import secure_filename
 
 from db import (
     create_whatsapp_blast,
+    get_app_setting,
     get_whatsapp_conversation,
     list_whatsapp_blasts,
     list_whatsapp_conversations,
@@ -21,6 +24,7 @@ from db import (
     normalize_inbox_contact_key,
     normalize_whatsapp_phone,
     save_whatsapp_message,
+    set_app_setting,
     update_whatsapp_conversation_status,
     upsert_whatsapp_rule,
     upsert_whatsapp_template,
@@ -28,6 +32,8 @@ from db import (
 
 
 whatsapp_bp = Blueprint("whatsapp", __name__, template_folder="templates")
+UPLOAD_DIR_NAME = "whatsapp_uploads"
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 def _json_default(value):
@@ -61,6 +67,59 @@ def channel_label(channel: str) -> str:
         "facebook": "Facebook",
         "instagram": "Instagram",
     }.get(str(channel or "").lower(), "Inbox")
+
+
+def get_upload_dir() -> Path:
+    target = Path(current_app.root_path) / "static" / UPLOAD_DIR_NAME
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def get_public_base_url() -> str:
+    return (
+        os.getenv("SHOPIFY_APP_BASE_URL")
+        or request.host_url.rstrip("/")
+    ).rstrip("/")
+
+
+def get_whatsapp_settings() -> dict[str, Any]:
+    raw = get_app_setting("whatsapp_inbox_settings", "")
+    defaults = {
+        "auto_handle_enabled": True,
+        "ai_mode_enabled": False,
+        "ai_handover_enabled": True,
+        "business_facts": (
+            "TickBags sells bean bags, ottomans, floor cushions, and home decor. "
+            "Common customer questions are about prices, delivery time, payment method, and order tracking."
+        ),
+        "delivery_time_reply": "Our usual delivery time is 3 to 7 working days depending on your city and order type.",
+        "payment_method_reply": "We mainly offer Cash on Delivery. Bank transfer can be arranged in special cases.",
+        "price_reply": "Please share the product name or screenshot and we’ll confirm the latest price for you.",
+        "human_handoff_reply": "Our team is checking this for you and will reply shortly.",
+        "openai_model": os.getenv("WHATSAPP_AI_MODEL", "gpt-4.1-mini"),
+    }
+    if raw:
+        try:
+            defaults.update(json.loads(raw))
+        except Exception:
+            pass
+    return defaults
+
+
+def save_whatsapp_settings(settings: dict[str, Any]) -> bool:
+    current = get_whatsapp_settings()
+    current.update({
+        "auto_handle_enabled": bool(settings.get("auto_handle_enabled", current.get("auto_handle_enabled", True))),
+        "ai_mode_enabled": bool(settings.get("ai_mode_enabled", current.get("ai_mode_enabled", False))),
+        "ai_handover_enabled": bool(settings.get("ai_handover_enabled", current.get("ai_handover_enabled", True))),
+        "business_facts": str(settings.get("business_facts", current.get("business_facts", "")) or "").strip(),
+        "delivery_time_reply": str(settings.get("delivery_time_reply", current.get("delivery_time_reply", "")) or "").strip(),
+        "payment_method_reply": str(settings.get("payment_method_reply", current.get("payment_method_reply", "")) or "").strip(),
+        "price_reply": str(settings.get("price_reply", current.get("price_reply", "")) or "").strip(),
+        "human_handoff_reply": str(settings.get("human_handoff_reply", current.get("human_handoff_reply", "")) or "").strip(),
+        "openai_model": str(settings.get("openai_model", current.get("openai_model", "gpt-4.1-mini")) or "gpt-4.1-mini").strip(),
+    })
+    return set_app_setting("whatsapp_inbox_settings", json.dumps(current))
 
 
 def phone_matches(left: str, right: str) -> bool:
@@ -137,6 +196,22 @@ def customer_orders_for_conversation(conversation: dict | None) -> list[dict]:
     return []
 
 
+def latest_order_summary(phone_or_contact: str) -> str:
+    orders = customer_orders_for_phone(phone_or_contact)
+    if not orders:
+        return ""
+    latest = orders[0]
+    tracking = ""
+    for item in latest.get("items", []) or []:
+        if item.get("tracking_number"):
+            tracking = str(item.get("tracking_number"))
+            break
+    summary = f"Latest order {latest.get('order_id')} is {latest.get('status') or 'being processed'}."
+    if tracking:
+        summary += f" Tracking: {tracking}."
+    return summary
+
+
 def render_template_body(body: str, phone: str) -> str:
     orders = customer_orders_for_phone(phone)
     latest = orders[0] if orders else {}
@@ -173,24 +248,82 @@ def find_keyword_reply(message: str) -> tuple[str, dict | None]:
 
 def fallback_reply(phone: str, message: str) -> str:
     text = (message or "").lower()
+    settings = get_whatsapp_settings()
     orders = customer_orders_for_phone(phone)
     if orders and any(word in text for word in ("track", "tracking", "order", "status")):
-        order = orders[0]
-        tracking = ""
-        for item in order.get("items", []) or []:
-            if item.get("tracking_number"):
-                tracking = item.get("tracking_number")
-                break
-        parts = [
-            f"Your latest order {order.get('order_id')} is {order.get('status') or 'being processed'}."
-        ]
-        if tracking:
-            parts.append(f"Tracking: {tracking}")
-        return " ".join(parts)
-    return os.getenv(
+        return latest_order_summary(phone)
+    if any(word in text for word in ("price", "cost", "rate", "kitnay", "kitna", "how much")):
+        return settings.get("price_reply") or "Please share the product name or screenshot and we’ll confirm the latest price for you."
+    if any(word in text for word in ("delivery", "deliver", "dispatch", "time", "days")):
+        return settings.get("delivery_time_reply") or "Our usual delivery time is 3 to 7 working days depending on your city and order type."
+    if any(word in text for word in ("payment", "cod", "cash", "bank", "advance")):
+        return settings.get("payment_method_reply") or "We mainly offer Cash on Delivery. Bank transfer can be arranged in special cases."
+    return settings.get("human_handoff_reply") or os.getenv(
         "WHATSAPP_FALLBACK_REPLY",
         "Thanks for messaging TickBags. Our team will review this and reply shortly.",
     )
+
+
+def ai_reply_for_message(channel: str, contact_key: str, body: str, conversation: dict | None = None) -> str:
+    settings = get_whatsapp_settings()
+    if not settings.get("ai_mode_enabled"):
+        return ""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return ""
+
+    contact_phone = ""
+    if conversation:
+        contact_phone = conversation.get("contact_phone") or ""
+    phone_for_lookup = contact_phone or contact_key
+    order_context = customer_orders_for_phone(phone_for_lookup)[:3]
+    latest_context = latest_order_summary(phone_for_lookup)
+    system_prompt = (
+        "You are a warm, human-sounding customer support agent for TickBags. "
+        "Reply briefly, naturally, and helpfully. Never mention being AI. "
+        "Do not invent unavailable discounts, shipping promises, or order details. "
+        "If specific order information is known, use it. If not known, say you'll confirm shortly. "
+        f"Business facts: {settings.get('business_facts', '')}"
+    )
+    user_prompt = {
+        "channel": channel,
+        "customer_name": (conversation or {}).get("customer_name", ""),
+        "contact": (conversation or {}).get("display_handle") or contact_key,
+        "customer_message": body,
+        "latest_order_summary": latest_context,
+        "recent_orders": order_context,
+        "safe_defaults": {
+            "delivery_time": settings.get("delivery_time_reply"),
+            "payment_method": settings.get("payment_method_reply"),
+            "price": settings.get("price_reply"),
+        },
+    }
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.get("openai_model", "gpt-4.1-mini"),
+                "temperature": 0.5,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": json.dumps(user_prompt, ensure_ascii=False)},
+                ],
+            },
+            timeout=30,
+        )
+        data = response.json() if response.content else {}
+        if response.ok:
+            choices = data.get("choices") or []
+            if choices:
+                content = (((choices[0] or {}).get("message") or {}).get("content") or "").strip()
+                return content
+    except Exception:
+        return ""
+    return ""
 
 
 def send_meta_text_message(phone: str, body: str) -> tuple[bool, str, dict]:
@@ -258,6 +391,66 @@ def send_facebook_text_message(recipient_id: str, body: str, channel: str = "fac
         return False, str(e), {}
 
 
+def send_channel_image_message(channel: str, contact_key: str, image_url: str, caption: str = "") -> tuple[bool, str, dict]:
+    channel = str(channel or "whatsapp").strip().lower() or "whatsapp"
+    image_url = str(image_url or "").strip()
+    caption = str(caption or "").strip()
+    if not image_url:
+        return False, "Image URL missing.", {}
+    if channel == "whatsapp":
+        token = os.getenv("META_WHATSAPP_TOKEN") or os.getenv("WHATSAPP_ACCESS_TOKEN")
+        phone_number_id = os.getenv("META_WHATSAPP_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
+        if not token or not phone_number_id:
+            return False, "Meta WhatsApp credentials are not configured.", {}
+        url = f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": clean_digits(contact_key),
+            "type": "image",
+            "image": {"link": image_url},
+        }
+        if caption:
+            payload["image"]["caption"] = caption
+    else:
+        token = os.getenv("META_PAGE_ACCESS_TOKEN") or os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
+        api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
+        recipient_id = str(contact_key or "")
+        if ":" in recipient_id:
+            recipient_id = recipient_id.split(":", 1)[1]
+        if not token or not recipient_id:
+            return False, "Meta Page access token or recipient id is missing.", {}
+        url = f"https://graph.facebook.com/{api_version}/me/messages"
+        payload = {
+            "recipient": {"id": recipient_id},
+            "messaging_type": "RESPONSE",
+            "message": {
+                "attachment": {
+                    "type": "image",
+                    "payload": {"url": image_url, "is_reusable": True},
+                }
+            },
+        }
+
+    try:
+        response = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=25,
+        )
+        data = response.json() if response.content else {}
+        if response.ok:
+            message_id = data.get("message_id") or ""
+            messages = data.get("messages") or []
+            if messages and not message_id:
+                message_id = messages[0].get("id") or ""
+            return True, message_id, data
+        return False, data.get("error", {}).get("message") or response.text, data
+    except Exception as e:
+        return False, str(e), {}
+
+
 def send_channel_text_message(channel: str, contact_key: str, body: str) -> tuple[bool, str, dict]:
     channel = str(channel or "whatsapp").strip().lower() or "whatsapp"
     if channel == "whatsapp":
@@ -266,6 +459,35 @@ def send_channel_text_message(channel: str, contact_key: str, body: str) -> tupl
     if ":" in recipient_id:
         recipient_id = recipient_id.split(":", 1)[1]
     return send_facebook_text_message(recipient_id, body, channel=channel)
+
+
+def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: str = "", display_handle: str = "", contact_phone: str = ""):
+    settings = get_whatsapp_settings()
+    if not settings.get("auto_handle_enabled", True):
+        return
+    reply, rule = find_keyword_reply(body)
+    conversation = get_whatsapp_conversation(contact_key)
+    if not reply:
+        reply = fallback_reply(contact_phone or contact_key, body)
+    if settings.get("ai_mode_enabled") and settings.get("ai_handover_enabled", True):
+        ai_reply = ai_reply_for_message(channel, contact_phone or contact_key, body, conversation=conversation)
+        if ai_reply:
+            reply = ai_reply
+            rule = {"id": "ai-mode", "hold_for_review": False}
+    if reply and not (rule and rule.get("hold_for_review")):
+        ok, provider_id, meta = send_channel_text_message(channel, contact_key, render_template_body(reply, contact_phone or contact_key))
+        if ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
+            save_whatsapp_message(
+                contact_key,
+                "outbound",
+                render_template_body(reply, contact_phone or contact_key),
+                customer_name=customer_name,
+                provider_message_id=provider_id if ok else "dry-run",
+                metadata={"source": "auto_reply", "rule_id": rule.get("id") if rule else None, "dry_run": not ok, "meta": meta},
+                channel=channel,
+                display_handle=display_handle,
+                contact_phone=contact_phone,
+            )
 
 
 def send_order_confirmation(order: dict[str, Any]) -> bool:
@@ -350,30 +572,46 @@ def api_send():
     channel = str(data.get("channel") or "whatsapp").strip().lower() or "whatsapp"
     phone = normalize_inbox_contact_key(channel, data.get("phone"))
     body = (data.get("body") or "").strip()
-    if not phone or not body:
+    attachment_url = (data.get("attachment_url") or "").strip()
+    if not phone or (not body and not attachment_url):
         return jsonify({"success": False, "error": "Phone and message are required."}), 400
 
-    ok, provider_id, meta = send_channel_text_message(channel, phone, body)
+    if attachment_url:
+        ok, provider_id, meta = send_channel_image_message(channel, phone, attachment_url, caption=body)
+    else:
+        ok, provider_id, meta = send_channel_text_message(channel, phone, body)
     if ok:
         save_whatsapp_message(
             phone,
             "outbound",
-            body,
+            body or "[Image]",
             provider_message_id=provider_id,
-            metadata={"source": "manual", "meta": meta},
+            metadata={"source": "manual", "meta": meta, "attachment_url": attachment_url},
             channel=channel,
             display_handle=data.get("display_handle") or "",
         )
         update_whatsapp_conversation_status(phone, "open")
+        if attachment_url and body and channel != "whatsapp":
+            extra_ok, extra_provider_id, extra_meta = send_channel_text_message(channel, phone, body)
+            if extra_ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
+                save_whatsapp_message(
+                    phone,
+                    "outbound",
+                    body,
+                    provider_message_id=extra_provider_id if extra_ok else "dry-run",
+                    metadata={"source": "manual_attachment_caption", "meta": extra_meta, "dry_run": not extra_ok},
+                    channel=channel,
+                    display_handle=data.get("display_handle") or "",
+                )
         return jsonify({"success": True, "provider_message_id": provider_id})
 
     if os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
         save_whatsapp_message(
             phone,
             "outbound",
-            body,
+            body or "[Image]",
             provider_message_id="dry-run",
-            metadata={"source": "manual", "dry_run": True, "error": provider_id},
+            metadata={"source": "manual", "dry_run": True, "error": provider_id, "attachment_url": attachment_url},
             channel=channel,
             display_handle=data.get("display_handle") or "",
         )
@@ -440,6 +678,32 @@ def api_blasts():
     return jsonify_data({"success": True, "blast": blast})
 
 
+@whatsapp_bp.route("/api/whatsapp/settings", methods=["GET", "POST"])
+def api_settings():
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        ok = save_whatsapp_settings(payload)
+        return jsonify_data({"success": ok, "settings": get_whatsapp_settings()}, 200 if ok else 400)
+    return jsonify_data({"success": True, "settings": get_whatsapp_settings()})
+
+
+@whatsapp_bp.route("/api/whatsapp/upload", methods=["POST"])
+def api_upload():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"success": False, "error": "Choose an image to upload."}), 400
+    extension = Path(file.filename).suffix.lower()
+    if extension not in SUPPORTED_IMAGE_EXTENSIONS:
+        return jsonify({"success": False, "error": "Only JPG, PNG, and WEBP images are supported."}), 400
+    filename = secure_filename(file.filename)
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    target_name = f"{timestamp}_{filename}"
+    target = get_upload_dir() / target_name
+    file.save(target)
+    public_url = f"{get_public_base_url()}/static/{UPLOAD_DIR_NAME}/{target_name}"
+    return jsonify({"success": True, "url": public_url, "filename": target_name})
+
+
 @whatsapp_bp.route("/webhook/whatsapp", methods=["GET", "POST"])
 def whatsapp_webhook():
     if request.method == "GET":
@@ -460,10 +724,16 @@ def whatsapp_webhook():
                 for contact in value.get("contacts", [])
             }
             for message in value.get("messages", []):
-                if message.get("type") != "text":
-                    continue
                 phone = normalize_whatsapp_phone(message.get("from"))
+                message_type = message.get("type")
                 body = ((message.get("text") or {}).get("body") or "").strip()
+                metadata = {"webhook": True}
+                if message_type == "image":
+                    body = body or "[Image]"
+                    metadata["media_type"] = "image"
+                    metadata["meta_media_id"] = ((message.get("image") or {}).get("id") or "")
+                elif message_type != "text":
+                    continue
                 customer_name = contacts.get(clean_digits(phone), "")
                 save_whatsapp_message(
                     phone,
@@ -471,29 +741,13 @@ def whatsapp_webhook():
                     body,
                     customer_name=customer_name,
                     provider_message_id=message.get("id") or "",
-                    metadata={"webhook": True},
+                    metadata=metadata,
                     channel="whatsapp",
                     display_handle=phone,
                     contact_phone=phone,
                 )
-
-                reply, rule = find_keyword_reply(body)
-                if not reply:
-                    reply = fallback_reply(phone, body)
-                if reply and not (rule and rule.get("hold_for_review")):
-                    rendered = render_template_body(reply, phone)
-                    ok, provider_id, meta = send_channel_text_message("whatsapp", phone, rendered)
-                    if ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
-                        save_whatsapp_message(
-                            phone,
-                            "outbound",
-                            rendered,
-                            provider_message_id=provider_id if ok else "dry-run",
-                            metadata={"source": "auto_reply", "rule_id": rule.get("id") if rule else None, "dry_run": not ok, "meta": meta},
-                            channel="whatsapp",
-                            display_handle=phone,
-                            contact_phone=phone,
-                        )
+                if message_type == "text":
+                    maybe_auto_reply("whatsapp", phone, body, customer_name=customer_name, display_handle=phone, contact_phone=phone)
 
     return jsonify({"success": True})
 
@@ -515,7 +769,8 @@ def meta_social_webhook():
         for event in entry.get("messaging", []):
             message = event.get("message") or {}
             text = (message.get("text") or "").strip()
-            if not text:
+            attachments = message.get("attachments") or []
+            if not text and not attachments:
                 continue
             sender = event.get("sender") or {}
             recipient = event.get("recipient") or {}
@@ -530,22 +785,34 @@ def meta_social_webhook():
             )
             contact_key = normalize_inbox_contact_key(channel, sender_id)
             display_handle = f"{channel_label(channel)} · {sender_id[-6:]}" if sender_id else channel_label(channel)
+            body = text
+            metadata = {
+                "webhook": True,
+                "channel": channel,
+                "sender_id": sender_id,
+                "recipient_id": recipient.get("id") or "",
+                "timestamp": event.get("timestamp"),
+            }
+            if attachments:
+                image = next((item for item in attachments if (item or {}).get("type") == "image"), None)
+                if image:
+                    body = body or "[Image]"
+                    metadata["attachment_url"] = ((image.get("payload") or {}).get("url") or "")
+                    metadata["media_type"] = "image"
+            if not body:
+                continue
             save_whatsapp_message(
                 contact_key,
                 "inbound",
-                text,
+                body,
                 customer_name=customer_name,
                 provider_message_id=message.get("mid") or message.get("id") or "",
-                metadata={
-                    "webhook": True,
-                    "channel": channel,
-                    "sender_id": sender_id,
-                    "recipient_id": recipient.get("id") or "",
-                    "timestamp": event.get("timestamp"),
-                },
+                metadata=metadata,
                 channel=channel,
                 display_handle=display_handle,
             )
+            if text:
+                maybe_auto_reply(channel, contact_key, text, customer_name=customer_name, display_handle=display_handle)
     return jsonify({"success": True})
 
 

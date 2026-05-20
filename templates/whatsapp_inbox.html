@@ -64,6 +64,11 @@
   .saved-row { border:1px solid #e3e6f0; border-radius:8px; padding:9px; margin-top:8px; background:#fff; }
   .saved-title { font-size:12px; color:#2d2e36; font-weight:800; }
   .saved-sub { font-size:11px; color:#858796; margin-top:4px; line-height:1.35; }
+  .upload-row { display:flex; gap:8px; align-items:center; }
+  .wa-file { display:none; }
+  .bubble-media { margin-top:8px; border-radius:10px; max-width:260px; display:block; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .switch-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; font-size:12px; color:#6f7280; }
+  .switch-row input { width:16px; height:16px; }
   .empty { color:#858796; font-size:13px; padding:24px; text-align:center; }
   @media (max-width: 1100px) {
     .wa-layout { grid-template-columns:280px minmax(0,1fr); }
@@ -133,9 +138,12 @@
         <textarea class="wa-textarea" id="replyText" placeholder="Write a reply..." disabled></textarea>
         <div class="reply-actions">
           <span id="sendHint" style="font-size:11px;color:#858796;margin-right:auto;">POST /whatsapp/send</span>
+          <input type="file" class="wa-file" id="imageUpload" accept="image/png,image/jpeg,image/webp" onchange="handleAttachmentSelected(event)">
+          <button class="wa-btn" onclick="document.getElementById('imageUpload').click()" id="imageBtn" disabled>Attach image</button>
           <button class="wa-btn" onclick="insertLatestStatus()" id="statusBtn" disabled>Insert status</button>
           <button class="wa-btn primary" onclick="sendReply()" id="sendBtn" disabled>Send</button>
         </div>
+        <div id="attachmentPreview" style="display:none;font-size:11px;color:#6f7280;"></div>
       </div>
     </section>
 
@@ -144,6 +152,19 @@
         <div class="side-section">
           <div class="side-title">Order history</div>
           <div id="orderHistory"><div class="empty" style="padding:12px;">Select a customer.</div></div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-title">Automation</div>
+          <div class="switch-row"><span>Auto-handle common questions</span><input type="checkbox" id="autoHandleEnabled"></div>
+          <div class="switch-row"><span>AI mode</span><input type="checkbox" id="aiModeEnabled"></div>
+          <div class="switch-row"><span>AI can reply directly</span><input type="checkbox" id="aiHandoverEnabled"></div>
+          <textarea class="wa-textarea" id="businessFacts" placeholder="Business facts for AI and auto replies."></textarea>
+          <input class="wa-input" id="deliveryReply" placeholder="Delivery time reply" style="width:100%;margin-top:8px;">
+          <input class="wa-input" id="paymentReply" placeholder="Payment method reply" style="width:100%;margin-top:8px;">
+          <input class="wa-input" id="priceReply" placeholder="Price reply" style="width:100%;margin-top:8px;">
+          <input class="wa-input" id="handoffReply" placeholder="Human handoff reply" style="width:100%;margin-top:8px;">
+          <button class="wa-btn blue" onclick="saveInboxSettings()" style="margin-top:8px;">Save automation settings</button>
         </div>
 
         <div class="side-section">
@@ -196,6 +217,7 @@ let conversationFilter = 'all';
 let channelFilter = 'all';
 let conversationFingerprint = '';
 let templates = [];
+let uploadedAttachmentUrl = '';
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -313,6 +335,7 @@ function renderMessages() {
     <div class="bubble-row ${escapeHtml(message.direction)}">
       <div class="bubble ${escapeHtml(message.direction)}">
         <div>${escapeHtml(message.body).replace(/\n/g, '<br>')}</div>
+        ${message.metadata && message.metadata.attachment_url ? `<img class="bubble-media" src="${escapeHtml(message.metadata.attachment_url)}" alt="attachment">` : ''}
         <div class="bubble-time">${escapeHtml(fmtTime(message.created_at))}</div>
       </div>
     </div>
@@ -354,7 +377,7 @@ async function saveStatus() {
 async function sendReply() {
   const textarea = document.getElementById('replyText');
   const body = textarea.value.trim();
-  if (!selectedPhone || !body) return;
+  if (!selectedPhone || (!body && !uploadedAttachmentUrl)) return;
   document.getElementById('sendBtn').disabled = true;
   const response = await fetch('/whatsapp/send', {
     method:'POST',
@@ -362,6 +385,7 @@ async function sendReply() {
     body: JSON.stringify({
       phone:selectedPhone,
       body,
+      attachment_url: uploadedAttachmentUrl,
       channel:selectedChannel,
       display_handle:(selectedConversation && selectedConversation.display_handle) || ''
     })
@@ -373,9 +397,46 @@ async function sendReply() {
     return;
   }
   textarea.value = '';
+  uploadedAttachmentUrl = '';
+  updateAttachmentPreview();
   if (payload.dry_run) showToast('Saved as dry run. Add Meta credentials to send live.');
   await loadMessages();
   await loadConversations(true);
+}
+
+function updateAttachmentPreview() {
+  const mount = document.getElementById('attachmentPreview');
+  const button = document.getElementById('imageBtn');
+  if (!uploadedAttachmentUrl) {
+    mount.style.display = 'none';
+    mount.innerHTML = '';
+    button.textContent = 'Attach image';
+    return;
+  }
+  mount.style.display = 'block';
+  mount.innerHTML = `Image attached. <a href="${escapeHtml(uploadedAttachmentUrl)}" target="_blank">Preview</a> <button class="wa-btn" style="min-height:24px;padding:2px 8px;margin-left:8px;" onclick="clearAttachment()">Remove</button>`;
+  button.textContent = 'Change image';
+}
+
+async function handleAttachmentSelected(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch('/api/whatsapp/upload', { method:'POST', body: form });
+  const payload = await response.json();
+  if (!payload.success) {
+    showToast(payload.error || 'Image upload failed');
+    return;
+  }
+  uploadedAttachmentUrl = payload.url;
+  updateAttachmentPreview();
+}
+
+function clearAttachment() {
+  uploadedAttachmentUrl = '';
+  document.getElementById('imageUpload').value = '';
+  updateAttachmentPreview();
 }
 
 function insertLatestStatus() {
@@ -452,6 +513,39 @@ async function loadTemplates() {
   `).join('');
 }
 
+async function loadInboxSettings() {
+  const payload = await (await fetch('/api/whatsapp/settings')).json();
+  const settings = payload.settings || {};
+  document.getElementById('autoHandleEnabled').checked = !!settings.auto_handle_enabled;
+  document.getElementById('aiModeEnabled').checked = !!settings.ai_mode_enabled;
+  document.getElementById('aiHandoverEnabled').checked = !!settings.ai_handover_enabled;
+  document.getElementById('businessFacts').value = settings.business_facts || '';
+  document.getElementById('deliveryReply').value = settings.delivery_time_reply || '';
+  document.getElementById('paymentReply').value = settings.payment_method_reply || '';
+  document.getElementById('priceReply').value = settings.price_reply || '';
+  document.getElementById('handoffReply').value = settings.human_handoff_reply || '';
+}
+
+async function saveInboxSettings() {
+  const payload = {
+    auto_handle_enabled: document.getElementById('autoHandleEnabled').checked,
+    ai_mode_enabled: document.getElementById('aiModeEnabled').checked,
+    ai_handover_enabled: document.getElementById('aiHandoverEnabled').checked,
+    business_facts: document.getElementById('businessFacts').value,
+    delivery_time_reply: document.getElementById('deliveryReply').value,
+    payment_method_reply: document.getElementById('paymentReply').value,
+    price_reply: document.getElementById('priceReply').value,
+    human_handoff_reply: document.getElementById('handoffReply').value
+  };
+  const result = await (await fetch('/api/whatsapp/settings', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  })).json();
+  if (!result.success) return showToast('Could not save inbox settings.');
+  showToast('Automation settings saved.');
+}
+
 async function saveTemplate() {
   const payload = {
     name: document.getElementById('templateName').value,
@@ -497,6 +591,7 @@ loadConversations(true);
 loadRules();
 loadTemplates();
 loadBlasts();
+loadInboxSettings();
 window.setInterval(() => {
   loadConversations(false);
   if (selectedPhone) loadMessages();

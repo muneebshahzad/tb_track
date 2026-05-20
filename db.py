@@ -75,10 +75,6 @@ def _ensure_whatsapp_tables(cur):
         ON whatsapp_messages (phone, created_at)
     """)
     cur.execute("""
-        CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_channel_updated
-        ON whatsapp_conversations (channel, last_message_at DESC, updated_at DESC)
-    """)
-    cur.execute("""
         ALTER TABLE whatsapp_conversations
         ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'whatsapp'
     """)
@@ -93,6 +89,10 @@ def _ensure_whatsapp_tables(cur):
     cur.execute("""
         ALTER TABLE whatsapp_messages
         ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'whatsapp'
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_channel_updated
+        ON whatsapp_conversations (channel, last_message_at DESC, updated_at DESC)
     """)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS whatsapp_rules (
@@ -400,6 +400,7 @@ def save_whatsapp_message(
     direction = (direction or '').strip().lower()
     body = str(body or '').strip()
     if not phone or direction not in {'inbound', 'outbound'} or not body:
+        _set_last_db_error("Phone, direction, and body are required to save a message.")
         return None
     contact_phone = normalize_whatsapp_phone(contact_phone) if contact_phone else ""
     display_handle = str(display_handle or "").strip()
@@ -408,59 +409,103 @@ def save_whatsapp_message(
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 _ensure_whatsapp_tables(cur)
-                cur.execute("""
-                    INSERT INTO whatsapp_messages (phone, channel, direction, body, provider_message_id, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s::jsonb)
-                    RETURNING id, phone, channel, direction, body, provider_message_id, metadata, created_at
-                """, (
-                    phone,
-                    channel,
-                    direction,
-                    body,
-                    provider_message_id or "",
-                    __import__('json').dumps(metadata or {}),
-                ))
-                message = dict(cur.fetchone())
-                unread_increment = 1 if direction == 'inbound' else 0
-                cur.execute("""
-                    INSERT INTO whatsapp_conversations (
-                        phone, channel, customer_name, display_handle, contact_phone,
-                        status, last_message, last_direction, unread_count
-                    )
-                    VALUES (%s, %s, %s, %s, %s, 'new', %s, %s, %s)
-                    ON CONFLICT (phone) DO UPDATE SET
-                        channel = EXCLUDED.channel,
-                        customer_name = CASE
-                            WHEN EXCLUDED.customer_name <> '' THEN EXCLUDED.customer_name
-                            ELSE whatsapp_conversations.customer_name
-                        END,
-                        display_handle = CASE
-                            WHEN EXCLUDED.display_handle <> '' THEN EXCLUDED.display_handle
-                            ELSE whatsapp_conversations.display_handle
-                        END,
-                        contact_phone = CASE
-                            WHEN EXCLUDED.contact_phone <> '' THEN EXCLUDED.contact_phone
-                            ELSE whatsapp_conversations.contact_phone
-                        END,
-                        last_message = EXCLUDED.last_message,
-                        last_direction = EXCLUDED.last_direction,
-                        last_message_at = NOW(),
-                        unread_count = CASE
-                            WHEN EXCLUDED.last_direction = 'inbound'
-                            THEN whatsapp_conversations.unread_count + 1
-                            ELSE whatsapp_conversations.unread_count
-                        END,
-                        updated_at = NOW()
-                """, (
-                    phone,
-                    channel,
-                    customer_name or "",
-                    display_handle,
-                    contact_phone,
-                    body,
-                    direction,
-                    unread_increment,
-                ))
+                try:
+                    cur.execute("""
+                        INSERT INTO whatsapp_messages (phone, channel, direction, body, provider_message_id, metadata)
+                        VALUES (%s, %s, %s, %s, %s, %s::jsonb)
+                        RETURNING id, phone, channel, direction, body, provider_message_id, metadata, created_at
+                    """, (
+                        phone,
+                        channel,
+                        direction,
+                        body,
+                        provider_message_id or "",
+                        __import__('json').dumps(metadata or {}),
+                    ))
+                    message = dict(cur.fetchone())
+                    unread_increment = 1 if direction == 'inbound' else 0
+                    cur.execute("""
+                        INSERT INTO whatsapp_conversations (
+                            phone, channel, customer_name, display_handle, contact_phone,
+                            status, last_message, last_direction, unread_count
+                        )
+                        VALUES (%s, %s, %s, %s, %s, 'new', %s, %s, %s)
+                        ON CONFLICT (phone) DO UPDATE SET
+                            channel = EXCLUDED.channel,
+                            customer_name = CASE
+                                WHEN EXCLUDED.customer_name <> '' THEN EXCLUDED.customer_name
+                                ELSE whatsapp_conversations.customer_name
+                            END,
+                            display_handle = CASE
+                                WHEN EXCLUDED.display_handle <> '' THEN EXCLUDED.display_handle
+                                ELSE whatsapp_conversations.display_handle
+                            END,
+                            contact_phone = CASE
+                                WHEN EXCLUDED.contact_phone <> '' THEN EXCLUDED.contact_phone
+                                ELSE whatsapp_conversations.contact_phone
+                            END,
+                            last_message = EXCLUDED.last_message,
+                            last_direction = EXCLUDED.last_direction,
+                            last_message_at = NOW(),
+                            unread_count = CASE
+                                WHEN EXCLUDED.last_direction = 'inbound'
+                                THEN whatsapp_conversations.unread_count + 1
+                                ELSE whatsapp_conversations.unread_count
+                            END,
+                            updated_at = NOW()
+                    """, (
+                        phone,
+                        channel,
+                        customer_name or "",
+                        display_handle,
+                        contact_phone,
+                        body,
+                        direction,
+                        unread_increment,
+                    ))
+                except Exception:
+                    cur.execute("""
+                        INSERT INTO whatsapp_messages (phone, direction, body, provider_message_id, metadata)
+                        VALUES (%s, %s, %s, %s, %s::jsonb)
+                        RETURNING id, phone, direction, body, provider_message_id, metadata, created_at
+                    """, (
+                        phone,
+                        direction,
+                        body,
+                        provider_message_id or "",
+                        __import__('json').dumps(metadata or {}),
+                    ))
+                    message = dict(cur.fetchone())
+                    message["channel"] = channel
+                    message["display_handle"] = display_handle
+                    message["contact_phone"] = contact_phone
+                    unread_increment = 1 if direction == 'inbound' else 0
+                    cur.execute("""
+                        INSERT INTO whatsapp_conversations (
+                            phone, customer_name, status, last_message, last_direction, unread_count
+                        )
+                        VALUES (%s, %s, 'new', %s, %s, %s)
+                        ON CONFLICT (phone) DO UPDATE SET
+                            customer_name = CASE
+                                WHEN EXCLUDED.customer_name <> '' THEN EXCLUDED.customer_name
+                                ELSE whatsapp_conversations.customer_name
+                            END,
+                            last_message = EXCLUDED.last_message,
+                            last_direction = EXCLUDED.last_direction,
+                            last_message_at = NOW(),
+                            unread_count = CASE
+                                WHEN EXCLUDED.last_direction = 'inbound'
+                                THEN whatsapp_conversations.unread_count + 1
+                                ELSE whatsapp_conversations.unread_count
+                            END,
+                            updated_at = NOW()
+                    """, (
+                        phone,
+                        customer_name or "",
+                        body,
+                        direction,
+                        unread_increment,
+                    ))
             conn.commit()
         _set_last_db_error("")
         return message
@@ -475,14 +520,29 @@ def list_whatsapp_conversations() -> list[dict]:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 _ensure_whatsapp_tables(cur)
-                cur.execute("""
-                    SELECT phone, channel, customer_name, display_handle, contact_phone,
-                           status, last_message, last_direction,
-                           last_message_at, unread_count, updated_at
-                    FROM whatsapp_conversations
-                    ORDER BY last_message_at DESC NULLS LAST, updated_at DESC
-                """)
-                rows = [dict(row) for row in cur.fetchall()]
+                try:
+                    cur.execute("""
+                        SELECT phone, channel, customer_name, display_handle, contact_phone,
+                               status, last_message, last_direction,
+                               last_message_at, unread_count, updated_at
+                        FROM whatsapp_conversations
+                        ORDER BY last_message_at DESC NULLS LAST, updated_at DESC
+                    """)
+                    rows = [dict(row) for row in cur.fetchall()]
+                except Exception:
+                    cur.execute("""
+                        SELECT phone, customer_name, status, last_message, last_direction,
+                               last_message_at, unread_count, updated_at
+                        FROM whatsapp_conversations
+                        ORDER BY last_message_at DESC NULLS LAST, updated_at DESC
+                    """)
+                    rows = []
+                    for row in cur.fetchall():
+                        item = dict(row)
+                        item.setdefault('channel', 'whatsapp')
+                        item.setdefault('display_handle', item.get('phone', ''))
+                        item.setdefault('contact_phone', item.get('phone', ''))
+                        rows.append(item)
         _set_last_db_error("")
         return rows
     except Exception as e:
@@ -499,14 +559,28 @@ def get_whatsapp_conversation(phone: str) -> dict | None:
             with get_conn() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     _ensure_whatsapp_tables(cur)
-                    cur.execute("""
-                        SELECT phone, channel, customer_name, display_handle, contact_phone,
-                               status, last_message, last_direction,
-                               last_message_at, unread_count, updated_at
-                        FROM whatsapp_conversations
-                        WHERE phone = %s
-                    """, (key,))
-                    row = cur.fetchone()
+                    try:
+                        cur.execute("""
+                            SELECT phone, channel, customer_name, display_handle, contact_phone,
+                                   status, last_message, last_direction,
+                                   last_message_at, unread_count, updated_at
+                            FROM whatsapp_conversations
+                            WHERE phone = %s
+                        """, (key,))
+                        row = cur.fetchone()
+                    except Exception:
+                        cur.execute("""
+                            SELECT phone, customer_name, status, last_message, last_direction,
+                                   last_message_at, unread_count, updated_at
+                            FROM whatsapp_conversations
+                            WHERE phone = %s
+                        """, (key,))
+                        row = cur.fetchone()
+                        if row:
+                            row = dict(row)
+                            row.setdefault('channel', 'whatsapp')
+                            row.setdefault('display_handle', row.get('phone', ''))
+                            row.setdefault('contact_phone', row.get('phone', ''))
                     if row:
                         _set_last_db_error("")
                         return dict(row)
@@ -531,14 +605,28 @@ def list_whatsapp_messages(phone: str, limit: int = 80) -> list[dict]:
                     SET unread_count = 0, status = CASE WHEN status = 'new' THEN 'open' ELSE status END
                     WHERE phone = %s
                 """, (phone,))
-                cur.execute("""
-                    SELECT id, phone, direction, body, provider_message_id, metadata, created_at
-                    FROM whatsapp_messages
-                    WHERE phone = %s
-                    ORDER BY created_at DESC
-                    LIMIT %s
-                """, (phone, limit))
-                rows = [dict(row) for row in cur.fetchall()]
+                try:
+                    cur.execute("""
+                        SELECT id, phone, channel, direction, body, provider_message_id, metadata, created_at
+                        FROM whatsapp_messages
+                        WHERE phone = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (phone, limit))
+                    rows = [dict(row) for row in cur.fetchall()]
+                except Exception:
+                    cur.execute("""
+                        SELECT id, phone, direction, body, provider_message_id, metadata, created_at
+                        FROM whatsapp_messages
+                        WHERE phone = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                    """, (phone, limit))
+                    rows = []
+                    for row in cur.fetchall():
+                        item = dict(row)
+                        item.setdefault('channel', 'whatsapp')
+                        rows.append(item)
             conn.commit()
         _set_last_db_error("")
         return list(reversed(rows))

@@ -15,6 +15,7 @@ from werkzeug.utils import secure_filename
 from db import (
     create_whatsapp_blast,
     get_app_setting,
+    get_last_db_error,
     get_whatsapp_conversation,
     list_whatsapp_blasts,
     list_whatsapp_conversations,
@@ -541,6 +542,7 @@ def api_conversations():
     return jsonify_data({
         "success": True,
         "conversations": conversations,
+        "db_error": get_last_db_error(),
         "fingerprint": hashlib.sha256(json.dumps(conversations, default=_json_default, sort_keys=True).encode()).hexdigest(),
         "generated_at": datetime.now().isoformat(timespec="seconds"),
     })
@@ -581,7 +583,7 @@ def api_send():
     else:
         ok, provider_id, meta = send_channel_text_message(channel, phone, body)
     if ok:
-        save_whatsapp_message(
+        saved = save_whatsapp_message(
             phone,
             "outbound",
             body or "[Image]",
@@ -590,6 +592,8 @@ def api_send():
             channel=channel,
             display_handle=data.get("display_handle") or "",
         )
+        if not saved:
+            return jsonify({"success": False, "error": get_last_db_error() or "Message sent but could not be saved to the inbox."}), 500
         update_whatsapp_conversation_status(phone, "open")
         if attachment_url and body and channel != "whatsapp":
             extra_ok, extra_provider_id, extra_meta = send_channel_text_message(channel, phone, body)
@@ -825,7 +829,7 @@ def api_mock_inbound():
     if not phone or not body:
         return jsonify({"success": False, "error": "Phone and message are required."}), 400
     display_handle = data.get("display_handle") or (phone if channel == "whatsapp" else f"{channel_label(channel)} · test")
-    save_whatsapp_message(
+    saved = save_whatsapp_message(
         phone,
         "inbound",
         body,
@@ -835,6 +839,8 @@ def api_mock_inbound():
         display_handle=display_handle,
         contact_phone=data.get("contact_phone") or (phone if channel == "whatsapp" else ""),
     )
+    if not saved:
+        return jsonify({"success": False, "error": get_last_db_error() or "Could not save the test message."}), 500
     reply, rule = find_keyword_reply(body)
     if not reply:
         reply = fallback_reply(data.get("contact_phone") or phone, body)

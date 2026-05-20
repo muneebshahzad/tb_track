@@ -12,11 +12,13 @@ from flask import Blueprint, current_app, jsonify, render_template, request
 
 from db import (
     create_whatsapp_blast,
+    get_whatsapp_conversation,
     list_whatsapp_blasts,
     list_whatsapp_conversations,
     list_whatsapp_messages,
     list_whatsapp_rules,
     list_whatsapp_templates,
+    normalize_inbox_contact_key,
     normalize_whatsapp_phone,
     save_whatsapp_message,
     update_whatsapp_conversation_status,
@@ -51,6 +53,14 @@ def get_order_source() -> tuple[list[dict], list[dict]]:
 
 def clean_digits(value: str) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def channel_label(channel: str) -> str:
+    return {
+        "whatsapp": "WhatsApp",
+        "facebook": "Facebook",
+        "instagram": "Instagram",
+    }.get(str(channel or "").lower(), "Inbox")
 
 
 def phone_matches(left: str, right: str) -> bool:
@@ -114,6 +124,17 @@ def customer_orders_for_phone(phone: str) -> list[dict]:
 
     matches.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     return matches[:12]
+
+
+def customer_orders_for_conversation(conversation: dict | None) -> list[dict]:
+    if not conversation:
+        return []
+    channel = str(conversation.get("channel") or "whatsapp").lower()
+    if channel == "whatsapp":
+        return customer_orders_for_phone(conversation.get("contact_phone") or conversation.get("phone") or "")
+    if conversation.get("contact_phone"):
+        return customer_orders_for_phone(conversation.get("contact_phone") or "")
+    return []
 
 
 def render_template_body(body: str, phone: str) -> str:
@@ -206,6 +227,47 @@ def send_meta_text_message(phone: str, body: str) -> tuple[bool, str, dict]:
         return False, str(e), {}
 
 
+def send_facebook_text_message(recipient_id: str, body: str, channel: str = "facebook") -> tuple[bool, str, dict]:
+    token = os.getenv("META_PAGE_ACCESS_TOKEN") or os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
+    api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
+    recipient_id = str(recipient_id or "").strip()
+    if not token or not recipient_id:
+        return False, "Meta Page access token or recipient id is missing.", {}
+
+    url = f"https://graph.facebook.com/{api_version}/me/messages"
+    payload = {
+        "recipient": {"id": recipient_id},
+        "messaging_type": "RESPONSE",
+        "message": {"text": body},
+    }
+    if channel == "instagram":
+        payload["messaging_type"] = "RESPONSE"
+
+    try:
+        response = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=25,
+        )
+        data = response.json() if response.content else {}
+        if response.ok:
+            return True, data.get("message_id") or "", data
+        return False, data.get("error", {}).get("message") or response.text, data
+    except Exception as e:
+        return False, str(e), {}
+
+
+def send_channel_text_message(channel: str, contact_key: str, body: str) -> tuple[bool, str, dict]:
+    channel = str(channel or "whatsapp").strip().lower() or "whatsapp"
+    if channel == "whatsapp":
+        return send_meta_text_message(contact_key, body)
+    recipient_id = str(contact_key or "")
+    if ":" in recipient_id:
+        recipient_id = recipient_id.split(":", 1)[1]
+    return send_facebook_text_message(recipient_id, body, channel=channel)
+
+
 def send_order_confirmation(order: dict[str, Any]) -> bool:
     customer = order.get("customer_details") or {}
     phone = normalize_whatsapp_phone(customer.get("phone") or "")
@@ -264,11 +326,13 @@ def api_conversations():
 
 @whatsapp_bp.route("/api/whatsapp/conversations/<path:phone>/messages")
 def api_messages(phone):
+    conversation = get_whatsapp_conversation(phone)
     return jsonify_data({
         "success": True,
-        "phone": normalize_whatsapp_phone(phone),
+        "phone": conversation.get("phone") if conversation else normalize_whatsapp_phone(phone),
+        "conversation": conversation,
         "messages": list_whatsapp_messages(phone),
-        "orders": customer_orders_for_phone(phone),
+        "orders": customer_orders_for_conversation(conversation),
     })
 
 
@@ -283,19 +347,36 @@ def api_status(phone):
 @whatsapp_bp.route("/api/whatsapp/send", methods=["POST"])
 def api_send():
     data = request.get_json(silent=True) or {}
-    phone = normalize_whatsapp_phone(data.get("phone"))
+    channel = str(data.get("channel") or "whatsapp").strip().lower() or "whatsapp"
+    phone = normalize_inbox_contact_key(channel, data.get("phone"))
     body = (data.get("body") or "").strip()
     if not phone or not body:
         return jsonify({"success": False, "error": "Phone and message are required."}), 400
 
-    ok, provider_id, meta = send_meta_text_message(phone, body)
+    ok, provider_id, meta = send_channel_text_message(channel, phone, body)
     if ok:
-        save_whatsapp_message(phone, "outbound", body, provider_message_id=provider_id, metadata={"source": "manual", "meta": meta})
+        save_whatsapp_message(
+            phone,
+            "outbound",
+            body,
+            provider_message_id=provider_id,
+            metadata={"source": "manual", "meta": meta},
+            channel=channel,
+            display_handle=data.get("display_handle") or "",
+        )
         update_whatsapp_conversation_status(phone, "open")
         return jsonify({"success": True, "provider_message_id": provider_id})
 
     if os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
-        save_whatsapp_message(phone, "outbound", body, provider_message_id="dry-run", metadata={"source": "manual", "dry_run": True, "error": provider_id})
+        save_whatsapp_message(
+            phone,
+            "outbound",
+            body,
+            provider_message_id="dry-run",
+            metadata={"source": "manual", "dry_run": True, "error": provider_id},
+            channel=channel,
+            display_handle=data.get("display_handle") or "",
+        )
         update_whatsapp_conversation_status(phone, "open")
         return jsonify({"success": True, "provider_message_id": "dry-run", "dry_run": True, "warning": provider_id})
 
@@ -384,14 +465,24 @@ def whatsapp_webhook():
                 phone = normalize_whatsapp_phone(message.get("from"))
                 body = ((message.get("text") or {}).get("body") or "").strip()
                 customer_name = contacts.get(clean_digits(phone), "")
-                save_whatsapp_message(phone, "inbound", body, customer_name=customer_name, provider_message_id=message.get("id") or "", metadata={"webhook": True})
+                save_whatsapp_message(
+                    phone,
+                    "inbound",
+                    body,
+                    customer_name=customer_name,
+                    provider_message_id=message.get("id") or "",
+                    metadata={"webhook": True},
+                    channel="whatsapp",
+                    display_handle=phone,
+                    contact_phone=phone,
+                )
 
                 reply, rule = find_keyword_reply(body)
                 if not reply:
                     reply = fallback_reply(phone, body)
                 if reply and not (rule and rule.get("hold_for_review")):
                     rendered = render_template_body(reply, phone)
-                    ok, provider_id, meta = send_meta_text_message(phone, rendered)
+                    ok, provider_id, meta = send_channel_text_message("whatsapp", phone, rendered)
                     if ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
                         save_whatsapp_message(
                             phone,
@@ -399,22 +490,96 @@ def whatsapp_webhook():
                             rendered,
                             provider_message_id=provider_id if ok else "dry-run",
                             metadata={"source": "auto_reply", "rule_id": rule.get("id") if rule else None, "dry_run": not ok, "meta": meta},
+                            channel="whatsapp",
+                            display_handle=phone,
+                            contact_phone=phone,
                         )
 
+    return jsonify({"success": True})
+
+
+@whatsapp_bp.route("/webhook/meta-social", methods=["GET", "POST"])
+def meta_social_webhook():
+    if request.method == "GET":
+        verify_token = os.getenv("META_SOCIAL_VERIFY_TOKEN") or os.getenv("META_VERIFY_TOKEN")
+        if request.args.get("hub.mode") == "subscribe" and request.args.get("hub.verify_token") == verify_token:
+            return request.args.get("hub.challenge", "")
+        return "Verification failed", 403
+
+    if not verify_meta_signature(request):
+        return jsonify({"success": False, "error": "Invalid webhook signature"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    default_channel = "instagram" if str(payload.get("object") or "").lower() == "instagram" else "facebook"
+    for entry in payload.get("entry", []):
+        for event in entry.get("messaging", []):
+            message = event.get("message") or {}
+            text = (message.get("text") or "").strip()
+            if not text:
+                continue
+            sender = event.get("sender") or {}
+            recipient = event.get("recipient") or {}
+            channel = str(event.get("platform") or default_channel).strip().lower() or default_channel
+            sender_id = str(sender.get("id") or "").strip()
+            if not sender_id:
+                continue
+            customer_name = (
+                ((event.get("sender") or {}).get("name"))
+                or ((event.get("profile") or {}).get("name"))
+                or f"{channel_label(channel)} user"
+            )
+            contact_key = normalize_inbox_contact_key(channel, sender_id)
+            display_handle = f"{channel_label(channel)} · {sender_id[-6:]}" if sender_id else channel_label(channel)
+            save_whatsapp_message(
+                contact_key,
+                "inbound",
+                text,
+                customer_name=customer_name,
+                provider_message_id=message.get("mid") or message.get("id") or "",
+                metadata={
+                    "webhook": True,
+                    "channel": channel,
+                    "sender_id": sender_id,
+                    "recipient_id": recipient.get("id") or "",
+                    "timestamp": event.get("timestamp"),
+                },
+                channel=channel,
+                display_handle=display_handle,
+            )
     return jsonify({"success": True})
 
 
 @whatsapp_bp.route("/api/whatsapp/mock-inbound", methods=["POST"])
 def api_mock_inbound():
     data = request.get_json(silent=True) or {}
-    phone = normalize_whatsapp_phone(data.get("phone"))
+    channel = str(data.get("channel") or "whatsapp").strip().lower() or "whatsapp"
+    phone = normalize_inbox_contact_key(channel, data.get("phone"))
     body = (data.get("body") or "").strip()
     if not phone or not body:
         return jsonify({"success": False, "error": "Phone and message are required."}), 400
-    save_whatsapp_message(phone, "inbound", body, customer_name=data.get("customer_name") or "Test Customer", metadata={"mock": True})
+    display_handle = data.get("display_handle") or (phone if channel == "whatsapp" else f"{channel_label(channel)} · test")
+    save_whatsapp_message(
+        phone,
+        "inbound",
+        body,
+        customer_name=data.get("customer_name") or "Test Customer",
+        metadata={"mock": True},
+        channel=channel,
+        display_handle=display_handle,
+        contact_phone=data.get("contact_phone") or (phone if channel == "whatsapp" else ""),
+    )
     reply, rule = find_keyword_reply(body)
     if not reply:
-        reply = fallback_reply(phone, body)
+        reply = fallback_reply(data.get("contact_phone") or phone, body)
     if reply and not (rule and rule.get("hold_for_review")):
-        save_whatsapp_message(phone, "outbound", render_template_body(reply, phone), provider_message_id="dry-run", metadata={"source": "mock_auto_reply", "rule_id": rule.get("id") if rule else None})
+        save_whatsapp_message(
+            phone,
+            "outbound",
+            render_template_body(reply, data.get("contact_phone") or phone),
+            provider_message_id="dry-run",
+            metadata={"source": "mock_auto_reply", "rule_id": rule.get("id") if rule else None},
+            channel=channel,
+            display_handle=display_handle,
+            contact_phone=data.get("contact_phone") or (phone if channel == "whatsapp" else ""),
+        )
     return jsonify({"success": True})

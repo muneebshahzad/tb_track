@@ -1,0 +1,244 @@
+{% extends 'base.html' %}
+{% block title %}TB Track – Daraz Profits{% endblock %}
+
+{% block content %}
+<style>
+  .profit-grid { display:grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap:12px; margin-bottom:16px; }
+  .profit-card { background:#fff; border-radius:12px; border:1px solid #e3e6f0; padding:14px 16px; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+  .profit-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .profit-table th { padding:10px 12px; text-align:left; font-size:10px; font-weight:700; color:#858796; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid #e3e6f0; background:#f8f9fc; white-space:nowrap; }
+  .profit-table td { padding:10px 12px; border-bottom:1px solid #e3e6f0; vertical-align:top; }
+  .profit-table tr:hover td { background:#fbfcff; }
+  .warn-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px; background:#fff5e5; color:#8b5a00; font-size:10px; font-weight:700; }
+  .ok-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px; background:#e8f8ee; color:#0f6848; font-size:10px; font-weight:700; }
+  .neutral-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px; background:#eef2ff; color:#3343a6; font-size:10px; font-weight:700; }
+  .line-list { display:flex; flex-direction:column; gap:8px; }
+  .line-row { display:grid; grid-template-columns: 1fr auto auto; gap:10px; align-items:center; padding:8px 10px; border:1px solid #eef1fa; border-radius:10px; background:#fafbff; }
+  .breakdown-list { display:flex; flex-direction:column; gap:6px; }
+  .breakdown-row { display:flex; justify-content:space-between; gap:12px; font-size:11px; color:#4b5563; }
+  .empty-state { padding:42px 18px; text-align:center; color:#858796; font-size:13px; }
+  details.profit-details { margin-top:8px; }
+  details.profit-details > summary { cursor:pointer; list-style:none; color:#4e73df; font-size:11px; font-weight:700; }
+  details.profit-details > summary::-webkit-details-marker { display:none; }
+  @media (max-width: 1200px) {
+    .profit-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 767px) {
+    .profit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+</style>
+
+<div style="height:3px;background:linear-gradient(90deg,#f97316,#ec4899,#7c3aed);background-size:200% 100%;animation:shimmerBar 4s linear infinite;flex-shrink:0;"></div>
+
+<div style="display:flex;flex-direction:column;height:calc(100% - 3px);overflow:hidden;">
+  <div class="topbar">
+    <span class="topbar-title">Daraz Profits</span>
+    <span style="font-size:12px;color:#858796;" class="hide-mob">— Shipped and delivered order profitability</span>
+    <div style="flex:1"></div>
+    <div class="search-box">
+      <span style="color:#858796;font-size:13px;">🔍</span>
+      <input id="profitSearch" placeholder="Search order, customer, SKU…" style="width:200px;" oninput="renderProfits()"/>
+    </div>
+  </div>
+
+  <div style="flex:1;overflow:auto;padding:16px;">
+    <div class="section-card" style="padding:14px 16px;margin-bottom:16px;display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;">
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">From</label>
+        <input type="date" id="fromDate" style="background:#f8f9fc;border:1px solid #e3e6f0;color:#3a3b45;border-radius:7px;padding:6px 9px;font-size:12px;outline:none;font-family:'DM Sans',sans-serif;"/>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <label style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">To</label>
+        <input type="date" id="toDate" style="background:#f8f9fc;border:1px solid #e3e6f0;color:#3a3b45;border-radius:7px;padding:6px 9px;font-size:12px;outline:none;font-family:'DM Sans',sans-serif;"/>
+      </div>
+      <button id="fetchBtn" onclick="fetchProfits()" style="padding:8px 18px;border-radius:8px;border:none;background:#f97316;color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:'DM Sans',sans-serif;">⚡ Fetch Daraz Profit</button>
+      <div style="margin-left:auto;font-size:12px;color:#858796;" id="profitUpdatedAt">Ready</div>
+    </div>
+
+    <div class="profit-grid">
+      <div class="profit-card"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Orders</div><div id="kpiOrders" style="font-size:24px;font-weight:700;color:#3a3b45;margin-top:6px;">0</div></div>
+      <div class="profit-card"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Gross Sale</div><div id="kpiGross" style="font-size:24px;font-weight:700;color:#3a3b45;margin-top:6px;">Rs 0</div></div>
+      <div class="profit-card"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Daraz Charges</div><div id="kpiCharges" style="font-size:24px;font-weight:700;color:#e74a3b;margin-top:6px;">Rs 0</div></div>
+      <div class="profit-card"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Net Settlement</div><div id="kpiSettlement" style="font-size:24px;font-weight:700;color:#4e73df;margin-top:6px;">Rs 0</div></div>
+      <div class="profit-card"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Product Cost</div><div id="kpiCost" style="font-size:24px;font-weight:700;color:#7c3aed;margin-top:6px;">Rs 0</div></div>
+      <div class="profit-card"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Net Profit</div><div id="kpiProfit" style="font-size:24px;font-weight:700;color:#1cc88a;margin-top:6px;">Rs 0</div><div id="kpiMissing" style="font-size:11px;color:#858796;margin-top:4px;">0 orders with missing cost</div></div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-header">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Order Profitability</span>
+        <span class="section-count" id="profitCount">0</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="profit-table">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>Items</th>
+              <th>Gross</th>
+              <th>Charges</th>
+              <th>Settlement</th>
+              <th>Cost</th>
+              <th>Profit</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody id="profitBody">
+            <tr><td colspan="9" class="empty-state">Fetch a date range to calculate Daraz profitability.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let profitRows = [];
+
+function formatPKR(value) {
+  const num = Number(value || 0);
+  return 'Rs ' + Math.round(num).toLocaleString('en-PK');
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+(function initDates() {
+  const now = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 60);
+  document.getElementById('toDate').value = now.toISOString().split('T')[0];
+  document.getElementById('fromDate').value = from.toISOString().split('T')[0];
+})();
+
+async function fetchProfits() {
+  const from = document.getElementById('fromDate').value;
+  const to = document.getElementById('toDate').value;
+  const btn = document.getElementById('fetchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching…';
+  document.getElementById('profitBody').innerHTML = '<tr><td colspan="9" class="empty-state">Calculating Daraz profitability…</td></tr>';
+  try {
+    const res = await fetch(`/api/daraz/profits?from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not fetch Daraz profit data.');
+    profitRows = data.records || [];
+    updateProfitKPIs(data.summary || {});
+    document.getElementById('profitUpdatedAt').textContent = `Loaded ${new Date().toLocaleTimeString('en-PK')}`;
+    renderProfits();
+  } catch (error) {
+    document.getElementById('profitBody').innerHTML = `<tr><td colspan="9" class="empty-state">${error.message}</td></tr>`;
+    showToast(error.message || 'Could not fetch Daraz profits');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⚡ Fetch Daraz Profit';
+  }
+}
+
+function updateProfitKPIs(summary) {
+  document.getElementById('kpiOrders').textContent = summary.orders || 0;
+  document.getElementById('kpiGross').textContent = summary.gross_sale_total_formatted || 'Rs 0';
+  document.getElementById('kpiCharges').textContent = summary.daraz_charges_total_formatted || 'Rs 0';
+  document.getElementById('kpiSettlement').textContent = summary.net_settlement_total_formatted || 'Rs 0';
+  document.getElementById('kpiCost').textContent = summary.product_cost_total_formatted || 'Rs 0';
+  document.getElementById('kpiProfit').textContent = summary.net_profit_total_formatted || 'Rs 0';
+  document.getElementById('kpiMissing').textContent = `${summary.missing_cost_orders || 0} orders with missing cost`;
+}
+
+function renderProfits() {
+  const q = (document.getElementById('profitSearch').value || '').trim().toLowerCase();
+  const rows = profitRows.filter(row => {
+    if (!q) return true;
+    const itemBlob = (row.line_items || []).map(item => `${item.primary_name} ${item.secondary_name || ''} ${item.sku || ''}`).join(' ');
+    return [
+      row.order_id,
+      row.customer_name,
+      row.customer_phone,
+      row.status,
+      itemBlob,
+    ].some(value => String(value || '').toLowerCase().includes(q));
+  });
+
+  document.getElementById('profitCount').textContent = rows.length;
+  if (!rows.length) {
+    document.getElementById('profitBody').innerHTML = '<tr><td colspan="9" class="empty-state">No Daraz orders match your filters.</td></tr>';
+    return;
+  }
+
+  document.getElementById('profitBody').innerHTML = rows.map(row => {
+    const itemPreview = (row.line_items || []).slice(0, 3).map(item => `
+      <div style="font-size:11px;color:#3a3b45;line-height:1.35;">${escapeHtml(item.primary_name)} <span style="color:#858796;">x${item.quantity}</span></div>
+    `).join('');
+
+    const lineItems = (row.line_items || []).map(item => `
+      <div class="line-row">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#3a3b45;">${escapeHtml(item.primary_name)}</div>
+          ${item.secondary_name ? `<div style="font-size:11px;color:#858796;margin-top:2px;">${escapeHtml(item.secondary_name)}</div>` : ''}
+          ${item.sku ? `<div style="font-size:10px;color:#a0a5b5;font-family:'DM Mono',monospace;margin-top:2px;">${escapeHtml(item.sku)}</div>` : ''}
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#3a3b45;">x${item.quantity}</div>
+        <div style="text-align:right;">
+          <div style="font-size:11px;color:${item.cost_missing ? '#e74a3b' : '#4e73df'};">${item.cost_missing ? 'Cost Missing' : item.unit_cost_formatted + ' each'}</div>
+          <div style="font-size:12px;font-weight:700;color:#3a3b45;margin-top:2px;">${item.line_cost_formatted}</div>
+        </div>
+      </div>
+    `).join('');
+
+    const breakdown = (row.breakdown || []).map(part => `
+      <div class="breakdown-row">
+        <span>${escapeHtml(part.label)}</span>
+        <span style="font-family:'DM Mono',monospace;">${escapeHtml(part.amount_formatted)}</span>
+      </div>
+    `).join('');
+
+    return `
+      <tr>
+        <td>
+          <div style="font-size:13px;font-weight:700;color:#4e73df;">${escapeHtml(row.order_id)}</div>
+          <div style="font-size:11px;color:#858796;margin-top:2px;">${escapeHtml(row.created_day || row.created_at || '')}</div>
+          <div style="margin-top:8px;"><span class="neutral-pill">${escapeHtml(row.status || '—')}</span></div>
+        </td>
+        <td>
+          <div style="font-size:12px;font-weight:700;color:#3a3b45;">${escapeHtml(row.customer_name || 'N/A')}</div>
+          <div style="font-size:11px;color:#4e73df;margin-top:4px;">${escapeHtml(row.customer_phone || 'N/A')}</div>
+        </td>
+        <td style="min-width:220px;">
+          ${itemPreview}
+          ${(row.line_items || []).length > 3 ? `<div style="font-size:10px;color:#858796;margin-top:6px;">+ ${(row.line_items || []).length - 3} more items</div>` : ''}
+          <details class="profit-details">
+            <summary>View line costs</summary>
+            <div class="line-list" style="margin-top:10px;">${lineItems}</div>
+          </details>
+        </td>
+        <td style="font-family:'DM Mono',monospace;font-weight:700;color:#3a3b45;white-space:nowrap;">${escapeHtml(row.gross_sale_formatted)}</td>
+        <td style="font-family:'DM Mono',monospace;font-weight:700;color:#e74a3b;white-space:nowrap;">${escapeHtml(row.daraz_charges_formatted)}</td>
+        <td>
+          <div style="font-family:'DM Mono',monospace;font-weight:700;color:#4e73df;white-space:nowrap;">${escapeHtml(row.net_settlement_formatted)}</div>
+          <details class="profit-details">
+            <summary>Breakdown</summary>
+            <div class="breakdown-list" style="margin-top:10px;">${breakdown || '<div style="font-size:11px;color:#858796;">No finance rows yet.</div>'}</div>
+          </details>
+        </td>
+        <td style="font-family:'DM Mono',monospace;font-weight:700;color:#7c3aed;white-space:nowrap;">${escapeHtml(row.product_cost_formatted)}</td>
+        <td style="font-family:'DM Mono',monospace;font-weight:700;color:${Number(row.net_profit || 0) >= 0 ? '#1cc88a' : '#e74a3b'};white-space:nowrap;">${escapeHtml(row.net_profit_formatted)}</td>
+        <td>
+          ${row.cost_missing ? `<span class="warn-pill">⚠ Cost Missing (${row.missing_cost_count})</span>` : '<span class="ok-pill">✓ Cost Set</span>'}
+          <div style="margin-top:8px;"><span class="${row.paid_status === 'Paid' ? 'ok-pill' : 'neutral-pill'}">${escapeHtml(row.paid_status || 'Not Paid')}</span></div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+fetchProfits();
+</script>
+{% endblock %}

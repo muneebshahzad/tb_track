@@ -1,0 +1,218 @@
+{% extends 'base.html' %}
+{% block title %}TB Track – Product Costs{% endblock %}
+
+{% block content %}
+<style>
+  .source-pill { padding: 6px 12px; border-radius: 999px; border: 1px solid #d7def0; background: #fff; color: #6b7280; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .source-pill.active { background: #4e73df; border-color: #4e73df; color: #fff; }
+  .cost-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .cost-table th { padding: 10px 12px; text-align: left; font-size: 10px; font-weight: 700; color: #858796; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; background: #f8f9fc; }
+  .cost-table td { padding: 10px 12px; border-bottom: 1px solid #e3e6f0; vertical-align: middle; }
+  .cost-table tr:hover td { background: #fbfcff; }
+  .cost-input { width: 100%; border: 1px solid #dbe1f0; border-radius: 8px; padding: 8px 10px; font-size: 12px; font-family: 'DM Sans', sans-serif; outline: none; }
+  .cost-input:focus { border-color: #4e73df; box-shadow: 0 0 0 3px rgba(78,115,223,0.08); }
+  .mini-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .mini-kpi { background: #fff; border-radius: 12px; border: 1px solid #e3e6f0; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+  .row-image { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; background: #eef2ff; border: 1px solid #e3e6f0; }
+  .empty-state { padding: 42px 16px; text-align: center; color: #858796; font-size: 13px; }
+  .save-btn { min-width: 84px; justify-content: center; }
+  @media (max-width: 960px) {
+    .mini-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+</style>
+
+<div style="height:3px;background:linear-gradient(90deg,#7c3aed,#4e73df,#20c997);background-size:200% 100%;animation:shimmerBar 4s linear infinite;flex-shrink:0;"></div>
+
+<div style="display:flex;flex-direction:column;height:calc(100% - 3px);overflow:hidden;">
+  <div class="topbar">
+    <span class="topbar-title">Product Costs</span>
+    <span style="font-size:12px;color:#858796;" class="hide-mob">— Manual variant costs for Daraz, Lahore, and Leopards</span>
+    <div style="flex:1"></div>
+    <div class="search-box">
+      <span style="color:#858796;font-size:13px;">🔍</span>
+      <input id="catalogSearch" placeholder="Search names or SKU…" style="width:200px;" oninput="renderCatalog()"/>
+    </div>
+  </div>
+
+  <div style="flex:1;overflow:auto;padding:16px;">
+    <div class="section-card" style="padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Source</span>
+      {% for key, label in sources.items() %}
+        <button class="source-pill {% if key == default_source %}active{% endif %}" data-source="{{ key }}" onclick="switchSource('{{ key }}', this)">{{ label }}</button>
+      {% endfor %}
+      <div style="margin-left:auto;font-size:12px;color:#858796;" id="catalogUpdatedAt">Ready</div>
+    </div>
+
+    <div class="mini-kpi-grid">
+      <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Variants</div><div id="kpiVariants" style="font-size:22px;font-weight:700;color:#3a3b45;margin-top:6px;">0</div></div>
+      <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Costs Set</div><div id="kpiCostsSet" style="font-size:22px;font-weight:700;color:#4e73df;margin-top:6px;">0</div></div>
+      <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Missing Costs</div><div id="kpiMissing" style="font-size:22px;font-weight:700;color:#e74a3b;margin-top:6px;">0</div></div>
+      <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Current Source</div><div id="kpiSource" style="font-size:18px;font-weight:700;color:#20c997;margin-top:8px;">{{ sources[default_source] }}</div></div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-header">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Variant Cost Table</span>
+        <span class="section-count" id="catalogCount">0</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="cost-table">
+          <thead>
+            <tr>
+              <th style="width:72px;">Image</th>
+              <th>Primary Name</th>
+              <th>Alt Name</th>
+              <th>SKU / Key</th>
+              <th style="width:140px;">Product Cost</th>
+              <th style="width:110px;">Save</th>
+            </tr>
+          </thead>
+          <tbody id="catalogBody">
+            <tr><td colspan="6" class="empty-state">Loading variant catalog…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const sourceLabels = {{ sources|tojson }};
+let currentSource = {{ default_source|tojson }};
+let catalogRows = [];
+
+function formatMoneyInput(value) {
+  const num = Number(value || 0);
+  if (!Number.isFinite(num)) return '0';
+  return num % 1 === 0 ? String(num) : num.toFixed(2);
+}
+
+async function loadCatalog(source = currentSource) {
+  currentSource = source;
+  document.getElementById('catalogBody').innerHTML = '<tr><td colspan="6" class="empty-state">Loading variant catalog…</td></tr>';
+  try {
+    const res = await fetch(`/api/costing/catalog?source=${encodeURIComponent(source)}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not load product cost catalog.');
+    catalogRows = data.rows || [];
+    document.getElementById('kpiSource').textContent = data.label || sourceLabels[source] || source;
+    document.getElementById('catalogUpdatedAt').textContent = `Loaded ${new Date().toLocaleTimeString('en-PK')}`;
+    updateCatalogKPIs();
+    renderCatalog();
+  } catch (error) {
+    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="6" class="empty-state">${error.message}</td></tr>`;
+    showToast(error.message || 'Could not load cost catalog');
+  }
+}
+
+function updateCatalogKPIs(filteredRows = null) {
+  const rows = filteredRows || catalogRows;
+  const costsSet = rows.filter(row => Number(row.product_cost || 0) > 0).length;
+  document.getElementById('kpiVariants').textContent = rows.length;
+  document.getElementById('kpiCostsSet').textContent = costsSet;
+  document.getElementById('kpiMissing').textContent = Math.max(rows.length - costsSet, 0);
+  document.getElementById('catalogCount').textContent = rows.length;
+}
+
+function switchSource(source, btn) {
+  document.querySelectorAll('.source-pill').forEach(el => el.classList.remove('active'));
+  btn.classList.add('active');
+  loadCatalog(source);
+}
+
+function renderCatalog() {
+  const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
+  const rows = catalogRows.filter(row => {
+    if (!q) return true;
+    return [
+      row.primary_name,
+      row.secondary_name,
+      row.sku,
+      row.variant_key,
+    ].some(value => String(value || '').toLowerCase().includes(q));
+  });
+
+  updateCatalogKPIs(rows);
+
+  if (!rows.length) {
+    document.getElementById('catalogBody').innerHTML = '<tr><td colspan="6" class="empty-state">No variants match your search.</td></tr>';
+    return;
+  }
+
+  document.getElementById('catalogBody').innerHTML = rows.map((row, index) => `
+    <tr>
+      <td><img class="row-image" src="${row.image || 'https://static.thenounproject.com/png/1578832-200.png'}" alt=""></td>
+      <td>
+        <div style="font-size:13px;font-weight:700;color:#3a3b45;line-height:1.35;">${escapeHtml(row.primary_name || 'Untitled variant')}</div>
+      </td>
+      <td>
+        <input class="cost-input" id="secondary-${index}" value="${escapeAttr(row.secondary_name || '')}" placeholder="Optional alternate name"/>
+      </td>
+      <td>
+        <div style="font-size:12px;font-weight:600;color:#3a3b45;">${escapeHtml(row.sku || 'No SKU')}</div>
+        <div style="font-size:10px;color:#858796;font-family:'DM Mono',monospace;margin-top:3px;">${escapeHtml(row.variant_key)}</div>
+      </td>
+      <td>
+        <input class="cost-input" id="cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.product_cost)}" placeholder="0"/>
+      </td>
+      <td>
+        <button class="btn btn-primary save-btn" id="save-${index}" onclick='saveRow(${JSON.stringify(index)}, ${JSON.stringify(encodeURIComponent(row.variant_key))})'>Save</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function saveRow(index, encodedKey) {
+  const row = catalogRows.find(entry => encodeURIComponent(entry.variant_key) === encodedKey);
+  if (!row) return;
+  const btn = document.getElementById(`save-${index}`);
+  const secondaryName = document.getElementById(`secondary-${index}`).value.trim();
+  const productCost = document.getElementById(`cost-${index}`).value;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const res = await fetch('/api/costing/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: currentSource,
+        variant_key: row.variant_key,
+        primary_name: row.primary_name,
+        secondary_name: secondaryName,
+        sku: row.sku,
+        product_cost,
+        source_product_id: row.source_product_id,
+        source_variant_id: row.source_variant_id,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not save product cost.');
+    row.secondary_name = secondaryName;
+    row.product_cost = Number(productCost || 0);
+    updateCatalogKPIs();
+    showToast('Cost saved');
+  } catch (error) {
+    showToast(error.message || 'Could not save product cost');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replaceAll("'", '&#39;');
+}
+
+loadCatalog(currentSource);
+</script>
+{% endblock %}

@@ -146,6 +146,8 @@
       <a href="/pending" class="sb-item {% if request.path == '/pending' %}active{% endif %}"><span class="sb-icon">📋</span><span class="sb-item-label">Pending Orders</span></a>
       <a href="/undelivered" class="sb-item {% if request.path == '/undelivered' %}active{% endif %}"><span class="sb-icon">🚚</span><span class="sb-item-label">Undelivered Orders</span></a>
       <a href="/campaigns/" class="sb-item {% if request.path.startswith('/campaigns') %}active{% endif %}"><span class="sb-icon">📣</span><span class="sb-item-label">Daraz Campaigns</span></a>
+      <a href="/daraz-profits" class="sb-item {% if request.path == '/daraz-profits' %}active{% endif %}"><span class="sb-icon">📈</span><span class="sb-item-label">Daraz Profits</span></a>
+      <a href="/product-costs" class="sb-item {% if request.path == '/product-costs' %}active{% endif %}"><span class="sb-icon">🏷️</span><span class="sb-item-label">Product Costs</span></a>
       <a href="#" class="sb-item" id="refreshDataBtn" onclick="triggerRefresh(event)"><span class="sb-icon">🔄</span><span class="sb-item-label">Refresh Data</span></a>
       <a href="/payments" class="sb-item {% if request.path == '/payments' %}active{% endif %}"><span class="sb-icon">💰</span><span class="sb-item-label">Finance</span></a>
     </nav>
@@ -231,6 +233,35 @@ function triggerRefresh(e) {
     .catch(() => showToast('Refresh failed. Check connection.'))
     .finally(() => { btn.style.opacity = ''; btn.style.pointerEvents = ''; });
 }
+
+(function watchShopifyOrderState() {
+  const watchedPaths = new Set(['/', '/pending', '/undelivered', '/scan']);
+  if (!watchedPaths.has(window.location.pathname)) return;
+
+  let fingerprint = null;
+  async function checkState(initial = false) {
+    try {
+      const response = await fetch('/api/shopify/order-state', { credentials: 'same-origin' });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (!payload.fingerprint) return;
+      if (initial || !fingerprint) {
+        fingerprint = payload.fingerprint;
+        return;
+      }
+      if (payload.fingerprint !== fingerprint) {
+        fingerprint = payload.fingerprint;
+        showToast('Shopify orders updated. Refreshing...', 1200);
+        window.setTimeout(() => window.location.reload(), 900);
+      }
+    } catch (error) {
+      return;
+    }
+  }
+
+  checkState(true);
+  window.setInterval(() => checkState(false), 30000);
+})();
 </script>
 
 {% block extra_js %}{% endblock %}

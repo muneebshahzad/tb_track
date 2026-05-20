@@ -25,6 +25,23 @@ def _ensure_app_settings_table(cur):
     """)
 
 
+def _ensure_product_costs_table(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS product_costs (
+            source TEXT NOT NULL,
+            variant_key TEXT NOT NULL,
+            source_product_id TEXT NOT NULL DEFAULT '',
+            source_variant_id TEXT NOT NULL DEFAULT '',
+            sku TEXT NOT NULL DEFAULT '',
+            primary_name TEXT NOT NULL,
+            secondary_name TEXT NOT NULL DEFAULT '',
+            product_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (source, variant_key)
+        )
+    """)
+
+
 def get_conn():
     url = (
         os.getenv('DATABASE_URL', '')
@@ -68,6 +85,7 @@ def init_db():
                     )
                 """)
                 _ensure_app_settings_table(cur)
+                _ensure_product_costs_table(cur)
             conn.commit()
         _set_last_db_error("")
         print("DB initialized.")
@@ -154,4 +172,95 @@ def set_app_setting(key: str, value: str):
     except Exception as e:
         _set_last_db_error(str(e))
         print(f"DB set_app_setting error: {e}")
+        return False
+
+
+def list_product_costs(source: str = "") -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_product_costs_table(cur)
+                if source:
+                    cur.execute("""
+                        SELECT source, variant_key, source_product_id, source_variant_id, sku,
+                               primary_name, secondary_name, product_cost, updated_at
+                        FROM product_costs
+                        WHERE source = %s
+                        ORDER BY primary_name ASC, sku ASC, variant_key ASC
+                    """, (source,))
+                else:
+                    cur.execute("""
+                        SELECT source, variant_key, source_product_id, source_variant_id, sku,
+                               primary_name, secondary_name, product_cost, updated_at
+                        FROM product_costs
+                        ORDER BY source ASC, primary_name ASC, sku ASC, variant_key ASC
+                    """)
+                rows = cur.fetchall()
+                _set_last_db_error("")
+                return [dict(row) for row in rows]
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_product_costs error: {e}")
+        return []
+
+
+def get_product_cost_lookup(source: str = "") -> dict:
+    rows = list_product_costs(source)
+    lookup = {}
+    for row in rows:
+        key = row['variant_key'] if source else f"{row['source']}::{row['variant_key']}"
+        lookup[key] = row
+    return lookup
+
+
+def upsert_product_cost(
+    source: str,
+    variant_key: str,
+    primary_name: str,
+    secondary_name: str = "",
+    sku: str = "",
+    product_cost=0,
+    source_product_id: str = "",
+    source_variant_id: str = "",
+):
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_product_costs_table(cur)
+                cur.execute("""
+                    INSERT INTO product_costs (
+                        source,
+                        variant_key,
+                        source_product_id,
+                        source_variant_id,
+                        sku,
+                        primary_name,
+                        secondary_name,
+                        product_cost
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (source, variant_key) DO UPDATE
+                    SET source_product_id = EXCLUDED.source_product_id,
+                        source_variant_id = EXCLUDED.source_variant_id,
+                        sku = EXCLUDED.sku,
+                        primary_name = EXCLUDED.primary_name,
+                        secondary_name = EXCLUDED.secondary_name,
+                        product_cost = EXCLUDED.product_cost,
+                        updated_at = NOW()
+                """, (
+                    source,
+                    variant_key,
+                    source_product_id or "",
+                    source_variant_id or "",
+                    sku or "",
+                    primary_name,
+                    secondary_name or "",
+                    product_cost,
+                ))
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB upsert_product_cost error: {e}")
         return False

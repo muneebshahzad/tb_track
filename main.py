@@ -3,6 +3,8 @@ import smtplib
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from decimal import Decimal, ROUND_HALF_UP
 from email.mime.text import MIMEText
 from flask import render_template, request, jsonify, redirect, url_for, session, send_from_directory
 import datetime as dt
@@ -39,7 +41,15 @@ from shopify_protected_data import (
 import ssl
 import certifi
 
-from db import init_db, load_order_statuses, upsert_order_status, delete_order_status
+from db import (
+    delete_order_status,
+    get_product_cost_lookup,
+    init_db,
+    list_product_costs,
+    load_order_statuses,
+    upsert_order_status,
+    upsert_product_cost,
+)
 from markupsafe import Markup
 
 os.environ['SSL_CERT_FILE'] = certifi.where()
@@ -122,6 +132,7 @@ def inject_now():
 
 order_details = []
 daraz_orders = []
+order_details_lock = threading.RLock()
 
 RATE_LIMIT = 2
 LAST_REQUEST_TIME = 0
@@ -1579,6 +1590,388 @@ def approve_shopify_cancellation(order):
     return warnings
 
 
+# ── Costing / profitability helpers ──────────────────────────────────────────
+
+COST_SOURCE_DARAZ = 'daraz'
+COST_SOURCE_SHOPIFY_LAHORE = 'shopify_lahore'
+COST_SOURCE_SHOPIFY_LEOPARDS = 'shopify_leopards'
+
+COST_SOURCE_LABELS = {
+    COST_SOURCE_DARAZ: 'Daraz',
+    COST_SOURCE_SHOPIFY_LAHORE: 'Shopify Lahore',
+    COST_SOURCE_SHOPIFY_LEOPARDS: 'Shopify Leopards',
+}
+
+DARAZ_PROFIT_STATUSES = ['shipped', 'delivered']
+DEFAULT_DARAZ_WINDOW_DAYS = 60
+
+
+def money_decimal(value) -> Decimal:
+    try:
+        cleaned = str(value or '0').replace(',', '').strip()
+        return Decimal(cleaned if cleaned else '0')
+    except Exception:
+        return Decimal('0')
+
+
+def money_float(value) -> float:
+    return float(money_decimal(value))
+
+
+def money_format(value) -> str:
+    amount = money_decimal(value).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if amount == amount.to_integral():
+        return f"Rs {int(amount):,}"
+    return f"Rs {amount:,.2f}"
+
+
+def parse_iso_day(value: str):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value[:10], '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def daraz_created_after_iso(days_back: int = DEFAULT_DARAZ_WINDOW_DAYS) -> str:
+    target = (datetime.now() - dt.timedelta(days=days_back)).date()
+    return f"{target.isoformat()}T00:00:00+08:00"
+
+
+def format_daraz_item_title(name: str, variation: str) -> str:
+    title = f"{name or 'Unknown'} {variation or ''}".strip()
+    if "Color family:" in title:
+        base, color = title.split("Color family:", 1)
+        title = f"{base.strip()} - {color.strip()}"
+    return title
+
+
+def daraz_item_key(item: dict) -> str:
+    for key in ('seller_sku', 'shop_sku', 'lazada_sku', 'sku'):
+        value = str(item.get(key) or '').strip()
+        if value:
+            return value
+    return f"{(item.get('name') or '').strip()}|{(item.get('variation') or '').strip()}"
+
+
+def get_daraz_client():
+    return lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
+
+
+def fetch_daraz_order_summaries(statuses, created_after=None, limit=100, max_pages=8):
+    access_token = get_access_token()
+    client = get_daraz_client()
+    all_orders = {}
+
+    for status in statuses:
+        offset = 0
+        for _ in range(max_pages):
+            req = lazop.LazopRequest('/orders/get', 'GET')
+            req.add_api_param('sort_direction', 'DESC')
+            req.add_api_param('offset', str(offset))
+            req.add_api_param('created_after', created_after or daraz_created_after_iso())
+            req.add_api_param('limit', str(limit))
+            req.add_api_param('update_after', created_after or daraz_created_after_iso())
+            req.add_api_param('sort_by', 'updated_at')
+            req.add_api_param('status', status)
+            req.add_api_param('access_token', access_token)
+
+            response = client.execute(req)
+            orders = response.body.get('data', {}).get('orders', []) or []
+            if not orders:
+                break
+
+            for order in orders:
+                order_copy = dict(order)
+                order_copy['_requested_status'] = status
+                all_orders[str(order.get('order_id'))] = order_copy
+
+            if len(orders) < limit:
+                break
+            offset += limit
+
+    return list(all_orders.values())
+
+
+def fetch_daraz_order_items(order_id, access_token=None, client=None):
+    access_token = access_token or get_access_token()
+    client = client or get_daraz_client()
+    req = lazop.LazopRequest('/order/items/get', 'GET')
+    req.add_api_param('order_id', order_id)
+    req.add_api_param('access_token', access_token)
+    response = client.execute(req)
+    return response.body.get('data', []) or []
+
+
+def fetch_daraz_order_finance(order_id, order_date_str, gross_sale, access_token=None, client=None):
+    access_token = access_token or get_access_token()
+    client = client or get_daraz_client()
+
+    order_date = parse_iso_day(order_date_str) or datetime.now().date()
+    start_date = (order_date - dt.timedelta(days=1)).strftime('%Y-%m-%d')
+    end_date = (order_date + dt.timedelta(days=120)).strftime('%Y-%m-%d')
+
+    req = lazop.LazopRequest('/finance/transaction/details/get', 'GET')
+    req.add_api_param('access_token', access_token)
+    req.add_api_param('offset', '0')
+    req.add_api_param('limit', '500')
+    req.add_api_param('start_time', start_date)
+    req.add_api_param('end_time', end_date)
+    req.add_api_param('trade_order_id', str(order_id))
+
+    response = client.execute(req)
+    rows = response.body.get('data', []) or []
+    gross_sale_decimal = money_decimal(gross_sale)
+
+    if not rows:
+        return {
+            'gross_sale': gross_sale_decimal,
+            'daraz_charges_total': Decimal('0'),
+            'net_settlement': Decimal('0'),
+            'paid_status': 'Not Paid',
+            'statement': '',
+            'breakdown': [],
+            'has_finance': False,
+        }
+
+    aggregate = {}
+    for row in rows:
+        label = str(row.get('fee_name') or row.get('transaction_type') or 'Other').strip()
+        amount = money_decimal(row.get('amount'))
+        aggregate[label] = aggregate.get(label, Decimal('0')) + amount
+
+    product_label = next((key for key in aggregate if key.strip().lower() == 'product price paid by buyer'), None)
+    if product_label is None:
+        aggregate['Product Price Paid by Buyer'] = gross_sale_decimal
+    elif aggregate[product_label] <= 0:
+        aggregate[product_label] = gross_sale_decimal
+
+    net_settlement = sum(aggregate.values(), Decimal('0'))
+    daraz_charges_total = sum(abs(value) for value in aggregate.values() if value < 0)
+    paid_status = 'Paid' if any(str(row.get('paid_status', '')).lower() in ('yes', 'paid') for row in rows) else 'Not Paid'
+    statement = str(rows[-1].get('statement') or '')
+
+    ordered_items = sorted(
+        aggregate.items(),
+        key=lambda kv: (
+            kv[0].strip().lower() != 'product price paid by buyer',
+            0 if kv[1] >= 0 else 1,
+            kv[0].lower(),
+        )
+    )
+
+    return {
+        'gross_sale': gross_sale_decimal,
+        'daraz_charges_total': daraz_charges_total,
+        'net_settlement': net_settlement,
+        'paid_status': paid_status,
+        'statement': statement,
+        'breakdown': [
+            {
+                'label': label,
+                'amount': float(amount),
+                'amount_formatted': money_format(amount),
+            }
+            for label, amount in ordered_items
+        ],
+        'has_finance': True,
+    }
+
+
+def build_shopify_cost_catalog(source: str):
+    rows = []
+    for item in get_active_shopify_products(limit=250):
+        variant_key = str(item.get('variant_id') or f"{item.get('product_id')}::{item.get('sku') or item.get('title')}")
+        rows.append({
+            'source': source,
+            'variant_key': variant_key,
+            'source_product_id': str(item.get('product_id') or ''),
+            'source_variant_id': str(item.get('variant_id') or ''),
+            'sku': item.get('sku') or '',
+            'primary_name': item.get('title') or item.get('product_title') or 'Untitled variant',
+            'secondary_name': '',
+            'image': item.get('image') or '',
+        })
+    rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
+    return rows
+
+
+def build_daraz_cost_catalog():
+    orders = fetch_daraz_order_summaries(DARAZ_PROFIT_STATUSES)
+    access_token = get_access_token()
+    items_by_key = {}
+
+    for order in orders:
+        try:
+            items = fetch_daraz_order_items(order.get('order_id'), access_token=access_token)
+        except Exception as e:
+            print(f"Could not fetch Daraz items for catalog order {order.get('order_id')}: {e}")
+            continue
+        for item in items:
+            variant_key = daraz_item_key(item)
+            if variant_key in items_by_key:
+                continue
+            items_by_key[variant_key] = {
+                'source': COST_SOURCE_DARAZ,
+                'variant_key': variant_key,
+                'source_product_id': str(item.get('item_id') or item.get('product_id') or ''),
+                'source_variant_id': str(item.get('order_item_id') or item.get('sku_id') or ''),
+                'sku': str(item.get('seller_sku') or item.get('shop_sku') or item.get('lazada_sku') or item.get('sku') or '').strip(),
+                'primary_name': format_daraz_item_title(item.get('name'), item.get('variation')),
+                'secondary_name': '',
+                'image': item.get('product_main_image') or '',
+            }
+
+    rows = list(items_by_key.values())
+    rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
+    return rows
+
+
+def with_saved_costs(source: str, rows: list):
+    lookup = get_product_cost_lookup(source)
+    hydrated = []
+    for row in rows:
+        saved = lookup.get(row['variant_key'])
+        row_copy = dict(row)
+        row_copy['product_cost'] = money_float(saved.get('product_cost')) if saved else 0.0
+        row_copy['secondary_name'] = (saved.get('secondary_name') if saved else row_copy.get('secondary_name')) or ''
+        row_copy['updated_at'] = saved.get('updated_at').isoformat() if saved and saved.get('updated_at') else ''
+        hydrated.append(row_copy)
+    return hydrated
+
+
+def get_cost_catalog_for_source(source: str):
+    if source == COST_SOURCE_DARAZ:
+        return with_saved_costs(source, build_daraz_cost_catalog())
+    if source in (COST_SOURCE_SHOPIFY_LAHORE, COST_SOURCE_SHOPIFY_LEOPARDS):
+        return with_saved_costs(source, build_shopify_cost_catalog(source))
+    return []
+
+
+def build_daraz_profit_records(start_date: str = '', end_date: str = ''):
+    summaries = fetch_daraz_order_summaries(DARAZ_PROFIT_STATUSES)
+    start_day = parse_iso_day(start_date)
+    end_day = parse_iso_day(end_date)
+    filtered = []
+
+    for order in summaries:
+        created_day = parse_iso_day(str(order.get('created_at') or ''))
+        if start_day and created_day and created_day < start_day:
+            continue
+        if end_day and created_day and created_day > end_day:
+            continue
+        filtered.append(order)
+
+    if not filtered:
+        return {'records': [], 'summary': {}}
+
+    cost_lookup = get_product_cost_lookup(COST_SOURCE_DARAZ)
+    access_token = get_access_token()
+
+    def process_order(order):
+        client = get_daraz_client()
+        order_id = str(order.get('order_id') or '')
+        items = fetch_daraz_order_items(order_id, access_token=access_token, client=client)
+        finance = fetch_daraz_order_finance(
+            order_id=order_id,
+            order_date_str=str(order.get('created_at') or ''),
+            gross_sale=order.get('price', '0'),
+            access_token=access_token,
+            client=client,
+        )
+
+        line_items = []
+        product_cost_total = Decimal('0')
+        missing_cost_count = 0
+        total_quantity = 0
+
+        for item in items:
+            variant_key = daraz_item_key(item)
+            saved = cost_lookup.get(variant_key)
+            qty = int(item.get('quantity') or 1)
+            total_quantity += qty
+            unit_cost = money_decimal(saved.get('product_cost')) if saved else Decimal('0')
+            line_cost = unit_cost * Decimal(qty)
+            product_cost_total += line_cost
+            if saved is None:
+                missing_cost_count += 1
+
+            line_items.append({
+                'variant_key': variant_key,
+                'primary_name': format_daraz_item_title(item.get('name'), item.get('variation')),
+                'secondary_name': saved.get('secondary_name') if saved else '',
+                'sku': str(item.get('seller_sku') or item.get('shop_sku') or item.get('lazada_sku') or item.get('sku') or '').strip(),
+                'quantity': qty,
+                'unit_cost': float(unit_cost),
+                'unit_cost_formatted': money_format(unit_cost),
+                'line_cost': float(line_cost),
+                'line_cost_formatted': money_format(line_cost),
+                'cost_missing': saved is None,
+                'image': item.get('product_main_image') or '',
+            })
+
+        net_profit = finance['net_settlement'] - product_cost_total
+        customer = order.get('address_shipping') or {}
+        display_status = str(order.get('_requested_status') or order.get('statuses', [''])[0] or '').replace('_', ' ').title()
+
+        return {
+            'order_id': order_id,
+            'created_at': str(order.get('created_at') or ''),
+            'created_day': parse_iso_day(str(order.get('created_at') or '')).isoformat() if parse_iso_day(str(order.get('created_at') or '')) else '',
+            'status': display_status,
+            'customer_name': f"{order.get('customer_first_name', '')} {order.get('customer_last_name', '')}".strip() or 'N/A',
+            'customer_phone': customer.get('phone') or 'N/A',
+            'gross_sale': float(finance['gross_sale']),
+            'gross_sale_formatted': money_format(finance['gross_sale']),
+            'daraz_charges_total': float(finance['daraz_charges_total']),
+            'daraz_charges_formatted': money_format(finance['daraz_charges_total']),
+            'net_settlement': float(finance['net_settlement']),
+            'net_settlement_formatted': money_format(finance['net_settlement']),
+            'product_cost_total': float(product_cost_total),
+            'product_cost_formatted': money_format(product_cost_total),
+            'net_profit': float(net_profit),
+            'net_profit_formatted': money_format(net_profit),
+            'paid_status': finance['paid_status'],
+            'statement': finance['statement'],
+            'breakdown': finance['breakdown'],
+            'has_finance': finance['has_finance'],
+            'cost_missing': missing_cost_count > 0,
+            'missing_cost_count': missing_cost_count,
+            'items_count': len(line_items),
+            'total_quantity': total_quantity,
+            'line_items': line_items,
+        }
+
+    records = []
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = [executor.submit(process_order, order) for order in filtered]
+        for future in as_completed(futures):
+            try:
+                records.append(future.result())
+            except Exception as e:
+                print(f"Daraz profitability processing error: {e}")
+
+    records.sort(key=lambda row: row.get('created_at', ''), reverse=True)
+
+    summary = {
+        'orders': len(records),
+        'gross_sale_total': float(sum(money_decimal(row['gross_sale']) for row in records)),
+        'daraz_charges_total': float(sum(money_decimal(row['daraz_charges_total']) for row in records)),
+        'net_settlement_total': float(sum(money_decimal(row['net_settlement']) for row in records)),
+        'product_cost_total': float(sum(money_decimal(row['product_cost_total']) for row in records)),
+        'net_profit_total': float(sum(money_decimal(row['net_profit']) for row in records)),
+        'missing_cost_orders': sum(1 for row in records if row['cost_missing']),
+    }
+    summary['gross_sale_total_formatted'] = money_format(summary['gross_sale_total'])
+    summary['daraz_charges_total_formatted'] = money_format(summary['daraz_charges_total'])
+    summary['net_settlement_total_formatted'] = money_format(summary['net_settlement_total'])
+    summary['product_cost_total_formatted'] = money_format(summary['product_cost_total'])
+    summary['net_profit_total_formatted'] = money_format(summary['net_profit_total'])
+
+    return {'records': records, 'summary': summary}
+
+
 # ── Daraz ─────────────────────────────────────────────────────────────────────
 
 def get_daraz_orders(statuses):
@@ -2014,19 +2407,87 @@ def employee_portal_report():
 
 # ── Webhooks ──────────────────────────────────────────────────────────────────
 
+def get_shopify_webhook_secret():
+    return (
+        os.getenv('SHOPIFY_WEBHOOK_SECRET')
+        or os.getenv('SHOPIFY_GRAPHQL_CLIENT_SECRET')
+        or os.getenv('SHOPIFY_API_SECRET')
+    )
+
+
 def verify_shopify_webhook(req):
     shopify_hmac = req.headers.get('X-Shopify-Hmac-Sha256')
     data = req.get_data()
-    secret = os.getenv('SHOPIFY_WEBHOOK_SECRET')
+    secret = get_shopify_webhook_secret()
 
-    if secret is None:
-        raise ValueError("SHOPIFY_WEBHOOK_SECRET is not set.")
+    if not secret:
+        raise ValueError("Shopify webhook secret is not set.")
+    if not shopify_hmac:
+        return False
 
     digest = hmac.new(secret.encode('utf-8'), data, hashlib.sha256).digest()
     computed_hmac = base64.b64encode(digest).decode('utf-8')
     return hmac.compare_digest(computed_hmac, shopify_hmac)
 
 
+def normalize_shopify_order_id(order_id):
+    return str(order_id or '').strip()
+
+
+def remove_shopify_order_from_portal(order_id):
+    normalized_id = normalize_shopify_order_id(order_id)
+    if not normalized_id:
+        return 0
+
+    with order_details_lock:
+        before_count = len(order_details)
+        order_details[:] = [
+            order for order in order_details
+            if normalize_shopify_order_id(order.get('id')) != normalized_id
+        ]
+        return before_count - len(order_details)
+
+
+def shopify_payload_removes_order(order_data, topic):
+    topic = (topic or '').lower()
+    return (
+        topic in {'orders/cancelled', 'orders/delete'}
+        or bool(order_data.get('cancelled_at'))
+        or bool(order_data.get('closed_at'))
+    )
+
+
+def build_shopify_order_state():
+    with order_details_lock:
+        orders = [
+            {
+                'id': normalize_shopify_order_id(order.get('id')),
+                'order_id': order.get('order_id', ''),
+                'status': order.get('status', ''),
+                'tags': order.get('tags', []),
+                'updated': order.get('updated_at') or order.get('created_at', ''),
+            }
+            for order in order_details
+        ]
+
+    state_json = json.dumps(orders, sort_keys=True, default=str)
+    return {
+        'success': True,
+        'count': len(orders),
+        'fingerprint': hashlib.sha256(state_json.encode('utf-8')).hexdigest(),
+        'generated_at': datetime.now().isoformat(timespec='seconds'),
+    }
+
+
+@app.route('/api/shopify/order-state')
+def shopify_order_state():
+    return jsonify(build_shopify_order_state())
+
+
+@app.route('/shopify/webhook/orders/create', methods=['POST'])
+@app.route('/shopify/webhook/orders/updated', methods=['POST'])
+@app.route('/shopify/webhook/orders/cancelled', methods=['POST'])
+@app.route('/shopify/webhook/orders/delete', methods=['POST'])
 @app.route('/shopify/webhook/order_updated', methods=['POST'])
 def shopify_order_updated():
     global order_details
@@ -2034,14 +2495,20 @@ def shopify_order_updated():
         if not verify_shopify_webhook(request):
             return jsonify({'error': 'Invalid webhook signature'}), 401
 
-        order_data = request.get_json()
+        topic = request.headers.get('X-Shopify-Topic', '')
+        order_data = request.get_json(silent=True) or {}
         order_id = order_data.get('id')
         if not order_id:
             return jsonify({'error': 'No order id found in payload'}), 400
 
-        if order_data.get('closed_at'):
-            order_details[:] = [o for o in order_details if o.get('id') != order_id]
-            return jsonify({'success': True, 'message': f'Order {order_id} removed.'}), 200
+        if shopify_payload_removes_order(order_data, topic):
+            removed_count = remove_shopify_order_from_portal(order_id)
+            return jsonify({
+                'success': True,
+                'message': f'Order {order_id} removed.',
+                'removed_count': removed_count,
+                'topic': topic,
+            }), 200
 
         order = shopify.Order.find(order_id)
         if not order:
@@ -2073,17 +2540,26 @@ def shopify_order_updated():
                 print(f"Webhook tracking fetch error: {e}")
 
         updated_order_info = asyncio.run(process_order(order, tracking_cache))
+        updated_order_info = enrich_orders_with_protected_customer_data([updated_order_info])[0]
 
         updated = False
-        for idx, existing_order in enumerate(order_details):
-            if existing_order.get('id') == updated_order_info.get('id'):
-                order_details[idx] = updated_order_info
-                updated = True
-                break
-        if not updated:
-            order_details.append(updated_order_info)
+        updated_order_id = normalize_shopify_order_id(updated_order_info.get('id'))
+        with order_details_lock:
+            for idx, existing_order in enumerate(order_details):
+                if normalize_shopify_order_id(existing_order.get('id')) == updated_order_id:
+                    order_details[idx] = updated_order_info
+                    updated = True
+                    break
+            if not updated:
+                order_details.append(updated_order_info)
+            order_details.sort(key=lambda item: str(item.get('created_at') or ''), reverse=True)
 
-        return jsonify({'success': True, 'message': f'Order {order_id} processed successfully'}), 200
+        return jsonify({
+            'success': True,
+            'message': f'Order {order_id} processed successfully',
+            'created': not updated,
+            'topic': topic,
+        }), 200
     except Exception as e:
         print(f"Webhook processing error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2310,6 +2786,97 @@ def normalize_shipper_advice_items(payload):
 @app.route('/payments')
 def payments_page():
     return render_template('payments.html')
+
+
+@app.route('/product-costs')
+def product_costs_page():
+    return render_template(
+        'product_costs.html',
+        sources=COST_SOURCE_LABELS,
+        default_source=COST_SOURCE_DARAZ,
+    )
+
+
+@app.route('/daraz-profits')
+def daraz_profits_page():
+    return render_template('daraz_profits.html')
+
+
+@app.route('/api/costing/catalog')
+def costing_catalog_api():
+    source = (request.args.get('source') or COST_SOURCE_DARAZ).strip().lower()
+    if source not in COST_SOURCE_LABELS:
+        return jsonify({'ok': False, 'error': 'Unknown source.'}), 400
+    try:
+        rows = get_cost_catalog_for_source(source)
+        saved = list_product_costs(source)
+        return jsonify({
+            'ok': True,
+            'source': source,
+            'label': COST_SOURCE_LABELS[source],
+            'rows': rows,
+            'saved_count': len(saved),
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/costing/save', methods=['POST'])
+def costing_save_api():
+    payload = request.get_json(silent=True) or {}
+    source = str(payload.get('source') or '').strip().lower()
+    variant_key = str(payload.get('variant_key') or '').strip()
+    primary_name = str(payload.get('primary_name') or '').strip()
+    secondary_name = str(payload.get('secondary_name') or '').strip()
+    sku = str(payload.get('sku') or '').strip()
+    source_product_id = str(payload.get('source_product_id') or '').strip()
+    source_variant_id = str(payload.get('source_variant_id') or '').strip()
+
+    if source not in COST_SOURCE_LABELS:
+        return jsonify({'ok': False, 'error': 'Unknown source.'}), 400
+    if not variant_key:
+        return jsonify({'ok': False, 'error': 'Variant key is required.'}), 400
+    if not primary_name:
+        return jsonify({'ok': False, 'error': 'Primary name is required.'}), 400
+
+    product_cost = money_decimal(payload.get('product_cost'))
+    success = upsert_product_cost(
+        source=source,
+        variant_key=variant_key,
+        primary_name=primary_name,
+        secondary_name=secondary_name,
+        sku=sku,
+        product_cost=str(product_cost),
+        source_product_id=source_product_id,
+        source_variant_id=source_variant_id,
+    )
+    if not success:
+        return jsonify({'ok': False, 'error': 'Could not save product cost.'}), 500
+
+    return jsonify({
+        'ok': True,
+        'saved': {
+            'source': source,
+            'variant_key': variant_key,
+            'primary_name': primary_name,
+            'secondary_name': secondary_name,
+            'sku': sku,
+            'product_cost': float(product_cost),
+            'source_product_id': source_product_id,
+            'source_variant_id': source_variant_id,
+        }
+    })
+
+
+@app.route('/api/daraz/profits')
+def daraz_profits_api():
+    start_date = (request.args.get('from_date') or '').strip()
+    end_date = (request.args.get('to_date') or '').strip()
+    try:
+        payload = build_daraz_profit_records(start_date=start_date, end_date=end_date)
+        return jsonify({'ok': True, **payload})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 @app.route('/api/leopards/last-status')

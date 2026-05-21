@@ -224,6 +224,8 @@ let appliedConversationRequestId = 0;
 let messagesRequestId = 0;
 let conversationsLoading = false;
 let messagesLoading = false;
+const conversationShadow = new Map();
+const MISSING_CONVERSATION_GRACE_MS = 45000;
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -245,6 +247,36 @@ function channelLabel(channel) {
   return ({ whatsapp:'WhatsApp', facebook:'Facebook', instagram:'Instagram' }[channel] || 'Inbox');
 }
 
+function conversationSortValue(item) {
+  const last = Date.parse(item.last_message_at || item.updated_at || '') || 0;
+  return last;
+}
+
+function stableConversationsFromSnapshot(nextConversations, forceRender = false) {
+  const now = Date.now();
+  const seen = new Set();
+  for (const item of nextConversations) {
+    seen.add(item.phone);
+    conversationShadow.set(item.phone, { item, missingSince: null });
+  }
+  for (const [phone, record] of Array.from(conversationShadow.entries())) {
+    if (seen.has(phone)) continue;
+    if (forceRender) {
+      if (record.missingSince == null) record.missingSince = now;
+    } else if (record.missingSince == null) {
+      record.missingSince = now;
+    }
+    if (record.missingSince != null && now - record.missingSince > MISSING_CONVERSATION_GRACE_MS) {
+      conversationShadow.delete(phone);
+    } else {
+      conversationShadow.set(phone, record);
+    }
+  }
+  return Array.from(conversationShadow.values())
+    .map(record => record.item)
+    .sort((left, right) => conversationSortValue(right) - conversationSortValue(left));
+}
+
 async function loadConversations(forceRender = false) {
   const requestId = ++conversationRequestId;
   conversationsLoading = true;
@@ -254,7 +286,7 @@ async function loadConversations(forceRender = false) {
     if (!payload.success) return;
     if (requestId < appliedConversationRequestId) return;
     appliedConversationRequestId = requestId;
-    const nextConversations = payload.conversations || [];
+    const nextConversations = stableConversationsFromSnapshot(payload.conversations || [], forceRender);
     if (!forceRender && !nextConversations.length && conversations.length && !payload.db_error) return;
     conversations = nextConversations;
     document.getElementById('waTotal').textContent = conversations.length;

@@ -500,20 +500,37 @@ def generate_loadsheet():
 
 # ── Shopify orders fetch ───────────────────────────────────────────────────────
 
-async def getShopifyOrders():
-    start_date = datetime(2024, 9, 1).isoformat()
-    result = []
-    total_start = time.time()
+def get_shopify_order_fetch_start_date():
+    raw_date = (os.getenv('SHOPIFY_ORDER_FETCH_START_DATE') or '2024-09-01').strip()
+    try:
+        return datetime.fromisoformat(raw_date).isoformat()
+    except ValueError:
+        print(f"Invalid SHOPIFY_ORDER_FETCH_START_DATE '{raw_date}', using 2024-09-01.")
+        return datetime(2024, 9, 1).isoformat()
 
+
+def get_shopify_order_fetch_status():
+    return (os.getenv('SHOPIFY_ORDER_FETCH_STATUS') or 'any').strip().lower() or 'any'
+
+
+def fetch_all_shopify_orders(start_date, fetch_status):
     all_orders = []
     try:
-        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(
+            limit=250,
+            order="created_at DESC",
+            created_at_min=start_date,
+            status=fetch_status,
+        )
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
 
+    page_count = 0
     while True:
-        all_orders.extend(orders)
+        page_orders = list(orders)
+        page_count += 1
+        all_orders.extend(page_orders)
         try:
             if not orders.has_next_page():
                 break
@@ -522,7 +539,22 @@ async def getShopifyOrders():
             print(f"Error fetching next page: {e}")
             break
 
-    print(f"Fetched {len(all_orders)} orders from Shopify.")
+    print(
+        f"Fetched {len(all_orders)} Shopify orders across {page_count} page(s) "
+        f"with status={fetch_status}, created_at_min={start_date}."
+    )
+    return all_orders
+
+
+async def getShopifyOrders(force_status=None):
+    start_date = get_shopify_order_fetch_start_date()
+    fetch_status = (force_status or get_shopify_order_fetch_status() or 'any').strip().lower() or 'any'
+    result = []
+    total_start = time.time()
+
+    all_orders = fetch_all_shopify_orders(start_date, fetch_status)
+    if not all_orders:
+        return []
 
     all_tracking_numbers = []
     for order in all_orders:
@@ -652,7 +684,7 @@ def admin_portal_service_worker():
 def refresh_data():
     global order_details
     try:
-        order_details = asyncio.run(getShopifyOrders())
+        order_details = asyncio.run(getShopifyOrders(force_status='any'))
         return jsonify({'message': 'Data refreshed successfully'})
     except Exception as e:
         print(f"Error refreshing data: {e}")
@@ -3218,7 +3250,7 @@ def background_refresh():
     if not order_details:
         print("BACKGROUND REFRESH: order_details empty — doing full Shopify fetch.")
         try:
-            order_details = asyncio.run(getShopifyOrders())
+            order_details = asyncio.run(getShopifyOrders(force_status='any'))
             print(f"BACKGROUND REFRESH: Shopify fetch complete ({len(order_details)} orders).")
         except Exception as e:
             print(f"BACKGROUND REFRESH ERROR (Shopify full fetch): {e}")
@@ -3287,7 +3319,7 @@ def load_initial_data():
     print("Loading initial data...")
     statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
     daraz_orders = get_daraz_orders(statuses)
-    order_details = asyncio.run(getShopifyOrders())
+    order_details = asyncio.run(getShopifyOrders(force_status='any'))
     print("Initial data loaded.")
 
 

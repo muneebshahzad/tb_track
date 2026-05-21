@@ -7,9 +7,10 @@ import os
 from pathlib import Path
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 import requests
-from flask import Blueprint, current_app, jsonify, render_template, request
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request
 from werkzeug.utils import secure_filename
 
 from db import (
@@ -60,6 +61,23 @@ def get_order_source() -> tuple[list[dict], list[dict]]:
 
 def clean_digits(value: str) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def meta_error_message(data: dict, fallback_text: str = "") -> str:
+    error = (data or {}).get("error") or {}
+    message = str(error.get("message") or fallback_text or "Meta request failed.").strip()
+    code = error.get("code")
+    subcode = error.get("error_subcode")
+    if code == 190:
+        message = "Meta access token is invalid or expired. Re-save the token in Railway and redeploy."
+    extras = []
+    if code:
+        extras.append(f"code {code}")
+    if subcode:
+        extras.append(f"subcode {subcode}")
+    if extras:
+        message = f"{message} ({', '.join(extras)})"
+    return message
 
 
 def channel_label(channel: str) -> str:
@@ -356,7 +374,7 @@ def send_meta_text_message(phone: str, body: str) -> tuple[bool, str, dict]:
             if messages:
                 message_id = messages[0].get("id") or ""
             return True, message_id, data
-        return False, data.get("error", {}).get("message") or response.text, data
+        return False, meta_error_message(data, response.text), data
     except Exception as e:
         return False, str(e), {}
 
@@ -387,7 +405,7 @@ def send_facebook_text_message(recipient_id: str, body: str, channel: str = "fac
         data = response.json() if response.content else {}
         if response.ok:
             return True, data.get("message_id") or "", data
-        return False, data.get("error", {}).get("message") or response.text, data
+        return False, meta_error_message(data, response.text), data
     except Exception as e:
         return False, str(e), {}
 
@@ -447,7 +465,7 @@ def send_channel_image_message(channel: str, contact_key: str, image_url: str, c
             if messages and not message_id:
                 message_id = messages[0].get("id") or ""
             return True, message_id, data
-        return False, data.get("error", {}).get("message") or response.text, data
+        return False, meta_error_message(data, response.text), data
     except Exception as e:
         return False, str(e), {}
 
@@ -539,6 +557,9 @@ def inbox():
 @whatsapp_bp.route("/api/whatsapp/conversations")
 def api_conversations():
     conversations = list_whatsapp_conversations()
+    for item in conversations:
+        if item.get("channel") in {"facebook", "instagram"}:
+            item["avatar_url"] = f"/api/whatsapp/avatar/{quote(item.get('phone') or '', safe='')}"
     return jsonify_data({
         "success": True,
         "conversations": conversations,
@@ -551,6 +572,8 @@ def api_conversations():
 @whatsapp_bp.route("/api/whatsapp/conversations/<path:phone>/messages")
 def api_messages(phone):
     conversation = get_whatsapp_conversation(phone)
+    if conversation and conversation.get("channel") in {"facebook", "instagram"}:
+        conversation["avatar_url"] = f"/api/whatsapp/avatar/{quote(conversation.get('phone') or '', safe='')}"
     return jsonify_data({
         "success": True,
         "phone": conversation.get("phone") if conversation else normalize_whatsapp_phone(phone),
@@ -573,6 +596,10 @@ def api_send():
     data = request.get_json(silent=True) or {}
     channel = str(data.get("channel") or "whatsapp").strip().lower() or "whatsapp"
     phone = normalize_inbox_contact_key(channel, data.get("phone"))
+    conversation = get_whatsapp_conversation(phone)
+    if conversation:
+        channel = str(conversation.get("channel") or channel).strip().lower() or channel
+        phone = conversation.get("phone") or phone
     body = (data.get("body") or "").strip()
     attachment_url = (data.get("attachment_url") or "").strip()
     if not phone or (not body and not attachment_url):
@@ -590,7 +617,8 @@ def api_send():
             provider_message_id=provider_id,
             metadata={"source": "manual", "meta": meta, "attachment_url": attachment_url},
             channel=channel,
-            display_handle=data.get("display_handle") or "",
+            display_handle=(conversation or {}).get("display_handle") or data.get("display_handle") or "",
+            contact_phone=(conversation or {}).get("contact_phone") or "",
         )
         if not saved:
             return jsonify({"success": False, "error": get_last_db_error() or "Message sent but could not be saved to the inbox."}), 500
@@ -605,7 +633,8 @@ def api_send():
                     provider_message_id=extra_provider_id if extra_ok else "dry-run",
                     metadata={"source": "manual_attachment_caption", "meta": extra_meta, "dry_run": not extra_ok},
                     channel=channel,
-                    display_handle=data.get("display_handle") or "",
+                    display_handle=(conversation or {}).get("display_handle") or data.get("display_handle") or "",
+                    contact_phone=(conversation or {}).get("contact_phone") or "",
                 )
         return jsonify({"success": True, "provider_message_id": provider_id})
 
@@ -617,12 +646,47 @@ def api_send():
             provider_message_id="dry-run",
             metadata={"source": "manual", "dry_run": True, "error": provider_id, "attachment_url": attachment_url},
             channel=channel,
-            display_handle=data.get("display_handle") or "",
+            display_handle=(conversation or {}).get("display_handle") or data.get("display_handle") or "",
+            contact_phone=(conversation or {}).get("contact_phone") or "",
         )
         update_whatsapp_conversation_status(phone, "open")
         return jsonify({"success": True, "provider_message_id": "dry-run", "dry_run": True, "warning": provider_id})
 
     return jsonify({"success": False, "error": provider_id}), 502
+
+
+@whatsapp_bp.route("/api/whatsapp/avatar/<path:phone>")
+def api_avatar(phone):
+    conversation = get_whatsapp_conversation(phone)
+    if not conversation:
+        return "", 404
+    channel = str(conversation.get("channel") or "").lower()
+    if channel not in {"facebook", "instagram"}:
+        return "", 404
+    sender_id = str(conversation.get("phone") or "")
+    if ":" in sender_id:
+        sender_id = sender_id.split(":", 1)[1]
+    token = os.getenv("META_PAGE_ACCESS_TOKEN") or os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN")
+    api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
+    if not token or not sender_id:
+        return "", 404
+    fields = "name,profile_pic"
+    if channel == "instagram":
+        fields = "username,profile_pic"
+    try:
+        response = requests.get(
+            f"https://graph.facebook.com/{api_version}/{sender_id}",
+            params={"fields": fields},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
+        )
+        data = response.json() if response.content else {}
+        avatar_url = (data.get("profile_pic") or "").strip()
+        if not avatar_url:
+            return "", 404
+        return redirect(avatar_url, code=302)
+    except Exception:
+        return "", 404
 
 
 @whatsapp_bp.route("/api/whatsapp/rules", methods=["GET", "POST"])

@@ -21,7 +21,8 @@
   .wa-list { overflow:auto; min-height:0; }
   .wa-convo { width:100%; border:0; border-bottom:1px solid #eef0f7; background:#fff; padding:12px; cursor:pointer; text-align:left; display:grid; grid-template-columns:38px 1fr auto; gap:10px; align-items:start; }
   .wa-convo:hover, .wa-convo.active { background:#f7f9ff; }
-  .wa-avatar { width:38px; height:38px; border-radius:50%; background:#d8f3e8; color:#0d6b4a; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800; }
+  .wa-avatar { width:38px; height:38px; border-radius:50%; background:#d8f3e8; color:#0d6b4a; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800; overflow:hidden; flex-shrink:0; }
+  .wa-avatar img { width:100%; height:100%; object-fit:cover; display:block; }
   .wa-convo-main { min-width:0; }
   .wa-convo-name { font-size:13px; font-weight:800; color:#2d2e36; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .wa-convo-msg { font-size:12px; color:#858796; line-height:1.35; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -218,6 +219,11 @@ let channelFilter = 'all';
 let conversationFingerprint = '';
 let templates = [];
 let uploadedAttachmentUrl = '';
+let conversationRequestId = 0;
+let appliedConversationRequestId = 0;
+let messagesRequestId = 0;
+let conversationsLoading = false;
+let messagesLoading = false;
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -240,16 +246,43 @@ function channelLabel(channel) {
 }
 
 async function loadConversations(forceRender = false) {
-  const response = await fetch('/api/whatsapp/conversations');
-  const payload = await response.json();
-  if (!payload.success) return;
-  conversations = payload.conversations || [];
-  document.getElementById('waTotal').textContent = conversations.length;
-  if (forceRender || payload.fingerprint !== conversationFingerprint) {
-    conversationFingerprint = payload.fingerprint;
-    renderConversations();
-    if (!selectedPhone && conversations.length) selectConversation(conversations[0].phone);
+  const requestId = ++conversationRequestId;
+  conversationsLoading = true;
+  try {
+    const response = await fetch('/api/whatsapp/conversations');
+    const payload = await response.json();
+    if (!payload.success) return;
+    if (requestId < appliedConversationRequestId) return;
+    appliedConversationRequestId = requestId;
+    const nextConversations = payload.conversations || [];
+    if (!forceRender && !nextConversations.length && conversations.length && !payload.db_error) return;
+    conversations = nextConversations;
+    document.getElementById('waTotal').textContent = conversations.length;
+    if (forceRender || payload.fingerprint !== conversationFingerprint) {
+      conversationFingerprint = payload.fingerprint;
+      renderConversations();
+    }
+    if (selectedPhone && !conversations.some(item => item.phone === selectedPhone)) {
+      if (conversations.length) {
+        await selectConversation(conversations[0].phone, { skipReloadConversations: true });
+      } else {
+        clearConversationSelection();
+      }
+    } else if (!selectedPhone && conversations.length) {
+      await selectConversation(conversations[0].phone, { skipReloadConversations: true });
+    }
+  } catch (error) {
+    console.error('Conversation refresh failed', error);
+  } finally {
+    conversationsLoading = false;
   }
+}
+
+function avatarMarkup(item) {
+  if (item && item.avatar_url) {
+    return `<img src="${escapeHtml(item.avatar_url)}" alt="${escapeHtml(item.customer_name || item.phone || 'Avatar')}" onerror="this.remove();this.parentNode.textContent='${escapeHtml(initials(item.customer_name, item.phone))}'">`;
+  }
+  return escapeHtml(initials(item.customer_name, item.phone));
 }
 
 function renderConversations() {
@@ -267,7 +300,7 @@ function renderConversations() {
   }
   list.innerHTML = filtered.map(item => `
     <button class="wa-convo ${item.phone === selectedPhone ? 'active' : ''}" onclick="selectConversation('${escapeHtml(item.phone)}')">
-      <div class="wa-avatar">${escapeHtml(initials(item.customer_name, item.phone))}</div>
+      <div class="wa-avatar">${avatarMarkup(item)}</div>
       <div class="wa-convo-main">
         <div class="wa-convo-name">${escapeHtml(item.customer_name || item.phone)}</div>
         <div class="wa-convo-msg">${item.last_direction === 'outbound' ? 'You: ' : ''}${escapeHtml(item.last_message || '')}</div>
@@ -280,6 +313,25 @@ function renderConversations() {
       </div>
     </button>
   `).join('');
+}
+
+function clearConversationSelection() {
+  selectedPhone = '';
+  selectedConversation = null;
+  selectedChannel = 'whatsapp';
+  messages = [];
+  orders = [];
+  renderConversations();
+  document.getElementById('chatName').textContent = 'Select a conversation';
+  document.getElementById('chatPhone').textContent = 'No phone selected';
+  document.getElementById('chatAvatar').textContent = 'TB';
+  document.getElementById('statusSelect').disabled = true;
+  document.getElementById('replyText').disabled = true;
+  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('statusBtn').disabled = true;
+  document.getElementById('imageBtn').disabled = true;
+  document.getElementById('messageList').innerHTML = '<div class="empty">Pick a conversation on the left, or use Test inbound to create one.</div>';
+  document.getElementById('orderHistory').innerHTML = '<div class="empty" style="padding:12px;">Select a customer.</div>';
 }
 
 function setChannelFilter(btn) {
@@ -296,33 +348,50 @@ function setConversationFilter(btn) {
   renderConversations();
 }
 
-async function selectConversation(phone) {
+async function selectConversation(phone, options = {}) {
   selectedPhone = phone;
   const conversation = conversations.find(item => item.phone === phone) || { phone };
   selectedConversation = conversation;
   selectedChannel = conversation.channel || 'whatsapp';
+  renderConversations();
   document.getElementById('chatName').textContent = conversation.customer_name || phone;
   const handle = conversation.display_handle || phone;
   document.getElementById('chatPhone').textContent = `${channelLabel(selectedChannel)} · ${handle}`;
-  document.getElementById('chatAvatar').textContent = initials(conversation.customer_name, phone);
+  const chatAvatar = document.getElementById('chatAvatar');
+  chatAvatar.innerHTML = avatarMarkup(conversation);
+  if (!conversation.avatar_url) {
+    chatAvatar.textContent = initials(conversation.customer_name, phone);
+  }
   document.getElementById('statusSelect').disabled = false;
   document.getElementById('statusSelect').value = conversation.status || 'open';
   document.getElementById('replyText').disabled = false;
   document.getElementById('sendBtn').disabled = false;
   document.getElementById('statusBtn').disabled = false;
+  document.getElementById('imageBtn').disabled = false;
   await loadMessages();
-  await loadConversations(true);
+  if (!options.skipReloadConversations) {
+    await loadConversations(true);
+  }
 }
 
 async function loadMessages() {
   if (!selectedPhone) return;
-  const response = await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/messages`);
-  const payload = await response.json();
-  selectedConversation = payload.conversation || selectedConversation;
-  messages = payload.messages || [];
-  orders = payload.orders || [];
-  renderMessages();
-  renderOrders();
+  const requestId = ++messagesRequestId;
+  messagesLoading = true;
+  try {
+    const response = await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/messages`);
+    const payload = await response.json();
+    if (requestId !== messagesRequestId) return;
+    selectedConversation = payload.conversation || selectedConversation;
+    messages = payload.messages || [];
+    orders = payload.orders || [];
+    renderMessages();
+    renderOrders();
+  } catch (error) {
+    console.error('Message refresh failed', error);
+  } finally {
+    messagesLoading = false;
+  }
 }
 
 function renderMessages() {
@@ -593,6 +662,7 @@ loadTemplates();
 loadBlasts();
 loadInboxSettings();
 window.setInterval(() => {
+  if (document.hidden || conversationsLoading || messagesLoading) return;
   loadConversations(false);
   if (selectedPhone) loadMessages();
 }, 12000);

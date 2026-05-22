@@ -444,6 +444,16 @@ AI_BLOCKING_LABELS = {
     "manual_lock", "order_added",
 }
 
+AI_RISK_PHRASES = (
+    "refund", "exchange", "damaged", "damage", "broken", "complaint", "angry",
+    "legal", "fraud", "scam", "payment issue", "paid but", "money back",
+)
+
+AI_OUT_OF_SCOPE_PHRASES = (
+    "job", "relationship", "homework", "weather", "news", "politics", "medical",
+    "doctor", "lawyer", "investment", "crypto",
+)
+
 
 def _safe_json_dict(value: Any) -> dict:
     if isinstance(value, dict):
@@ -572,7 +582,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
             "order_state": "collecting_details",
             "missing_order_fields": ["product"],
         })
-    elif any(word in text for word in ("refund", "damaged", "damage", "broken", "complaint", "angry", "legal")):
+    elif any(word in text for word in AI_RISK_PHRASES):
         decision.update({
             "intent": "damaged_item" if "damage" in text or "damaged" in text else "refund_exchange",
             "needs_human": True,
@@ -580,6 +590,24 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
             "labels": ["refund" if "refund" in text else "complaint", "damaged_item" if "damage" in text or "damaged" in text else "needs_human"],
             "reply_text": settings.get("escalation_reply") or settings.get("human_handoff_reply") or "",
             "escalation_reason": "Complaint/refund/damaged item requires a human.",
+        })
+    elif any(word in text for word in AI_OUT_OF_SCOPE_PHRASES):
+        decision.update({
+            "intent": "out_of_scope",
+            "needs_human": True,
+            "should_auto_reply": False,
+            "labels": ["needs_human", "outside_policy"],
+            "reply_text": settings.get("escalation_reply") or settings.get("human_handoff_reply") or "",
+            "escalation_reason": "Message appears outside TickBags sales/support scope.",
+        })
+    elif any(phrase in text for phrase in ("who are you", "what are you", "ap kon", "aap kon", "who is this")):
+        decision.update({
+            "intent": "greeting",
+            "confidence": 0.90,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["ai"],
+            "reply_text": "I am from TickBags support. Share the product you like or your order question and I will help.",
         })
     elif any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay")):
         decision.update({"intent": "price_question", "labels": ["price_question"], "reply_text": settings.get("price_reply") or "", "should_auto_reply": True})
@@ -600,11 +628,13 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
         })
     else:
         decision.update({
-            "intent": "unknown",
-            "needs_human": True,
-            "labels": ["needs_human"],
-            "reply_text": settings.get("escalation_reply") or "",
-            "escalation_reason": "Unknown request needs human review.",
+            "intent": "product_question",
+            "confidence": 0.76,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["ai", "product_interest"],
+            "reply_text": "Please share the product name, picture, or link, and tell me what you want to know.",
+            "order_state": "collecting_details",
         })
     return normalize_ai_decision(decision)
 
@@ -612,6 +642,18 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
 def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict) -> dict:
     text = (body or "").strip().lower()
     simple_greetings = {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}
+    default_unavailable = (
+        str(decision.get("escalation_reason") or "").strip().lower() == "ai decision unavailable."
+        and not decision.get("reply_text")
+    )
+    soft_unknown_escalation = (
+        decision.get("needs_human")
+        and str(decision.get("intent") or "").lower() in {"unknown", "product_question", "greeting"}
+        and not any(word in text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES)
+        and not any(label in {"refund", "complaint", "damaged_item", "payment_issue", "outside_policy"} for label in decision.get("labels") or [])
+    )
+    if (default_unavailable or soft_unknown_escalation) and not any(word in text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES):
+        decision = heuristic_ai_decision("", body, settings)
     if text in simple_greetings:
         decision.update({
             "intent": "greeting",
@@ -630,6 +672,16 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict) -> di
             "needs_human": False,
             "labels": sorted(set((decision.get("labels") or []) + ["ai"])),
             "reply_text": decision.get("reply_text") or "Sorry for the delay. I am here now. How can I help you with your TickBags order or product?",
+            "escalation_reason": "",
+        })
+    elif any(phrase in text for phrase in ("who are you", "what are you", "ap kon", "aap kon", "who is this")):
+        decision.update({
+            "intent": "greeting",
+            "confidence": max(float(decision.get("confidence") or 0), 0.90),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["ai"])),
+            "reply_text": decision.get("reply_text") or "I am from TickBags support. Share the product you like or your order question and I will help.",
             "escalation_reason": "",
         })
     elif decision.get("needs_human") and not decision.get("reply_text"):

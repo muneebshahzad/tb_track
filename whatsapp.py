@@ -171,6 +171,64 @@ def get_public_base_url() -> str:
     ).rstrip("/")
 
 
+def download_whatsapp_media(media_id: str) -> dict[str, str]:
+    media_id = str(media_id or "").strip()
+    token = get_whatsapp_access_token()
+    api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
+    if not media_id or not token:
+        return {}
+
+    try:
+        info_response = requests.get(
+            f"https://graph.facebook.com/{api_version}/{media_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
+        )
+        info = info_response.json() if info_response.content else {}
+        if not info_response.ok:
+            return {"download_error": meta_error_message(info, info_response.text)}
+
+        media_url = str(info.get("url") or "").strip()
+        mime_type = str(info.get("mime_type") or "").lower()
+        if not media_url:
+            return {"download_error": "Meta media URL was empty."}
+
+        media_response = requests.get(
+            media_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        if not media_response.ok:
+            return {"download_error": f"Could not download media ({media_response.status_code})."}
+
+        extension = {
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/png": ".png",
+            "image/webp": ".webp",
+        }.get(mime_type)
+        if not extension:
+            content_type = str(media_response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+            extension = {
+                "image/jpeg": ".jpg",
+                "image/jpg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+            }.get(content_type, ".jpg")
+
+        safe_id = secure_filename(media_id)[:80] or "media"
+        filename = f"inbound_{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_id}{extension}"
+        target = get_upload_dir() / filename
+        target.write_bytes(media_response.content)
+        return {
+            "attachment_url": f"{get_public_base_url()}/static/{UPLOAD_DIR_NAME}/{filename}",
+            "media_mime_type": mime_type or str(media_response.headers.get("Content-Type") or ""),
+            "media_filename": filename,
+        }
+    except Exception as e:
+        return {"download_error": str(e)}
+
+
 def get_whatsapp_settings() -> dict[str, Any]:
     raw = get_app_setting("whatsapp_inbox_settings", "")
     defaults = {
@@ -1300,10 +1358,23 @@ def whatsapp_webhook():
                 message_type = message.get("type")
                 body = ((message.get("text") or {}).get("body") or "").strip()
                 metadata = {"webhook": True}
+                attachments = []
                 if message_type == "image":
+                    image_payload = message.get("image") or {}
                     body = body or "[Image]"
                     metadata["media_type"] = "image"
-                    metadata["meta_media_id"] = ((message.get("image") or {}).get("id") or "")
+                    metadata["meta_media_id"] = (image_payload.get("id") or "")
+                    if image_payload.get("caption"):
+                        body = str(image_payload.get("caption") or "").strip() or body
+                    media_file = download_whatsapp_media(metadata["meta_media_id"])
+                    metadata.update(media_file)
+                    if media_file.get("attachment_url"):
+                        attachments.append({
+                            "type": "image",
+                            "url": media_file["attachment_url"],
+                            "mime_type": media_file.get("media_mime_type", ""),
+                            "source": "whatsapp_media",
+                        })
                 elif message_type != "text":
                     continue
                 customer_name = contacts.get(clean_digits(phone), "")
@@ -1317,6 +1388,8 @@ def whatsapp_webhook():
                     channel="whatsapp",
                     display_handle=phone,
                     contact_phone=phone,
+                    message_type="image" if message_type == "image" else "text",
+                    attachments=attachments,
                 )
                 if message_type == "text":
                     maybe_auto_reply("whatsapp", phone, body, customer_name=customer_name, display_handle=phone, contact_phone=phone)
@@ -1391,6 +1464,8 @@ def meta_social_webhook():
                 metadata=metadata,
                 channel=channel,
                 display_handle=display_handle,
+                message_type="image" if metadata.get("media_type") == "image" else "text",
+                attachments=[{"type": "image", "url": metadata.get("attachment_url")}] if metadata.get("attachment_url") else [],
             )
             if text:
                 maybe_auto_reply(channel, contact_key, text, customer_name=customer_name, display_handle=display_handle)

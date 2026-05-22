@@ -501,6 +501,13 @@ AI_FOLLOWUP_PHRASES = (
     "deliver", "warranty",
 )
 
+AI_ORDER_HELP_PHRASES = (
+    "order kaise", "order kaise karoon", "order kaise karun", "order kaisy",
+    "order kaisy karoon", "order kaisy karun", "order kese", "order kese karoon",
+    "order kese karun", "order kesay", "order kesay karoon", "order kesay karun",
+    "how to order", "place order", "order process",
+)
+
 
 def _safe_json_dict(value: Any) -> dict:
     if isinstance(value, dict):
@@ -743,10 +750,21 @@ def _product_details_reply(matches: list[dict], query: str, asking_price: bool =
     lines = [intro, *variants]
     if url:
         lines.append(f"Link: {url}")
-    if image:
-        lines.append(f"Image: {image}")
-    lines.append("Would you like to order this? Please share your name, phone number, complete address, and quantity.")
+    lines.append("Order karna ho to apna name, phone number, complete address, quantity aur color/variant share kar dein.")
     return "\n".join(lines)
+
+
+def _order_help_reply(product_context: str = "") -> str:
+    product_line = f" ({product_context})" if product_context else ""
+    return (
+        f"Order place karne ke liye{product_line} ye details send kar dein:\n"
+        "- Name\n"
+        "- Phone number\n"
+        "- Complete address\n"
+        "- Quantity\n"
+        "- Color/variant\n"
+        "Details milte hi team order create kar degi."
+    )
 
 
 def _contextual_followup_reply(body: str, product_context: str, settings: dict) -> str:
@@ -782,6 +800,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
     asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
+    order_help = any(phrase in text for phrase in AI_ORDER_HELP_PHRASES)
     if text.strip() in {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}:
         decision.update({
             "intent": "greeting",
@@ -856,6 +875,17 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "order_candidate": {"product": str(product_matches[0].get("product_title") or product_matches[0].get("title") or "")},
             "product_attachment_url": str(product_matches[0].get("image") or ""),
         })
+    elif order_help:
+        decision.update({
+            "intent": "order_intent",
+            "confidence": 0.88,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest", "collecting_details"],
+            "reply_text": _order_help_reply(product_context),
+            "order_state": "collecting_details",
+            "missing_order_fields": ["name", "phone", "address", "quantity", "variant"],
+        })
     elif contextual_reply:
         decision.update({
             "intent": "product_question",
@@ -898,7 +928,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
         decision.update({
             "intent": "order_intent",
             "labels": ["product_interest", "collecting_details"],
-            "reply_text": "Great. Please share product name/link, your name, phone number, complete address, and quantity.",
+            "reply_text": _order_help_reply(product_context),
             "order_state": "collecting_details",
             "order_candidate": candidate,
             "missing_order_fields": ["product", "name", "phone", "address"],
@@ -925,6 +955,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
     asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
+    order_help = any(phrase in text for phrase in AI_ORDER_HELP_PHRASES)
     default_unavailable = (
         str(decision.get("escalation_reason") or "").strip().lower() == "ai decision unavailable."
         and not decision.get("reply_text")
@@ -981,6 +1012,23 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             "order_state": decision.get("order_state") if decision.get("order_state") != "no_order" else "collecting_details",
             "order_candidate": {"product": str(product_matches[0].get("product_title") or product_matches[0].get("title") or "")},
             "product_attachment_url": str(product_matches[0].get("image") or ""),
+            "escalation_reason": "",
+        })
+    elif order_help and (
+        not decision.get("reply_text")
+        or "provide your full name" in str(decision.get("reply_text") or "").lower()
+        or "complete delivery address" in str(decision.get("reply_text") or "").lower()
+        or decision.get("needs_human")
+    ):
+        decision.update({
+            "intent": "order_intent",
+            "confidence": max(float(decision.get("confidence") or 0), 0.88),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["product_interest", "collecting_details"])),
+            "reply_text": _order_help_reply(product_context),
+            "order_state": "collecting_details",
+            "missing_order_fields": ["name", "phone", "address", "quantity", "variant"],
             "escalation_reason": "",
         })
     elif contextual_reply and (

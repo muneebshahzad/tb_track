@@ -1079,12 +1079,21 @@ def api_status(phone):
 @whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/ai-mode", methods=["POST"])
 def api_ai_mode(key):
     data = request.get_json(silent=True) or {}
-    ok = update_conversation_ai_mode(key, data.get("ai_mode"), data.get("reason") or "")
-    if data.get("ai_mode") == "human":
+    ai_mode = str(data.get("ai_mode") or "").strip().lower()
+    ok = update_conversation_ai_mode(key, ai_mode, data.get("reason") or "")
+    if not ok:
+        return jsonify_data({
+            "success": False,
+            "error": get_last_db_error() or "Could not update AI mode for this chat.",
+            "conversation": get_conversation_by_any_key(key),
+        }, 400)
+    if ai_mode == "human":
         update_conversation_labels(key, add=["manual_lock"], remove=["ai"])
-    elif data.get("ai_mode") == "auto":
+    elif ai_mode == "auto":
         update_conversation_labels(key, add=["ai"], remove=["manual_lock", "needs_human"])
-    return jsonify({"success": ok, "conversation": get_conversation_by_any_key(key)})
+    elif ai_mode == "suggest":
+        update_conversation_labels(key, add=["ai"], remove=["manual_lock", "needs_human"])
+    return jsonify_data({"success": True, "conversation": get_conversation_by_any_key(key)})
 
 
 @whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/labels", methods=["POST"])

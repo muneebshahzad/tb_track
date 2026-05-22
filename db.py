@@ -959,8 +959,12 @@ def update_conversation_ai_mode(key, ai_mode, reason=''):
     if ai_mode not in {"human", "suggest", "auto", "needs_human"}:
         return False
     conversation = get_conversation_by_any_key(key)
-    if not conversation:
-        return False
+    raw_key = str(key or "").strip()
+    candidates = [raw_key]
+    if raw_key and not raw_key.startswith(("facebook:", "instagram:", "internal:")):
+        normalized = normalize_inbox_contact_key("whatsapp", raw_key)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -976,9 +980,25 @@ def update_conversation_ai_mode(key, ai_mode, reason=''):
                             ELSE manual_lock
                         END,
                         updated_at = NOW()
-                    WHERE phone = %s
-                """, (ai_mode, ai_mode == "auto", reason or "", reason or "", ai_mode, ai_mode, conversation["phone"]))
+                    WHERE phone = ANY(%s)
+                       OR public_chat_id = %s
+                       OR chat_id::text = %s
+                """, (
+                    ai_mode,
+                    ai_mode == "auto",
+                    reason or "",
+                    reason or "",
+                    ai_mode,
+                    ai_mode,
+                    [conversation["phone"]] if conversation else candidates,
+                    raw_key,
+                    raw_key,
+                ))
+                updated = cur.rowcount
             conn.commit()
+        if updated < 1:
+            _set_last_db_error(f"Conversation not found for key: {raw_key}")
+            return False
         _set_last_db_error("")
         return True
     except Exception as e:

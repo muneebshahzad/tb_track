@@ -701,6 +701,23 @@ def save_whatsapp_message(
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 _ensure_whatsapp_tables(cur)
+                if provider_message_id and provider_message_id != "dry-run":
+                    try:
+                        cur.execute("""
+                            SELECT *
+                            FROM whatsapp_messages
+                            WHERE provider_message_id = %s AND channel = %s
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                        """, (provider_message_id, channel))
+                        existing = cur.fetchone()
+                        if existing:
+                            message = dict(existing)
+                            message["_duplicate"] = True
+                            _set_last_db_error("")
+                            return message
+                    except Exception:
+                        pass
                 try:
                     cur.execute("""
                         INSERT INTO whatsapp_messages (

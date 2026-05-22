@@ -464,6 +464,11 @@ AI_SUGGESTION_PHRASES = (
     "bean bag", "best one", "kon sa", "konsa",
 )
 
+AI_SMALL_TALK_PHRASES = (
+    "how are you", "how r u", "how are u", "how are you doing", "how r you",
+    "kaise ho", "kaisay ho", "kesay ho", "kese ho", "ap kese", "aap kese",
+)
+
 
 def _safe_json_dict(value: Any) -> dict:
     if isinstance(value, dict):
@@ -577,6 +582,15 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
             "needs_human": False,
             "labels": ["ai"],
             "reply_text": "Hi! How can I help you with TickBags today?",
+        })
+    elif any(phrase in text for phrase in AI_SMALL_TALK_PHRASES):
+        decision.update({
+            "intent": "greeting",
+            "confidence": 0.92,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["ai"],
+            "reply_text": "I am good, thank you. How can I help you with TickBags today?",
         })
     elif any(phrase in text for phrase in ("why don't you", "why dont you", "no reply", "reply?", "respond", "where are you")):
         decision.update({
@@ -702,6 +716,16 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict) -> di
             "needs_human": False,
             "labels": sorted(set((decision.get("labels") or []) + ["ai"])),
             "reply_text": decision.get("reply_text") or "Hi! How can I help you with TickBags today?",
+            "escalation_reason": "",
+        })
+    elif any(phrase in text for phrase in AI_SMALL_TALK_PHRASES):
+        decision.update({
+            "intent": "greeting",
+            "confidence": max(float(decision.get("confidence") or 0), 0.92),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["ai"])),
+            "reply_text": "I am good, thank you. How can I help you with TickBags today?",
             "escalation_reason": "",
         })
     elif any(phrase in text for phrase in ("why don't you", "why dont you", "no reply", "reply?", "respond")):
@@ -1546,7 +1570,7 @@ def whatsapp_webhook():
                 elif message_type != "text":
                     continue
                 customer_name = contacts.get(clean_digits(phone), "")
-                save_whatsapp_message(
+                saved = save_whatsapp_message(
                     phone,
                     "inbound",
                     body,
@@ -1559,7 +1583,7 @@ def whatsapp_webhook():
                     message_type="image" if message_type == "image" else "text",
                     attachments=attachments,
                 )
-                if message_type == "text":
+                if message_type == "text" and not (saved or {}).get("_duplicate"):
                     maybe_auto_reply("whatsapp", phone, body, customer_name=customer_name, display_handle=phone, contact_phone=phone)
 
     return jsonify({"success": True})
@@ -1590,9 +1614,12 @@ def meta_social_webhook():
             recipient = event.get("recipient") or {}
             channel = str(event.get("platform") or default_channel).strip().lower() or default_channel
             sender_id = str(sender.get("id") or "").strip()
-            if not sender_id:
+            recipient_id = str(recipient.get("id") or "").strip()
+            is_echo = bool(message.get("is_echo"))
+            contact_id = recipient_id if is_echo else sender_id
+            if not contact_id:
                 continue
-            profile = fetch_social_profile(sender_id, channel)
+            profile = fetch_social_profile(contact_id, channel)
             customer_name = (
                 profile.get("name")
                 or profile.get("username")
@@ -1600,18 +1627,19 @@ def meta_social_webhook():
                 or ((event.get("profile") or {}).get("name"))
                 or f"{channel_label(channel)} user"
             )
-            contact_key = normalize_inbox_contact_key(channel, sender_id)
+            contact_key = normalize_inbox_contact_key(channel, contact_id)
             display_handle = (
                 (f"@{profile.get('username')}" if profile.get("username") else "")
                 or profile.get("name")
-                or (f"{channel_label(channel)} · {sender_id[-6:]}" if sender_id else channel_label(channel))
+                or (f"{channel_label(channel)} · {contact_id[-6:]}" if contact_id else channel_label(channel))
             )
             body = text or str(postback or "").strip()
             metadata = {
                 "webhook": True,
                 "channel": channel,
                 "sender_id": sender_id,
-                "recipient_id": recipient.get("id") or "",
+                "recipient_id": recipient_id,
+                "is_echo": is_echo,
                 "timestamp": event.get("timestamp"),
                 "raw_message_keys": list(message.keys()) if isinstance(message, dict) else [],
             }
@@ -1631,19 +1659,20 @@ def meta_social_webhook():
                     metadata["unsupported_attachment"] = first_attachment
             if not body:
                 continue
-            save_whatsapp_message(
+            saved = save_whatsapp_message(
                 contact_key,
-                "inbound",
+                "outbound" if is_echo else "inbound",
                 body,
                 customer_name=customer_name,
                 provider_message_id=message.get("mid") or message.get("id") or "",
                 metadata=metadata,
                 channel=channel,
                 display_handle=display_handle,
+                sender_type="human" if is_echo else "customer",
                 message_type="image" if metadata.get("media_type") == "image" else "text",
                 attachments=[{"type": "image", "url": metadata.get("attachment_url")}] if metadata.get("attachment_url") else [],
             )
-            if text:
+            if text and not is_echo and not (saved or {}).get("_duplicate"):
                 maybe_auto_reply(channel, contact_key, text, customer_name=customer_name, display_handle=display_handle)
     return jsonify({"success": True})
 

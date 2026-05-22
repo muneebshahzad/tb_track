@@ -71,10 +71,11 @@
   }
   .bubble-row { display:flex; }
   .bubble-row.outbound { justify-content:flex-end; }
-  .bubble { max-width:min(620px,78%); border-radius:12px; padding:9px 11px; font-size:13px; line-height:1.45; box-shadow:0 1px 4px rgba(20,33,61,.06); }
+  .bubble { max-width:min(520px,72%); border-radius:12px; padding:8px 10px; font-size:13px; line-height:1.42; box-shadow:0 1px 4px rgba(20,33,61,.06); }
   .bubble.inbound { background:#202c33; color:#e9edef; border:0; border-top-left-radius:4px; }
   .bubble.outbound { background:#005c4b; color:#e9edef; border:0; border-top-right-radius:4px; }
   .bubble.system, .bubble.assistant { background:#182229; color:#d1d7db; border:0; }
+  .bubble-sender { display:block; margin-bottom:2px; color:#7bdcb5; font-size:11px; font-weight:800; }
   .date-sep { align-self:center; background:#182229; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,.18); color:#8696a0; font-size:11px; font-weight:800; padding:5px 10px; }
   .bubble-time { margin-top:5px; font-size:10px; color:#8a8b96; font-family:'DM Mono', monospace; }
   .reply-box { padding:10px 14px; border-top:1px solid #26353d; background:#202c33; display:flex; flex-direction:column; gap:8px; }
@@ -150,7 +151,7 @@
     #imageBtn::before { content:'+'; font-size:28px; line-height:1; color:#aebac1; }
     #sendBtn { grid-column:3; width:48px; min-height:48px; border-radius:50%; padding:0; font-size:0; }
     #sendBtn::before { content:'>'; font-size:22px; line-height:1; transform:scaleX(1.25); }
-    .bubble { max-width:88%; }
+    .bubble { max-width:84%; }
   }
 </style>
 
@@ -673,18 +674,19 @@ async function loadMessages() {
 
 function renderMessages() {
   const list = document.getElementById('messageList');
-  if (!messages.length) {
+  const visibleMessages = messages.filter(message => selectedConversation?.is_internal || !message.internal_only);
+  if (!visibleMessages.length) {
     list.innerHTML = '<div class="empty">No messages yet.</div>';
     return;
   }
   let lastDate = '';
-  list.innerHTML = messages.map(message => {
+  list.innerHTML = visibleMessages.map(message => {
     const d = new Date(message.created_at);
     const dateKey = Number.isNaN(d.getTime()) ? '' : d.toDateString();
     const sep = dateKey && dateKey !== lastDate ? `<div class="date-sep">${escapeHtml(d.toLocaleDateString([], { month:'short', day:'numeric', year:'numeric' }))}</div>` : '';
     if (dateKey) lastDate = dateKey;
     const bubbleClass = message.internal_only || ['system','assistant'].includes(message.sender_type) ? (message.sender_type || 'system') : message.direction;
-    const sender = message.sender_type && !['customer','human'].includes(message.sender_type) ? `<strong>${escapeHtml(message.sender_type)}</strong><br>` : '';
+    const sender = selectedConversation?.is_internal && message.sender_type && !['customer','human'].includes(message.sender_type) ? `<span class="bubble-sender">${escapeHtml(message.sender_type)}</span>` : '';
     return `${sep}
     <div class="bubble-row ${escapeHtml(message.direction)}">
       <div class="bubble ${escapeHtml(bubbleClass)}">

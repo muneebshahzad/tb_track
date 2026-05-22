@@ -454,6 +454,16 @@ AI_OUT_OF_SCOPE_PHRASES = (
     "doctor", "lawyer", "investment", "crypto",
 )
 
+AI_LOCATION_PHRASES = (
+    "where are you based", "where r u based", "where in pakistan", "location",
+    "pin location", "store", "shop", "address kaha", "kahan", "kidhar",
+)
+
+AI_SUGGESTION_PHRASES = (
+    "suggest", "recommend", "which beanbag", "which bean bag", "beanbag",
+    "bean bag", "best one", "kon sa", "konsa",
+)
+
 
 def _safe_json_dict(value: Any) -> dict:
     if isinstance(value, dict):
@@ -556,6 +566,9 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
     text = (body or "").lower()
     decision = dict(AI_DECISION_DEFAULT)
     decision.update({"needs_human": False, "labels": [], "confidence": 0.72, "should_auto_reply": False})
+    delivery_reply = settings.get("delivery_time_reply") or "Our usual delivery time is 3 to 7 working days depending on your city and order type."
+    price_reply = settings.get("price_reply") or "Please share the product name, picture, or link and I will confirm the latest price."
+    payment_reply = settings.get("payment_method_reply") or "We mainly offer Cash on Delivery. Bank transfer can be arranged in special cases."
     if text.strip() in {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}:
         decision.update({
             "intent": "greeting",
@@ -610,9 +623,30 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
             "reply_text": "I am from TickBags support. Share the product you like or your order question and I will help.",
         })
     elif any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay")):
-        decision.update({"intent": "price_question", "labels": ["price_question"], "reply_text": settings.get("price_reply") or "", "should_auto_reply": True})
+        decision.update({"intent": "price_question", "confidence": 0.86, "labels": ["price_question"], "reply_text": price_reply, "should_auto_reply": True})
     elif any(word in text for word in ("delivery", "deliver", "kitne din", "days")):
-        decision.update({"intent": "delivery_question", "labels": ["delivery_question"], "reply_text": settings.get("delivery_time_reply") or "", "should_auto_reply": True})
+        decision.update({"intent": "delivery_question", "confidence": 0.88, "labels": ["delivery_question"], "reply_text": delivery_reply, "should_auto_reply": True})
+    elif any(word in text for word in ("payment", "cod", "cash", "bank", "advance")):
+        decision.update({"intent": "payment_question", "confidence": 0.86, "labels": ["payment_question"], "reply_text": payment_reply, "should_auto_reply": True})
+    elif any(phrase in text for phrase in AI_LOCATION_PHRASES):
+        decision.update({
+            "intent": "delivery_question",
+            "confidence": 0.82,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["delivery_question"],
+            "reply_text": "We are based in Pakistan. Please share your city and the product you want, and I will guide you with the next step.",
+        })
+    elif any(phrase in text for phrase in AI_SUGGESTION_PHRASES):
+        decision.update({
+            "intent": "product_question",
+            "confidence": 0.82,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest"],
+            "reply_text": "Sure. Please share your room size or the beanbag style you like, and I will suggest a suitable option.",
+            "order_state": "collecting_details",
+        })
     elif any(word in text for word in ("order", "buy", "want this", "address", "phone", "name")):
         candidate = {}
         if "address" in text or "lahore" in text or "karachi" in text:
@@ -652,7 +686,13 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict) -> di
         and not any(word in text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES)
         and not any(label in {"refund", "complaint", "damaged_item", "payment_issue", "outside_policy"} for label in decision.get("labels") or [])
     )
-    if (default_unavailable or soft_unknown_escalation) and not any(word in text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES):
+    safe_sales_question = any(
+        phrase in text
+        for phrase in AI_LOCATION_PHRASES + AI_SUGGESTION_PHRASES + (
+            "delivery", "deliver", "kitne din", "price", "cost", "rate", "payment", "cod", "cash",
+        )
+    )
+    if (default_unavailable or soft_unknown_escalation or (decision.get("needs_human") and safe_sales_question)) and not any(word in text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES):
         decision = heuristic_ai_decision("", body, settings)
     if text in simple_greetings:
         decision.update({

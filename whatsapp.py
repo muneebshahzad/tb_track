@@ -888,13 +888,15 @@ def send_channel_text_message(channel: str, contact_key: str, body: str) -> tupl
 
 def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: str = "", display_handle: str = "", contact_phone: str = ""):
     settings = get_whatsapp_settings()
-    if not settings.get("auto_handle_enabled", True):
-        return
     conversation = get_conversation_by_any_key(contact_key)
+    per_chat_mode = str((conversation or {}).get("ai_mode") or "human").lower()
+    per_chat_ai_requested = per_chat_mode in {"suggest", "auto"}
+    if not settings.get("auto_handle_enabled", True) and not per_chat_ai_requested:
+        return
     if conversation and (conversation.get("manual_lock") or conversation.get("ai_mode") == "needs_human"):
         return
     reply, rule = find_keyword_reply(body)
-    if settings.get("ai_mode_enabled") or settings.get("global_ai_mode_enabled"):
+    if per_chat_ai_requested or settings.get("ai_mode_enabled") or settings.get("global_ai_mode_enabled"):
         decision = analyze_inbound_message(channel, contact_key, body, conversation=conversation)
         conversation = get_conversation_by_any_key(contact_key) or conversation
         if conversation:
@@ -1415,7 +1417,8 @@ def meta_social_webhook():
             message = event.get("message") or {}
             text = (message.get("text") or "").strip()
             attachments = message.get("attachments") or []
-            if not text and not attachments:
+            postback = (event.get("postback") or {}).get("payload") or ""
+            if not text and not attachments and not postback:
                 continue
             sender = event.get("sender") or {}
             recipient = event.get("recipient") or {}
@@ -1437,13 +1440,14 @@ def meta_social_webhook():
                 or profile.get("name")
                 or (f"{channel_label(channel)} · {sender_id[-6:]}" if sender_id else channel_label(channel))
             )
-            body = text
+            body = text or str(postback or "").strip()
             metadata = {
                 "webhook": True,
                 "channel": channel,
                 "sender_id": sender_id,
                 "recipient_id": recipient.get("id") or "",
                 "timestamp": event.get("timestamp"),
+                "raw_message_keys": list(message.keys()) if isinstance(message, dict) else [],
             }
             if profile.get("profile_pic"):
                 metadata["profile_pic"] = profile["profile_pic"]
@@ -1453,6 +1457,12 @@ def meta_social_webhook():
                     body = body or "[Image]"
                     metadata["attachment_url"] = ((image.get("payload") or {}).get("url") or "")
                     metadata["media_type"] = "image"
+                elif not body:
+                    first_attachment = attachments[0] or {}
+                    attachment_type = str(first_attachment.get("type") or "attachment")
+                    body = f"[{attachment_type.title()}]"
+                    metadata["media_type"] = attachment_type
+                    metadata["unsupported_attachment"] = first_attachment
             if not body:
                 continue
             save_whatsapp_message(

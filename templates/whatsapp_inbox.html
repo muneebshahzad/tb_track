@@ -6,7 +6,7 @@
   html, body, #app, #main { height:100%; }
   body.embedded { background:#111b21; overflow:hidden; }
   body.embedded #main { height:100vh; overflow:hidden; }
-  .wa-shell { height:100vh; display:flex; flex-direction:column; overflow:hidden; background:#111b21; color:#111b21; }
+  .wa-shell { height:100vh; height:100dvh; display:flex; flex-direction:column; overflow:hidden; background:#111b21; color:#111b21; }
   .wa-topbar { height:59px; background:#202c33; color:#e9edef; border-bottom:1px solid #26353d; display:flex; align-items:center; gap:12px; padding:0 16px; flex-shrink:0; }
   .wa-title { font-size:16px; font-weight:800; color:#e9edef; }
   .wa-subtitle { font-size:12px; color:#8696a0; }
@@ -14,6 +14,7 @@
   .wa-pane { min-height:0; background:#111b21; border-right:1px solid #2a3942; display:flex; flex-direction:column; overflow:hidden; }
   .wa-pane:last-child { border-right:0; border-left:1px solid #2a3942; }
   .mobile-list-header { display:none; }
+  .mobile-bulk-ai, .mobile-ai-bar { display:none; }
   .wa-toolbar { padding:10px 12px; border-bottom:1px solid #222e35; display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:#111b21; }
   .wa-search { width:100%; border:0; background:#202c33; color:#e9edef; border-radius:8px; padding:10px 12px; font:inherit; font-size:13px; outline:none; }
   .wa-search::placeholder { color:#8696a0; }
@@ -102,7 +103,7 @@
   @media (max-width: 760px) {
     .wa-topbar { display:none; }
     .wa-layout { display:block; position:relative; }
-    .wa-pane { position:absolute; inset:0; border:0; }
+    .wa-pane { position:absolute; inset:0; border:0; height:100dvh; }
     .wa-pane.conversations { display:flex; transform:translateX(0); transition:transform .18s ease; z-index:2; }
     .wa-pane.chat-panel { transform:translateX(100%); transition:transform .18s ease; z-index:3; }
     .wa-shell.mobile-chat-open .wa-pane.conversations { transform:translateX(-30%); }
@@ -110,6 +111,9 @@
     .mobile-list-header { display:flex; align-items:center; justify-content:space-between; padding:18px 18px 10px; background:#111b21; color:#e9edef; }
     .mobile-list-title { font-size:28px; font-weight:900; letter-spacing:0; }
     .mobile-list-actions { display:flex; gap:18px; color:#e9edef; font-size:24px; line-height:1; }
+    .mobile-bulk-ai { display:flex; gap:8px; width:100%; align-items:center; }
+    .mobile-bulk-ai .wa-select { flex:1; height:40px; border-radius:20px; background:#202c33; border:0; }
+    .mobile-bulk-ai .wa-btn { height:40px; border-radius:20px; background:#00a884; color:#001f1a; border:0; }
     .wa-toolbar { padding:8px 18px 12px; gap:10px; border-bottom:1px solid #222e35; }
     .wa-search { height:52px; border-radius:26px; padding:0 18px; font-size:15px; background:#202c33; }
     .wa-channel-tabs, .wa-tabs { width:auto; overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; }
@@ -129,12 +133,16 @@
     .row-labels { display:none; }
     .wa-unread { min-width:24px; height:24px; font-size:12px; background:#00a884; color:#001f1a; }
     .mobile-back { display:inline-flex; align-items:center; justify-content:center; }
-    .chat-head { min-height:56px; grid-template-columns:34px 42px minmax(0,1fr); gap:8px; padding:7px 12px; }
+    .chat-head { min-height:58px; grid-template-columns:34px 42px minmax(0,1fr); gap:8px; padding:7px 12px; }
+    .chat-head .wa-avatar { width:42px; height:42px; font-size:13px; }
     .chat-name { font-size:17px; }
     .chat-phone { font-family:'DM Sans', sans-serif; font-size:12px; }
     .chat-actions { display:none; }
-    .chat-body { padding:18px 12px; }
-    .reply-box { display:grid; grid-template-columns:minmax(0,1fr) 44px 48px; align-items:center; gap:8px; padding:8px; }
+    .mobile-ai-bar { display:flex; gap:8px; overflow-x:auto; padding:7px 10px; background:#111b21; border-bottom:1px solid #222e35; scrollbar-width:none; }
+    .mobile-ai-bar::-webkit-scrollbar { display:none; }
+    .mobile-ai-bar .wa-btn { min-height:32px; border-radius:18px; font-size:11px; padding:6px 10px; }
+    .chat-body { padding:18px 12px 76px; }
+    .reply-box { position:absolute; left:0; right:0; bottom:0; z-index:5; display:grid; grid-template-columns:minmax(0,1fr) 44px 48px; align-items:center; gap:8px; padding:8px 8px calc(8px + env(safe-area-inset-bottom)); }
     .reply-box .wa-textarea { grid-column:1; min-height:44px; max-height:96px; border-radius:22px; resize:none; padding:11px 16px; background:#202c33; border:0; font-size:16px; }
     .reply-actions { display:contents; }
     #sendHint, #draftBtn, #statusBtn { display:none; }
@@ -165,6 +173,15 @@
       </div>
       <div class="wa-toolbar">
         <input class="wa-search" id="conversationSearch" placeholder="Search name, phone, labels, or chat ID" oninput="renderConversations()">
+        <div class="mobile-bulk-ai">
+          <select class="wa-select" id="mobileBulkAiMode">
+            <option value="suggest">Bulk: Suggest</option>
+            <option value="auto">Bulk: AI ON</option>
+            <option value="human">Bulk: Human</option>
+            <option value="needs_human">Bulk: Needs Human</option>
+          </select>
+          <button class="wa-btn" onclick="applyBulkAiMode()">Apply</button>
+        </div>
         <div class="wa-channel-tabs">
           <button class="wa-channel-tab active" data-channel="all" onclick="setChannelFilter(this)">All</button>
           <button class="wa-channel-tab" data-channel="whatsapp" onclick="setChannelFilter(this)">WA</button>
@@ -185,7 +202,7 @@
 
     <section class="wa-pane chat-panel" style="border-right:0;">
       <div class="chat-head">
-        <button class="mobile-back" onclick="showChatList()" aria-label="Back to chats">‹</button>
+        <button class="mobile-back" onclick="closeMobileChat()" aria-label="Back to chats">‹</button>
         <div class="wa-avatar" id="chatAvatar">TB</div>
         <div class="chat-person">
           <div class="chat-name" id="chatName">Select a conversation</div>
@@ -202,6 +219,11 @@
           <button class="wa-btn" onclick="setAiMode('human')" id="stopAiBtn" disabled>Stop AI</button>
           <button class="wa-btn" onclick="markNeedsHuman()" id="needsHumanBtn" disabled>Needs Human</button>
         </div>
+      </div>
+      <div class="mobile-ai-bar">
+        <button class="wa-btn blue" onclick="setAiMode('auto')" id="mobileHandoverBtn" disabled>Hand over to AI</button>
+        <button class="wa-btn" onclick="setAiMode('human')" id="mobileStopAiBtn" disabled>Stop AI</button>
+        <button class="wa-btn" onclick="draftAiReply()" id="mobileDraftBtn" disabled>Draft</button>
       </div>
       <div class="chat-body" id="messageList">
         <div class="empty">Pick a conversation on the left, or use Test inbound to create one.</div>
@@ -402,6 +424,14 @@ function serviceWindowLabel(item) {
   return expires > new Date() ? 'Reply window open' : 'Template required';
 }
 
+function chatSubtitle(item, identity) {
+  const compactView = window.matchMedia('(max-width: 760px)').matches;
+  if (compactView) {
+    return `${item.public_chat_id || channelLabel(item.channel)} · ${channelLabel(item.channel)}`;
+  }
+  return `${item.public_chat_id || ''} · ${channelLabel(item.channel)} · ${identity.subtitle} · ${serviceWindowLabel(item)}`;
+}
+
 function conversationSortValue(item) {
   const last = Date.parse(item.last_message_at || item.updated_at || '') || 0;
   return last;
@@ -528,6 +558,9 @@ function clearConversationSelection() {
   document.getElementById('handoverBtn').disabled = true;
   document.getElementById('stopAiBtn').disabled = true;
   document.getElementById('needsHumanBtn').disabled = true;
+  document.getElementById('mobileHandoverBtn').disabled = true;
+  document.getElementById('mobileStopAiBtn').disabled = true;
+  document.getElementById('mobileDraftBtn').disabled = true;
   document.getElementById('aiModeSelect').disabled = true;
   document.getElementById('messageList').innerHTML = '<div class="empty">Pick a conversation on the left, or use Test inbound to create one.</div>';
   document.getElementById('orderHistory').innerHTML = '<div class="empty" style="padding:12px;">Select a customer.</div>';
@@ -540,6 +573,20 @@ function clearConversationSelection() {
 function showChatList() {
   document.querySelector('.wa-shell')?.classList.remove('mobile-chat-open');
 }
+
+function closeMobileChat() {
+  if (window.matchMedia('(max-width: 760px)').matches && history.state && history.state.tickbotChat) {
+    history.back();
+    return;
+  }
+  showChatList();
+}
+
+window.addEventListener('popstate', () => {
+  if (document.querySelector('.wa-shell')?.classList.contains('mobile-chat-open')) {
+    showChatList();
+  }
+});
 
 function setChannelFilter(btn) {
   document.querySelectorAll('.wa-channel-tab').forEach(tab => tab.classList.remove('active'));
@@ -561,10 +608,15 @@ async function selectConversation(phone, options = {}) {
   selectedConversation = conversation;
   selectedChannel = conversation.channel || 'whatsapp';
   renderConversations();
-  document.querySelector('.wa-shell')?.classList.add('mobile-chat-open');
+  const shell = document.querySelector('.wa-shell');
+  const compactView = window.matchMedia('(max-width: 760px)').matches;
+  if (compactView && !shell?.classList.contains('mobile-chat-open')) {
+    history.pushState({ tickbotChat: phone }, '', window.location.href);
+  }
+  shell?.classList.add('mobile-chat-open');
   const identity = conversationIdentity(conversation);
   document.getElementById('chatName').textContent = identity.title;
-  document.getElementById('chatPhone').textContent = `${conversation.public_chat_id || ''} · ${channelLabel(selectedChannel)} · ${identity.subtitle} · ${serviceWindowLabel(conversation)}`;
+  document.getElementById('chatPhone').textContent = chatSubtitle(conversation, identity);
   const chatAvatar = document.getElementById('chatAvatar');
   chatAvatar.innerHTML = avatarMarkup(conversation);
   if (!conversation.avatar_url) {
@@ -580,6 +632,9 @@ async function selectConversation(phone, options = {}) {
   document.getElementById('handoverBtn').disabled = !!conversation.is_internal;
   document.getElementById('stopAiBtn').disabled = false;
   document.getElementById('needsHumanBtn').disabled = !!conversation.is_internal;
+  document.getElementById('mobileHandoverBtn').disabled = !!conversation.is_internal;
+  document.getElementById('mobileStopAiBtn').disabled = false;
+  document.getElementById('mobileDraftBtn').disabled = !!conversation.is_internal;
   document.getElementById('aiModeSelect').disabled = !!conversation.is_internal;
   document.getElementById('aiModeSelect').value = conversation.ai_mode || 'human';
   renderSidePanels();
@@ -701,6 +756,22 @@ async function saveStatus() {
     body: JSON.stringify({ status })
   });
   await loadConversations(true);
+}
+
+async function applyBulkAiMode() {
+  const mode = document.getElementById('mobileBulkAiMode').value;
+  const eligible = conversations.filter(item => !item.is_internal);
+  if (!eligible.length) return showToast('No eligible chats.');
+  for (const item of eligible) {
+    await fetch(`/api/whatsapp/conversations/${encodeURIComponent(item.phone)}/ai-mode`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ai_mode: mode, reason: 'Bulk update from mobile inbox' })
+    });
+  }
+  showToast(`Updated ${eligible.length} chats.`);
+  await loadConversations(true);
+  if (selectedPhone) await loadMessages();
 }
 
 async function setAiMode(mode) {

@@ -15,9 +15,13 @@ from werkzeug.utils import secure_filename
 
 from db import (
     create_whatsapp_blast,
+    ensure_tickbot_assistant_chat,
     get_app_setting,
     get_last_db_error,
+    get_conversation_by_any_key,
     get_whatsapp_conversation,
+    list_inbox_conversations,
+    list_inbox_messages,
     list_whatsapp_blasts,
     list_whatsapp_conversations,
     list_whatsapp_messages,
@@ -26,7 +30,15 @@ from db import (
     normalize_inbox_contact_key,
     normalize_whatsapp_phone,
     save_whatsapp_message,
+    save_ai_decision,
+    save_internal_assistant_message,
     set_app_setting,
+    mark_conversation_needs_human,
+    mark_new_order,
+    mark_order_added,
+    update_conversation_ai_mode,
+    update_conversation_labels,
+    update_order_candidate,
     update_whatsapp_conversation_status,
     upsert_whatsapp_rule,
     upsert_whatsapp_template,
@@ -173,6 +185,12 @@ def get_whatsapp_settings() -> dict[str, Any]:
         "payment_method_reply": "We mainly offer Cash on Delivery. Bank transfer can be arranged in special cases.",
         "price_reply": "Please share the product name or screenshot and we’ll confirm the latest price for you.",
         "human_handoff_reply": "Our team is checking this for you and will reply shortly.",
+        "global_ai_mode_enabled": False,
+        "default_new_chat_ai_mode": "suggest",
+        "auto_reply_inside_service_window_only": True,
+        "order_collection_enabled": True,
+        "escalation_reply": "Let me have our team check this and reply with the correct details.",
+        "ai_tone": "Warm, persuasive, professional, and brief.",
         "openai_model": os.getenv("WHATSAPP_AI_MODEL", "gpt-4.1-mini"),
     }
     if raw:
@@ -194,6 +212,12 @@ def save_whatsapp_settings(settings: dict[str, Any]) -> bool:
         "payment_method_reply": str(settings.get("payment_method_reply", current.get("payment_method_reply", "")) or "").strip(),
         "price_reply": str(settings.get("price_reply", current.get("price_reply", "")) or "").strip(),
         "human_handoff_reply": str(settings.get("human_handoff_reply", current.get("human_handoff_reply", "")) or "").strip(),
+        "global_ai_mode_enabled": bool(settings.get("global_ai_mode_enabled", current.get("global_ai_mode_enabled", False))),
+        "default_new_chat_ai_mode": str(settings.get("default_new_chat_ai_mode", current.get("default_new_chat_ai_mode", "suggest")) or "suggest").strip(),
+        "auto_reply_inside_service_window_only": bool(settings.get("auto_reply_inside_service_window_only", current.get("auto_reply_inside_service_window_only", True))),
+        "order_collection_enabled": bool(settings.get("order_collection_enabled", current.get("order_collection_enabled", True))),
+        "escalation_reply": str(settings.get("escalation_reply", current.get("escalation_reply", "")) or "").strip(),
+        "ai_tone": str(settings.get("ai_tone", current.get("ai_tone", "")) or "").strip(),
         "openai_model": str(settings.get("openai_model", current.get("openai_model", "gpt-4.1-mini")) or "gpt-4.1-mini").strip(),
     })
     return set_app_setting("whatsapp_inbox_settings", json.dumps(current))
@@ -339,6 +363,272 @@ def fallback_reply(phone: str, message: str) -> str:
         "WHATSAPP_FALLBACK_REPLY",
         "Thanks for messaging TickBags. Our team will review this and reply shortly.",
     )
+
+
+AI_DECISION_DEFAULT = {
+    "intent": "unknown",
+    "confidence": 0.0,
+    "should_auto_reply": False,
+    "needs_human": True,
+    "labels": ["needs_human"],
+    "reply_text": "",
+    "order_state": "no_order",
+    "order_candidate": {},
+    "missing_order_fields": [],
+    "escalation_reason": "AI decision unavailable.",
+    "knowledge_gap_question": "",
+    "internal_note": "",
+}
+
+AI_BLOCKING_LABELS = {
+    "needs_human", "complaint", "refund", "damaged_item", "angry_customer",
+    "payment_issue", "high_value_order", "unclear_product", "outside_policy",
+    "manual_lock", "order_added",
+}
+
+
+def _safe_json_dict(value: Any) -> dict:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _safe_json_list(value: Any) -> list:
+    if isinstance(value, list):
+        return value
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
+def normalize_ai_decision(raw: dict | None) -> dict:
+    decision = dict(AI_DECISION_DEFAULT)
+    if isinstance(raw, dict):
+        decision.update(raw)
+    decision["intent"] = str(decision.get("intent") or "unknown")
+    try:
+        decision["confidence"] = max(0.0, min(1.0, float(decision.get("confidence") or 0)))
+    except Exception:
+        decision["confidence"] = 0.0
+    decision["should_auto_reply"] = bool(decision.get("should_auto_reply"))
+    decision["needs_human"] = bool(decision.get("needs_human"))
+    decision["labels"] = [str(label).strip().lower() for label in (decision.get("labels") or []) if str(label).strip()]
+    decision["reply_text"] = str(decision.get("reply_text") or "").strip()
+    if decision.get("order_state") not in {"no_order", "collecting_details", "new_order", "pending_human_order_creation", "order_added", "cancelled"}:
+        decision["order_state"] = "no_order"
+    decision["order_candidate"] = decision.get("order_candidate") if isinstance(decision.get("order_candidate"), dict) else {}
+    decision["missing_order_fields"] = [str(item) for item in (decision.get("missing_order_fields") or []) if str(item)]
+    decision["escalation_reason"] = str(decision.get("escalation_reason") or "").strip()
+    decision["knowledge_gap_question"] = str(decision.get("knowledge_gap_question") or "").strip()
+    decision["internal_note"] = str(decision.get("internal_note") or "").strip()
+    if decision["needs_human"] and "needs_human" not in decision["labels"]:
+        decision["labels"].append("needs_human")
+    return decision
+
+
+def service_window_open(conversation: dict | None) -> bool:
+    if not conversation or str(conversation.get("channel") or "whatsapp").lower() != "whatsapp":
+        return True
+    expires = conversation.get("service_window_expires_at")
+    if not expires:
+        return False
+    if isinstance(expires, str):
+        try:
+            expires = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+        except Exception:
+            return False
+    if getattr(expires, "tzinfo", None):
+        return expires > datetime.now(expires.tzinfo)
+    return expires > datetime.now()
+
+
+def build_ai_context(conversation: dict, messages: list[dict], orders: list[dict], settings: dict) -> dict:
+    return {
+        "conversation": {
+            "channel": conversation.get("channel"),
+            "customer_name": conversation.get("customer_name"),
+            "display_handle": conversation.get("display_handle"),
+            "public_chat_id": conversation.get("public_chat_id"),
+            "ai_mode": conversation.get("ai_mode"),
+            "labels": _safe_json_list(conversation.get("labels")),
+            "order_state": conversation.get("order_state"),
+            "order_candidate": _safe_json_dict(conversation.get("order_candidate")),
+        },
+        "recent_messages": [
+            {
+                "direction": msg.get("direction"),
+                "sender_type": msg.get("sender_type"),
+                "body": msg.get("body"),
+                "created_at": msg.get("created_at"),
+            }
+            for msg in messages[-12:]
+        ],
+        "recent_orders": orders[:5],
+        "business_facts": settings.get("business_facts", ""),
+        "safe_defaults": {
+            "delivery_time": settings.get("delivery_time_reply"),
+            "payment_method": settings.get("payment_method_reply"),
+            "price": settings.get("price_reply"),
+        },
+        "tone": settings.get("ai_tone", ""),
+    }
+
+
+def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
+    text = (body or "").lower()
+    decision = dict(AI_DECISION_DEFAULT)
+    decision.update({"needs_human": False, "labels": [], "confidence": 0.72, "should_auto_reply": False})
+    if "[image]" in text:
+        decision.update({
+            "intent": "product_question",
+            "labels": ["unclear_product", "image_received"],
+            "reply_text": "Please share the product name or link too, so our team can confirm the exact details.",
+            "order_state": "collecting_details",
+            "missing_order_fields": ["product"],
+        })
+    elif any(word in text for word in ("refund", "damaged", "damage", "broken", "complaint", "angry", "legal")):
+        decision.update({
+            "intent": "damaged_item" if "damage" in text or "damaged" in text else "refund_exchange",
+            "needs_human": True,
+            "should_auto_reply": False,
+            "labels": ["refund" if "refund" in text else "complaint", "damaged_item" if "damage" in text or "damaged" in text else "needs_human"],
+            "reply_text": settings.get("escalation_reply") or settings.get("human_handoff_reply") or "",
+            "escalation_reason": "Complaint/refund/damaged item requires a human.",
+        })
+    elif any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay")):
+        decision.update({"intent": "price_question", "labels": ["price_question"], "reply_text": settings.get("price_reply") or "", "should_auto_reply": True})
+    elif any(word in text for word in ("delivery", "deliver", "kitne din", "days")):
+        decision.update({"intent": "delivery_question", "labels": ["delivery_question"], "reply_text": settings.get("delivery_time_reply") or "", "should_auto_reply": True})
+    elif any(word in text for word in ("order", "buy", "want this", "address", "phone", "name")):
+        candidate = {}
+        if "address" in text or "lahore" in text or "karachi" in text:
+            candidate["address"] = body
+        decision.update({
+            "intent": "order_intent",
+            "labels": ["product_interest", "collecting_details"],
+            "reply_text": "Great. Please share product name/link, your name, phone number, complete address, and quantity.",
+            "order_state": "collecting_details",
+            "order_candidate": candidate,
+            "missing_order_fields": ["product", "name", "phone", "address"],
+            "should_auto_reply": True,
+        })
+    else:
+        decision.update({
+            "intent": "unknown",
+            "needs_human": True,
+            "labels": ["needs_human"],
+            "reply_text": settings.get("escalation_reply") or "",
+            "escalation_reason": "Unknown request needs human review.",
+        })
+    return normalize_ai_decision(decision)
+
+
+def analyze_inbound_message(channel: str, contact_key: str, body: str, conversation: dict | None = None) -> dict:
+    settings = get_whatsapp_settings()
+    conversation = conversation or get_conversation_by_any_key(contact_key) or {}
+    messages = list_inbox_messages(contact_key, limit=30) if conversation else []
+    orders = customer_orders_for_conversation(conversation)
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return heuristic_ai_decision(channel, body, settings)
+    system_prompt = (
+        "You are TickBot, a warm, persuasive, professional sales/support agent for TickBags. "
+        "Return only valid JSON. Never mention being AI. Reply in the customer's language when possible: English, Urdu, or Roman Urdu. "
+        "Keep replies short and natural. Collect order details when the customer shows buying intent. "
+        "Do not invent product availability, prices, discounts, delivery promises, tracking, refunds, or policies. "
+        "If unsure or risky, set needs_human=true. Never say an order is confirmed unless order_state is already order_added or a real order exists. "
+        "If complete order details are present, set order_state=new_order and label new_order. "
+        "Escalate angry customers, refunds, damaged items, payment issues, unclear products, legal threats, or anything outside TickBags/products/orders/support."
+    )
+    schema_hint = {
+        "intent": "greeting|product_question|price_question|delivery_question|payment_question|order_tracking|order_intent|order_details_provided|complaint|refund_exchange|damaged_item|payment_issue|discount_negotiation|out_of_scope|unknown",
+        "confidence": 0.0,
+        "should_auto_reply": False,
+        "needs_human": False,
+        "labels": [],
+        "reply_text": "",
+        "order_state": "no_order|collecting_details|new_order|pending_human_order_creation|order_added|cancelled",
+        "order_candidate": {"product": "", "product_link": "", "product_image_reference": "", "customer_name": "", "phone": "", "address": "", "quantity": "", "variant": "", "notes": ""},
+        "missing_order_fields": [],
+        "escalation_reason": "",
+        "knowledge_gap_question": "",
+        "internal_note": "",
+    }
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": settings.get("openai_model", "gpt-4.1-mini"),
+                "temperature": 0.2,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": json.dumps({
+                        "schema": schema_hint,
+                        "channel": channel,
+                        "latest_customer_message": body,
+                        "context": build_ai_context(conversation, messages, orders, settings),
+                    }, ensure_ascii=False, default=_json_default)},
+                ],
+            },
+            timeout=30,
+        )
+        data = response.json() if response.content else {}
+        if response.ok:
+            content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "{}").strip()
+            return normalize_ai_decision(json.loads(content))
+    except Exception as e:
+        safe = heuristic_ai_decision(channel, body, settings)
+        safe["internal_note"] = f"AI provider failed safely: {e}"
+        return safe
+    return heuristic_ai_decision(channel, body, settings)
+
+
+def should_auto_send_ai_reply(conversation: dict, decision: dict, settings: dict) -> bool:
+    labels = set(_safe_json_list(conversation.get("labels"))) | set(decision.get("labels") or [])
+    mode = str(conversation.get("ai_mode") or "human").lower()
+    global_allowed = settings.get("global_ai_mode_enabled") and mode != "needs_human"
+    if mode != "auto" and not global_allowed:
+        return False
+    if conversation.get("manual_lock") or labels.intersection(AI_BLOCKING_LABELS):
+        return False
+    if decision.get("needs_human") or not decision.get("should_auto_reply"):
+        return False
+    if float(decision.get("confidence") or 0) < 0.70 or not decision.get("reply_text"):
+        return False
+    if settings.get("auto_reply_inside_service_window_only", True) and not service_window_open(conversation):
+        return False
+    return True
+
+
+def apply_ai_decision(conversation: dict, decision: dict) -> None:
+    save_ai_decision(conversation["phone"], decision)
+    labels = list(decision.get("labels") or [])
+    if decision.get("needs_human"):
+        mark_conversation_needs_human(conversation["phone"], decision.get("escalation_reason") or "Needs human review", labels=labels)
+        save_internal_assistant_message(
+            f"{conversation.get('public_chat_id') or conversation.get('phone')} needs human help: {decision.get('escalation_reason') or decision.get('knowledge_gap_question') or decision.get('internal_note') or 'Review latest message.'}",
+            metadata={"source": "ai_escalation", "conversation": conversation.get("phone"), "decision": decision},
+        )
+        return
+    if decision.get("order_state") == "new_order":
+        mark_new_order(conversation["phone"], decision.get("order_candidate") or {})
+        return
+    if decision.get("order_state") in {"collecting_details", "pending_human_order_creation"}:
+        update_order_candidate(conversation["phone"], decision.get("order_state"), decision.get("order_candidate") or {})
+    if labels:
+        update_conversation_labels(conversation["phone"], add=labels)
 
 
 def ai_reply_for_message(channel: str, contact_key: str, body: str, conversation: dict | None = None) -> str:
@@ -542,15 +832,26 @@ def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: s
     settings = get_whatsapp_settings()
     if not settings.get("auto_handle_enabled", True):
         return
+    conversation = get_conversation_by_any_key(contact_key)
+    if conversation and (conversation.get("manual_lock") or conversation.get("ai_mode") == "needs_human"):
+        return
     reply, rule = find_keyword_reply(body)
-    conversation = get_whatsapp_conversation(contact_key)
-    if not reply:
+    if settings.get("ai_mode_enabled") or settings.get("global_ai_mode_enabled"):
+        decision = analyze_inbound_message(channel, contact_key, body, conversation=conversation)
+        conversation = get_conversation_by_any_key(contact_key) or conversation
+        if conversation:
+            apply_ai_decision(conversation, decision)
+            conversation = get_conversation_by_any_key(contact_key) or conversation
+            if should_auto_send_ai_reply(conversation, decision, settings):
+                reply = decision.get("reply_text") or ""
+                rule = {"id": "ai-decision", "hold_for_review": False}
+            elif decision.get("needs_human") and decision.get("reply_text") and service_window_open(conversation):
+                reply = decision.get("reply_text")
+                rule = {"id": "ai-handoff", "hold_for_review": False}
+            else:
+                return
+    elif not reply:
         reply = fallback_reply(contact_phone or contact_key, body)
-    if settings.get("ai_mode_enabled") and settings.get("ai_handover_enabled", True):
-        ai_reply = ai_reply_for_message(channel, contact_phone or contact_key, body, conversation=conversation)
-        if ai_reply:
-            reply = ai_reply
-            rule = {"id": "ai-mode", "hold_for_review": False}
     if reply and not (rule and rule.get("hold_for_review")):
         ok, provider_id, meta = send_channel_text_message(channel, contact_key, render_template_body(reply, contact_phone or contact_key))
         if ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
@@ -564,6 +865,8 @@ def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: s
                 channel=channel,
                 display_handle=display_handle,
                 contact_phone=contact_phone,
+                sender_type="ai" if rule and str(rule.get("id", "")).startswith("ai") else "system",
+                ai_metadata={"decision": decision} if "decision" in locals() else {},
             )
 
 
@@ -614,7 +917,7 @@ def inbox():
 
 @whatsapp_bp.route("/api/whatsapp/conversations")
 def api_conversations():
-    conversations = list_whatsapp_conversations()
+    conversations = list_inbox_conversations()
     for item in conversations:
         if item.get("channel") in {"facebook", "instagram"}:
             item["avatar_url"] = f"/api/whatsapp/avatar/{quote(item.get('phone') or '', safe='')}"
@@ -629,14 +932,14 @@ def api_conversations():
 
 @whatsapp_bp.route("/api/whatsapp/conversations/<path:phone>/messages")
 def api_messages(phone):
-    conversation = get_whatsapp_conversation(phone)
+    conversation = get_conversation_by_any_key(phone)
     if conversation and conversation.get("channel") in {"facebook", "instagram"}:
         conversation["avatar_url"] = f"/api/whatsapp/avatar/{quote(conversation.get('phone') or '', safe='')}"
     return jsonify_data({
         "success": True,
         "phone": conversation.get("phone") if conversation else normalize_whatsapp_phone(phone),
         "conversation": conversation,
-        "messages": list_whatsapp_messages(phone),
+        "messages": list_inbox_messages(phone),
         "orders": customer_orders_for_conversation(conversation),
     })
 
@@ -648,13 +951,142 @@ def api_status(phone):
     return jsonify({"success": ok})
 
 
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/ai-mode", methods=["POST"])
+def api_ai_mode(key):
+    data = request.get_json(silent=True) or {}
+    ok = update_conversation_ai_mode(key, data.get("ai_mode"), data.get("reason") or "")
+    if data.get("ai_mode") == "human":
+        update_conversation_labels(key, add=["manual_lock"], remove=["ai"])
+    elif data.get("ai_mode") == "auto":
+        update_conversation_labels(key, add=["ai"], remove=["manual_lock", "needs_human"])
+    return jsonify({"success": ok, "conversation": get_conversation_by_any_key(key)})
+
+
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/labels", methods=["POST"])
+def api_labels(key):
+    data = request.get_json(silent=True) or {}
+    conversation = update_conversation_labels(key, add=data.get("add") or [], remove=data.get("remove") or [])
+    return jsonify_data({"success": bool(conversation), "conversation": conversation}, 200 if conversation else 404)
+
+
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/manual-lock", methods=["POST"])
+def api_manual_lock(key):
+    data = request.get_json(silent=True) or {}
+    lock = bool(data.get("manual_lock"))
+    mode = "human" if lock else "suggest"
+    ok = update_conversation_ai_mode(key, mode, "Manual lock" if lock else "")
+    if lock:
+        update_conversation_labels(key, add=["manual_lock"], remove=["ai"])
+    else:
+        update_conversation_labels(key, remove=["manual_lock"])
+    return jsonify({"success": ok, "conversation": get_conversation_by_any_key(key)})
+
+
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/ai-draft", methods=["POST"])
+def api_ai_draft(key):
+    conversation = get_conversation_by_any_key(key)
+    if not conversation:
+        return jsonify({"success": False, "error": "Conversation not found."}), 404
+    messages = list_inbox_messages(key)
+    latest = next((msg for msg in reversed(messages) if msg.get("direction") == "inbound"), {})
+    decision = analyze_inbound_message(conversation.get("channel") or "whatsapp", conversation.get("phone") or key, latest.get("body") or "", conversation=conversation)
+    apply_ai_decision(conversation, decision)
+    return jsonify_data({"success": True, "decision": decision, "draft": decision.get("reply_text") or ""})
+
+
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/send-ai-draft", methods=["POST"])
+def api_send_ai_draft(key):
+    data = request.get_json(silent=True) or {}
+    body = str(data.get("body") or "").strip()
+    if not body:
+        return jsonify({"success": False, "error": "Draft body is required."}), 400
+    conversation = get_conversation_by_any_key(key)
+    if not conversation:
+        return jsonify({"success": False, "error": "Conversation not found."}), 404
+    if conversation.get("is_internal"):
+        return jsonify({"success": False, "error": "Assistant messages are internal only."}), 400
+    if conversation.get("channel") == "whatsapp" and not service_window_open(conversation):
+        return jsonify({"success": False, "error": "Template required: the WhatsApp reply window is closed."}), 409
+    ok, provider_id, meta = send_channel_text_message(conversation.get("channel") or "whatsapp", conversation.get("phone"), body)
+    if ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
+        save_whatsapp_message(
+            conversation.get("phone"),
+            "outbound",
+            body,
+            provider_message_id=provider_id if ok else "dry-run",
+            metadata={"source": "ai_draft", "dry_run": not ok, "meta": meta},
+            channel=conversation.get("channel") or "whatsapp",
+            display_handle=conversation.get("display_handle") or "",
+            contact_phone=conversation.get("contact_phone") or "",
+            sender_type="ai",
+        )
+        return jsonify({"success": True, "provider_message_id": provider_id if ok else "dry-run", "dry_run": not ok})
+    return jsonify({"success": False, "error": provider_id}), 502
+
+
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/mark-new-order", methods=["POST"])
+def api_mark_new_order(key):
+    data = request.get_json(silent=True) or {}
+    ok = mark_new_order(key, data.get("order_candidate") or {})
+    return jsonify({"success": ok, "conversation": get_conversation_by_any_key(key)})
+
+
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/order-added", methods=["POST"])
+def api_order_added(key):
+    data = request.get_json(silent=True) or {}
+    ok = mark_order_added(key, data.get("human_user") or "team")
+    if ok and (data.get("shopify_order_id") or data.get("note")):
+        save_internal_assistant_message(
+            f"Order added for {key}: {data.get('shopify_order_id') or ''} {data.get('note') or ''}".strip(),
+            metadata={"source": "order_added", "conversation": key},
+        )
+    return jsonify({"success": ok, "conversation": get_conversation_by_any_key(key)})
+
+
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:key>/needs-human", methods=["POST"])
+def api_needs_human(key):
+    data = request.get_json(silent=True) or {}
+    ok = mark_conversation_needs_human(key, data.get("reason") or "Needs human review", labels=data.get("labels") or [])
+    return jsonify({"success": ok, "conversation": get_conversation_by_any_key(key)})
+
+
+@whatsapp_bp.route("/api/tickbot-assistant/messages", methods=["GET"])
+def api_assistant_messages():
+    assistant = ensure_tickbot_assistant_chat()
+    return jsonify_data({"success": bool(assistant), "conversation": assistant, "messages": list_inbox_messages(assistant["phone"]) if assistant else []})
+
+
+@whatsapp_bp.route("/api/tickbot-assistant/message", methods=["POST"])
+def api_assistant_message():
+    data = request.get_json(silent=True) or {}
+    body = str(data.get("body") or "").strip()
+    if not body:
+        return jsonify({"success": False, "error": "Message body is required."}), 400
+    saved = save_whatsapp_message(
+        "internal:tickbot-assistant",
+        "outbound",
+        body,
+        metadata={"source": "assistant_chat"},
+        channel="internal",
+        display_handle="Internal assistant",
+        sender_type="human",
+        internal_only=True,
+    )
+    if any(word in body.lower() for word in ("fact:", "policy:", "teach:", "remember")):
+        current = get_whatsapp_settings()
+        current["business_facts"] = (current.get("business_facts", "") + "\n" + body).strip()
+        save_whatsapp_settings(current)
+        save_internal_assistant_message("Saved this as a TickBags business fact.", metadata={"source": "knowledge_saved"})
+    return jsonify_data({"success": bool(saved), "message": saved}, 200 if saved else 500)
+
+
 @whatsapp_bp.route("/whatsapp/send", methods=["POST"])
 @whatsapp_bp.route("/api/whatsapp/send", methods=["POST"])
 def api_send():
     data = request.get_json(silent=True) or {}
     channel = str(data.get("channel") or "whatsapp").strip().lower() or "whatsapp"
     phone = normalize_inbox_contact_key(channel, data.get("phone"))
-    conversation = get_whatsapp_conversation(phone)
+    conversation = get_conversation_by_any_key(data.get("phone")) or get_conversation_by_any_key(phone)
     if conversation:
         channel = str(conversation.get("channel") or channel).strip().lower() or channel
         phone = conversation.get("phone") or phone
@@ -662,6 +1094,20 @@ def api_send():
     attachment_url = (data.get("attachment_url") or "").strip()
     if not phone or (not body and not attachment_url):
         return jsonify({"success": False, "error": "Phone and message are required."}), 400
+    if conversation and conversation.get("is_internal"):
+        saved = save_whatsapp_message(
+            phone,
+            "outbound",
+            body,
+            metadata={"source": "assistant_manual"},
+            channel="internal",
+            display_handle="Internal assistant",
+            sender_type="human",
+            internal_only=True,
+        )
+        return jsonify({"success": bool(saved), "provider_message_id": "internal"})
+    if conversation and channel == "whatsapp" and not attachment_url and not service_window_open(conversation):
+        return jsonify({"success": False, "error": "Template required: the 24-hour reply window is closed for this WhatsApp chat."}), 409
 
     if attachment_url:
         ok, provider_id, meta = send_channel_image_message(channel, phone, attachment_url, caption=body)
@@ -972,18 +1418,5 @@ def api_mock_inbound():
     )
     if not saved:
         return jsonify({"success": False, "error": get_last_db_error() or "Could not save the test message."}), 500
-    reply, rule = find_keyword_reply(body)
-    if not reply:
-        reply = fallback_reply(data.get("contact_phone") or phone, body)
-    if reply and not (rule and rule.get("hold_for_review")):
-        save_whatsapp_message(
-            phone,
-            "outbound",
-            render_template_body(reply, data.get("contact_phone") or phone),
-            provider_message_id="dry-run",
-            metadata={"source": "mock_auto_reply", "rule_id": rule.get("id") if rule else None},
-            channel=channel,
-            display_handle=display_handle,
-            contact_phone=data.get("contact_phone") or (phone if channel == "whatsapp" else ""),
-        )
+    maybe_auto_reply(channel, phone, body, customer_name=data.get("customer_name") or "Test Customer", display_handle=display_handle, contact_phone=data.get("contact_phone") or (phone if channel == "whatsapp" else ""))
     return jsonify({"success": True})

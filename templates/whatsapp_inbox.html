@@ -3,11 +3,11 @@
 
 {% block content %}
 <style>
-  .wa-shell { height:100%; display:flex; flex-direction:column; overflow:hidden; background:#f4f6fb; }
-  .wa-topbar { height:52px; background:#fff; border-bottom:1px solid #e3e6f0; display:flex; align-items:center; gap:12px; padding:0 20px; flex-shrink:0; }
+  .wa-shell { height:100%; display:flex; flex-direction:column; overflow:hidden; background:#d9dbd5; }
+  .wa-topbar { height:52px; background:#f0f2f5; border-bottom:1px solid #d7dce0; display:flex; align-items:center; gap:12px; padding:0 20px; flex-shrink:0; }
   .wa-title { font-size:16px; font-weight:800; color:#2d2e36; }
   .wa-subtitle { font-size:12px; color:#858796; }
-  .wa-layout { flex:1; min-height:0; display:grid; grid-template-columns:320px minmax(0,1fr) 330px; gap:0; overflow:hidden; }
+  .wa-layout { flex:1; min-height:0; display:grid; grid-template-columns:minmax(320px,30%) minmax(0,1fr) 340px; gap:0; overflow:hidden; }
   .wa-pane { min-height:0; background:#fff; border-right:1px solid #e3e6f0; display:flex; flex-direction:column; overflow:hidden; }
   .wa-pane:last-child { border-right:0; border-left:1px solid #e3e6f0; }
   .wa-toolbar { padding:12px; border-bottom:1px solid #eef0f7; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
@@ -20,7 +20,8 @@
   .wa-channel-tab.active { background:#1f3b8b; border-color:#1f3b8b; color:#fff; }
   .wa-list { overflow:auto; min-height:0; }
   .wa-convo { width:100%; border:0; border-bottom:1px solid #eef0f7; background:#fff; padding:12px; cursor:pointer; text-align:left; display:grid; grid-template-columns:38px 1fr auto; gap:10px; align-items:start; }
-  .wa-convo:hover, .wa-convo.active { background:#f7f9ff; }
+  .wa-convo:hover { background:#f5f6f6; }
+  .wa-convo.active { background:#e9edef; }
   .wa-avatar { width:38px; height:38px; border-radius:50%; background:#d8f3e8; color:#0d6b4a; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800; overflow:hidden; flex-shrink:0; }
   .wa-avatar img { width:100%; height:100%; object-fit:cover; display:block; }
   .wa-convo-main { min-width:0; }
@@ -33,8 +34,15 @@
   .wa-status.open { background:#e8f8fb; color:#0a5c6e; }
   .wa-status.resolved { background:#e7f7ef; color:#0d6b4a; }
   .wa-status.channel { background:#eff2ff; color:#3350b8; }
+  .wa-status.ai-human { background:#eef0f2; color:#445; }
+  .wa-status.ai-suggest { background:#fff7df; color:#7a5900; }
+  .wa-status.ai-auto { background:#dff7ed; color:#0d6b4a; }
+  .wa-status.ai-needs_human { background:#ffe6e6; color:#9b1c1c; }
+  .chip-row { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
+  .label-chip { border-radius:99px; background:#eef2f3; color:#4b5563; font-size:10px; font-weight:800; padding:2px 7px; }
+  .label-chip.new-order { background:#e8f7ef; color:#067647; }
   .wa-unread { min-width:18px; height:18px; padding:0 5px; border-radius:99px; background:#1cc88a; color:#fff; font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; }
-  .chat-head { padding:14px 16px; border-bottom:1px solid #eef0f7; display:flex; gap:12px; align-items:center; background:#fff; }
+  .chat-head { padding:10px 14px; border-bottom:1px solid #d7dce0; display:flex; gap:12px; align-items:center; background:#f0f2f5; }
   .chat-person { flex:1; min-width:0; }
   .chat-name { font-size:15px; font-weight:800; color:#2d2e36; }
   .chat-phone { font-family:'DM Mono', monospace; font-size:11px; color:#4e73df; margin-top:2px; }
@@ -45,12 +53,14 @@
   .wa-btn.primary { background:#1cc88a; border-color:#1cc88a; color:#fff; }
   .wa-btn.blue { background:#4e73df; border-color:#4e73df; color:#fff; }
   .wa-btn:disabled { opacity:.5; cursor:not-allowed; }
-  .chat-body { min-height:0; flex:1; overflow:auto; padding:18px 16px; background:#f4f6fb; display:flex; flex-direction:column; gap:10px; }
+  .chat-body { min-height:0; flex:1; overflow:auto; padding:18px 16px; background:#efeae2; display:flex; flex-direction:column; gap:10px; }
   .bubble-row { display:flex; }
   .bubble-row.outbound { justify-content:flex-end; }
   .bubble { max-width:min(620px,78%); border-radius:12px; padding:9px 11px; font-size:13px; line-height:1.45; box-shadow:0 1px 4px rgba(20,33,61,.06); }
   .bubble.inbound { background:#fff; color:#2d2e36; border:1px solid #e8ebf3; border-top-left-radius:4px; }
   .bubble.outbound { background:#dff7ed; color:#123c2e; border:1px solid #bdebd8; border-top-right-radius:4px; }
+  .bubble.system, .bubble.assistant { background:#fff7d6; color:#4d4631; border:1px solid #f1dda0; }
+  .date-sep { align-self:center; background:#fff; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,.05); color:#667085; font-size:11px; font-weight:800; padding:5px 10px; }
   .bubble-time { margin-top:5px; font-size:10px; color:#8a8b96; font-family:'DM Mono', monospace; }
   .reply-box { padding:12px; border-top:1px solid #e3e6f0; background:#fff; display:flex; flex-direction:column; gap:8px; }
   .reply-actions { display:flex; gap:8px; justify-content:flex-end; align-items:center; }
@@ -86,8 +96,8 @@
 <div class="wa-shell">
   <div class="wa-topbar">
     <div>
-      <div class="wa-title">Inbox</div>
-      <div class="wa-subtitle">WhatsApp now, Facebook first, Instagram next.</div>
+      <div class="wa-title">TickBot Inbox</div>
+      <div class="wa-subtitle">Internal sales and support inbox for TickBags.</div>
     </div>
     <span class="section-count" id="waTotal">0</span>
     <div style="flex:1"></div>
@@ -97,10 +107,10 @@
   <div class="wa-layout">
     <section class="wa-pane conversations">
       <div class="wa-toolbar">
-        <input class="wa-search" id="conversationSearch" placeholder="Search phone or customer" oninput="renderConversations()">
+        <input class="wa-search" id="conversationSearch" placeholder="Search name, phone, labels, or chat ID" oninput="renderConversations()">
         <div class="wa-channel-tabs">
           <button class="wa-channel-tab active" data-channel="all" onclick="setChannelFilter(this)">All</button>
-          <button class="wa-channel-tab" data-channel="whatsapp" onclick="setChannelFilter(this)">WhatsApp</button>
+          <button class="wa-channel-tab" data-channel="whatsapp" onclick="setChannelFilter(this)">WA</button>
           <button class="wa-channel-tab" data-channel="facebook" onclick="setChannelFilter(this)">Facebook</button>
           <button class="wa-channel-tab" data-channel="instagram" onclick="setChannelFilter(this)">Instagram</button>
         </div>
@@ -130,6 +140,9 @@
             <option value="resolved">Resolved</option>
           </select>
           <button class="wa-btn" onclick="mockInbound()">Test inbound</button>
+          <button class="wa-btn blue" onclick="setAiMode('auto')" id="handoverBtn" disabled>Hand over to TickBot</button>
+          <button class="wa-btn" onclick="setAiMode('human')" id="stopAiBtn" disabled>Stop AI</button>
+          <button class="wa-btn" onclick="markNeedsHuman()" id="needsHumanBtn" disabled>Needs Human</button>
         </div>
       </div>
       <div class="chat-body" id="messageList">
@@ -139,17 +152,53 @@
         <textarea class="wa-textarea" id="replyText" placeholder="Write a reply..." disabled></textarea>
         <div class="reply-actions">
           <span id="sendHint" style="font-size:11px;color:#858796;margin-right:auto;">POST /whatsapp/send</span>
+          <button class="wa-btn" onclick="draftAiReply()" id="draftBtn" disabled>Draft AI Reply</button>
           <input type="file" class="wa-file" id="imageUpload" accept="image/png,image/jpeg,image/webp" onchange="handleAttachmentSelected(event)">
           <button class="wa-btn" onclick="document.getElementById('imageUpload').click()" id="imageBtn" disabled>Attach image</button>
           <button class="wa-btn" onclick="insertLatestStatus()" id="statusBtn" disabled>Insert status</button>
           <button class="wa-btn primary" onclick="sendReply()" id="sendBtn" disabled>Send</button>
         </div>
         <div id="attachmentPreview" style="display:none;font-size:11px;color:#6f7280;"></div>
+        <div id="draftPreview" style="display:none;font-size:12px;background:#fff7df;border:1px solid #ead59b;border-radius:8px;padding:8px;"></div>
       </div>
     </section>
 
     <aside class="wa-pane ops">
       <div class="settings-scroll">
+        <div class="side-section">
+          <div class="side-title">Customer</div>
+          <div id="customerPanel"><div class="empty" style="padding:12px;">Select a chat.</div></div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-title">AI Control</div>
+          <select class="wa-select" id="aiModeSelect" onchange="setAiMode(this.value)" style="width:100%;" disabled>
+            <option value="human">Human</option>
+            <option value="suggest">Suggest</option>
+            <option value="auto">AI ON</option>
+            <option value="needs_human">Needs Human</option>
+          </select>
+          <div id="aiPanel" class="saved-sub" style="margin-top:8px;">No AI decision yet.</div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-title">Labels</div>
+          <div id="labelsPanel" class="chip-row"></div>
+          <div class="upload-row" style="margin-top:8px;">
+            <input class="wa-input" id="labelInput" placeholder="Add label" style="min-width:0;flex:1;">
+            <button class="wa-btn" onclick="addLabel()">Add</button>
+          </div>
+        </div>
+
+        <div class="side-section">
+          <div class="side-title">Order Candidate</div>
+          <div id="orderCandidatePanel"><div class="empty" style="padding:12px;">No candidate yet.</div></div>
+          <div class="mini-grid" style="margin-top:8px;">
+            <button class="wa-btn blue" onclick="markNewOrder()">Mark New Order</button>
+            <button class="wa-btn primary" onclick="markOrderAdded()">Order Added</button>
+          </div>
+        </div>
+
         <div class="side-section">
           <div class="side-title">Order history</div>
           <div id="orderHistory"><div class="empty" style="padding:12px;">Select a customer.</div></div>
@@ -160,6 +209,12 @@
           <div class="switch-row"><span>Auto-handle common questions</span><input type="checkbox" id="autoHandleEnabled"></div>
           <div class="switch-row"><span>AI mode</span><input type="checkbox" id="aiModeEnabled"></div>
           <div class="switch-row"><span>AI can reply directly</span><input type="checkbox" id="aiHandoverEnabled"></div>
+          <div class="switch-row"><span>AI Mode for eligible chats</span><input type="checkbox" id="globalAiModeEnabled"></div>
+          <select class="wa-select" id="defaultNewChatAiMode" style="width:100%;margin-top:8px;">
+            <option value="suggest">New chats: Suggest</option>
+            <option value="human">New chats: Human</option>
+            <option value="auto">New chats: AI ON</option>
+          </select>
           <textarea class="wa-textarea" id="businessFacts" placeholder="Business facts for AI and auto replies."></textarea>
           <input class="wa-input" id="deliveryReply" placeholder="Delivery time reply" style="width:100%;margin-top:8px;">
           <input class="wa-input" id="paymentReply" placeholder="Payment method reply" style="width:100%;margin-top:8px;">
@@ -234,8 +289,8 @@ function conversationIdentity(item) {
   const phone = (item?.contact_phone || item?.phone || '').trim();
   if (channel === 'whatsapp') {
     return {
-      title: name || phone || 'WhatsApp customer',
-      subtitle: phone || handle || 'WhatsApp',
+      title: name || phone || 'Messaging customer',
+      subtitle: phone || handle || 'WA',
     };
   }
   const cleanHandle = handle && handle !== name ? handle : '';
@@ -263,7 +318,30 @@ function initials(name, phone) {
 }
 
 function channelLabel(channel) {
-  return ({ whatsapp:'WhatsApp', facebook:'Facebook', instagram:'Instagram' }[channel] || 'Inbox');
+  return ({ whatsapp:'WA', facebook:'Facebook', instagram:'Instagram', internal:'Internal' }[channel] || 'Inbox');
+}
+
+function labelsOf(item) {
+  if (!item || !item.labels) return [];
+  if (Array.isArray(item.labels)) return item.labels;
+  try { const parsed = JSON.parse(item.labels); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+}
+
+function jsonObject(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try { const parsed = JSON.parse(value); return parsed && typeof parsed === 'object' ? parsed : {}; } catch { return {}; }
+}
+
+function aiModeLabel(mode) {
+  return ({ human:'Human', suggest:'Suggest', auto:'AI ON', needs_human:'Needs Human' }[mode || 'human'] || 'Human');
+}
+
+function serviceWindowLabel(item) {
+  if (!item || item.channel !== 'whatsapp') return 'Reply window open';
+  if (!item.service_window_expires_at) return 'Template required';
+  const expires = new Date(item.service_window_expires_at);
+  return expires > new Date() ? 'Reply window open' : 'Template required';
 }
 
 function conversationSortValue(item) {
@@ -342,7 +420,7 @@ function renderConversations() {
   const filtered = conversations.filter(item => {
     const statusOk = conversationFilter === 'all' || item.status === conversationFilter;
     const channelOk = channelFilter === 'all' || item.channel === channelFilter;
-    const text = `${item.phone} ${item.customer_name} ${item.last_message} ${item.display_handle || ''} ${item.channel || ''}`.toLowerCase();
+    const text = `${item.phone} ${item.public_chat_id || ''} ${item.customer_name} ${item.last_message} ${item.display_handle || ''} ${item.channel || ''} ${labelsOf(item).join(' ')}`.toLowerCase();
     return statusOk && channelOk && (!query || text.includes(query));
   });
   if (!filtered.length) {
@@ -354,11 +432,13 @@ function renderConversations() {
       <div class="wa-avatar">${avatarMarkup(item)}</div>
       <div class="wa-convo-main">
         <div class="wa-convo-name">${escapeHtml(conversationIdentity(item).title)}</div>
-        <div class="wa-convo-msg">${item.last_direction === 'outbound' ? 'You: ' : ''}${escapeHtml(item.last_message || '')}</div>
+        <div class="wa-convo-msg">${escapeHtml(item.public_chat_id || '')} · ${item.last_direction === 'outbound' ? 'You: ' : ''}${escapeHtml(item.last_message || '')}</div>
+        <div class="chip-row">${labelsOf(item).slice(0, 3).map(label => `<span class="label-chip ${label === 'new_order' ? 'new-order' : ''}">${escapeHtml(label.replaceAll('_', ' '))}</span>`).join('')}</div>
       </div>
       <div class="wa-convo-meta">
         <span class="wa-time">${escapeHtml(fmtTime(item.last_message_at))}</span>
         <span class="wa-status channel">${escapeHtml(channelLabel(item.channel))}</span>
+        <span class="wa-status ai-${escapeHtml(item.ai_mode || 'human')}">${escapeHtml(aiModeLabel(item.ai_mode))}</span>
         <span class="wa-status ${escapeHtml(item.status || 'new')}">${escapeHtml(item.status || 'new')}</span>
         ${item.unread_count ? `<span class="wa-unread">${item.unread_count}</span>` : ''}
       </div>
@@ -381,8 +461,16 @@ function clearConversationSelection() {
   document.getElementById('sendBtn').disabled = true;
   document.getElementById('statusBtn').disabled = true;
   document.getElementById('imageBtn').disabled = true;
+  document.getElementById('draftBtn').disabled = true;
+  document.getElementById('handoverBtn').disabled = true;
+  document.getElementById('stopAiBtn').disabled = true;
+  document.getElementById('needsHumanBtn').disabled = true;
+  document.getElementById('aiModeSelect').disabled = true;
   document.getElementById('messageList').innerHTML = '<div class="empty">Pick a conversation on the left, or use Test inbound to create one.</div>';
   document.getElementById('orderHistory').innerHTML = '<div class="empty" style="padding:12px;">Select a customer.</div>';
+  document.getElementById('customerPanel').innerHTML = '<div class="empty" style="padding:12px;">Select a chat.</div>';
+  document.getElementById('labelsPanel').innerHTML = '';
+  document.getElementById('orderCandidatePanel').innerHTML = '<div class="empty" style="padding:12px;">No candidate yet.</div>';
 }
 
 function setChannelFilter(btn) {
@@ -407,7 +495,7 @@ async function selectConversation(phone, options = {}) {
   renderConversations();
   const identity = conversationIdentity(conversation);
   document.getElementById('chatName').textContent = identity.title;
-  document.getElementById('chatPhone').textContent = `${channelLabel(selectedChannel)} · ${identity.subtitle}`;
+  document.getElementById('chatPhone').textContent = `${conversation.public_chat_id || ''} · ${channelLabel(selectedChannel)} · ${identity.subtitle} · ${serviceWindowLabel(conversation)}`;
   const chatAvatar = document.getElementById('chatAvatar');
   chatAvatar.innerHTML = avatarMarkup(conversation);
   if (!conversation.avatar_url) {
@@ -419,6 +507,13 @@ async function selectConversation(phone, options = {}) {
   document.getElementById('sendBtn').disabled = false;
   document.getElementById('statusBtn').disabled = false;
   document.getElementById('imageBtn').disabled = false;
+  document.getElementById('draftBtn').disabled = !!conversation.is_internal;
+  document.getElementById('handoverBtn').disabled = !!conversation.is_internal;
+  document.getElementById('stopAiBtn').disabled = false;
+  document.getElementById('needsHumanBtn').disabled = !!conversation.is_internal;
+  document.getElementById('aiModeSelect').disabled = !!conversation.is_internal;
+  document.getElementById('aiModeSelect').value = conversation.ai_mode || 'human';
+  renderSidePanels();
   await loadMessages();
   if (!options.skipReloadConversations) await loadConversations(false);
 }
@@ -444,6 +539,7 @@ async function loadMessages() {
     orders = payload.orders || [];
     renderMessages();
     renderOrders();
+    renderSidePanels();
   } catch (error) {
     console.error('Message refresh failed', error);
   } finally {
@@ -457,16 +553,54 @@ function renderMessages() {
     list.innerHTML = '<div class="empty">No messages yet.</div>';
     return;
   }
-  list.innerHTML = messages.map(message => `
+  let lastDate = '';
+  list.innerHTML = messages.map(message => {
+    const d = new Date(message.created_at);
+    const dateKey = Number.isNaN(d.getTime()) ? '' : d.toDateString();
+    const sep = dateKey && dateKey !== lastDate ? `<div class="date-sep">${escapeHtml(d.toLocaleDateString([], { month:'short', day:'numeric', year:'numeric' }))}</div>` : '';
+    if (dateKey) lastDate = dateKey;
+    const bubbleClass = message.internal_only || ['system','assistant'].includes(message.sender_type) ? (message.sender_type || 'system') : message.direction;
+    const sender = message.sender_type && !['customer','human'].includes(message.sender_type) ? `<strong>${escapeHtml(message.sender_type)}</strong><br>` : '';
+    return `${sep}
     <div class="bubble-row ${escapeHtml(message.direction)}">
-      <div class="bubble ${escapeHtml(message.direction)}">
-        <div>${escapeHtml(message.body).replace(/\n/g, '<br>')}</div>
+      <div class="bubble ${escapeHtml(bubbleClass)}">
+        <div>${sender}${escapeHtml(message.body).replace(/\n/g, '<br>')}</div>
+        ${message.metadata && message.metadata.dry_run ? '<div class="label-chip">dry run</div>' : ''}
         ${message.metadata && message.metadata.attachment_url ? `<img class="bubble-media" src="${escapeHtml(message.metadata.attachment_url)}" alt="attachment">` : ''}
         <div class="bubble-time">${escapeHtml(fmtTime(message.created_at))}</div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
   list.scrollTop = list.scrollHeight;
+}
+
+function renderSidePanels() {
+  const item = selectedConversation;
+  if (!item) return;
+  const identity = conversationIdentity(item);
+  document.getElementById('customerPanel').innerHTML = `
+    <div class="saved-sub">
+      <strong>${escapeHtml(identity.title)}</strong><br>
+      ${escapeHtml(identity.subtitle)}<br>
+      ${escapeHtml(channelLabel(item.channel))} · ${escapeHtml(item.public_chat_id || '')}<br>
+      Status: ${escapeHtml(item.status || 'open')} · ${escapeHtml(serviceWindowLabel(item))}
+    </div>
+  `;
+  const decision = jsonObject(item.ai_last_decision);
+  document.getElementById('aiPanel').innerHTML = `
+    <div>Mode: <strong>${escapeHtml(aiModeLabel(item.ai_mode))}</strong></div>
+    <div>Global AI: ${document.getElementById('globalAiModeEnabled')?.checked ? 'enabled' : 'off'}</div>
+    <div>${escapeHtml(item.ai_paused_reason || decision.escalation_reason || decision.internal_note || 'No AI decision yet.')}</div>
+  `;
+  document.getElementById('labelsPanel').innerHTML = labelsOf(item).map(label => `
+    <button class="label-chip ${label === 'new_order' ? 'new-order' : ''}" onclick="removeLabel('${escapeHtml(label)}')">${escapeHtml(label.replaceAll('_', ' '))}</button>
+  `).join('') || '<span class="saved-sub">No labels</span>';
+  const candidate = jsonObject(item.order_candidate);
+  const fields = ['product','product_link','customer_name','phone','address','quantity','variant','notes'];
+  document.getElementById('orderCandidatePanel').innerHTML = Object.keys(candidate).length ? `
+    <div class="saved-sub">State: <strong>${escapeHtml(item.order_state || 'no_order')}</strong></div>
+    ${fields.map(field => candidate[field] ? `<div class="order-line"><span>${escapeHtml(field.replaceAll('_', ' '))}</span><strong>${escapeHtml(candidate[field])}</strong></div>` : '').join('')}
+  ` : '<div class="empty" style="padding:12px;">No candidate yet.</div>';
 }
 
 function renderOrders() {
@@ -500,6 +634,99 @@ async function saveStatus() {
   await loadConversations(true);
 }
 
+async function setAiMode(mode) {
+  if (!selectedPhone) return;
+  const result = await (await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/ai-mode`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ ai_mode: mode, reason: mode === 'needs_human' ? 'Marked by team' : '' })
+  })).json();
+  if (!result.success) return showToast('Could not update AI mode.');
+  await loadConversations(true);
+  await loadMessages();
+}
+
+async function markNeedsHuman() {
+  if (!selectedPhone) return;
+  const reason = prompt('Reason for human review?', 'Needs human review') || 'Needs human review';
+  await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/needs-human`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ reason, labels:['needs_human'] })
+  });
+  await loadConversations(true);
+  await loadMessages();
+}
+
+async function draftAiReply() {
+  if (!selectedPhone) return;
+  const preview = document.getElementById('draftPreview');
+  preview.style.display = 'block';
+  preview.textContent = 'Drafting...';
+  const result = await (await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/ai-draft`, { method:'POST' })).json();
+  if (!result.success) {
+    preview.textContent = result.error || 'Could not draft a reply.';
+    return;
+  }
+  preview.innerHTML = `<strong>AI draft</strong><br>${escapeHtml(result.draft || 'No draft available.').replace(/\n/g, '<br>')}<br><button class="wa-btn blue" style="margin-top:8px;" onclick="useDraft()">Use draft</button>`;
+  preview.dataset.draft = result.draft || '';
+  await loadConversations(true);
+}
+
+function useDraft() {
+  const draft = document.getElementById('draftPreview').dataset.draft || '';
+  document.getElementById('replyText').value = draft;
+}
+
+async function addLabel() {
+  const input = document.getElementById('labelInput');
+  const label = input.value.trim().toLowerCase().replace(/\s+/g, '_');
+  if (!selectedPhone || !label) return;
+  await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/labels`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ add:[label] })
+  });
+  input.value = '';
+  await loadConversations(true);
+  await loadMessages();
+}
+
+async function removeLabel(label) {
+  if (!selectedPhone || !label) return;
+  await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/labels`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ remove:[label] })
+  });
+  await loadConversations(true);
+  await loadMessages();
+}
+
+async function markNewOrder() {
+  if (!selectedPhone) return;
+  const candidate = jsonObject(selectedConversation?.order_candidate);
+  await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/mark-new-order`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ order_candidate: candidate })
+  });
+  await loadConversations(true);
+  await loadMessages();
+}
+
+async function markOrderAdded() {
+  if (!selectedPhone) return;
+  const shopify_order_id = prompt('Shopify order ID or note', '') || '';
+  await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/order-added`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ shopify_order_id })
+  });
+  await loadConversations(true);
+  await loadMessages();
+}
+
 async function sendReply() {
   const textarea = document.getElementById('replyText');
   const body = textarea.value.trim();
@@ -519,7 +746,7 @@ async function sendReply() {
   const payload = await response.json();
   document.getElementById('sendBtn').disabled = false;
   if (!payload.success) {
-    showToast(payload.error || 'Could not send WhatsApp message');
+    showToast(payload.error || 'Could not send message');
     return;
   }
   textarea.value = '';
@@ -645,6 +872,8 @@ async function loadInboxSettings() {
   document.getElementById('autoHandleEnabled').checked = !!settings.auto_handle_enabled;
   document.getElementById('aiModeEnabled').checked = !!settings.ai_mode_enabled;
   document.getElementById('aiHandoverEnabled').checked = !!settings.ai_handover_enabled;
+  document.getElementById('globalAiModeEnabled').checked = !!settings.global_ai_mode_enabled;
+  document.getElementById('defaultNewChatAiMode').value = settings.default_new_chat_ai_mode || 'suggest';
   document.getElementById('businessFacts').value = settings.business_facts || '';
   document.getElementById('deliveryReply').value = settings.delivery_time_reply || '';
   document.getElementById('paymentReply').value = settings.payment_method_reply || '';
@@ -657,6 +886,8 @@ async function saveInboxSettings() {
     auto_handle_enabled: document.getElementById('autoHandleEnabled').checked,
     ai_mode_enabled: document.getElementById('aiModeEnabled').checked,
     ai_handover_enabled: document.getElementById('aiHandoverEnabled').checked,
+    global_ai_mode_enabled: document.getElementById('globalAiModeEnabled').checked,
+    default_new_chat_ai_mode: document.getElementById('defaultNewChatAiMode').value,
     business_facts: document.getElementById('businessFacts').value,
     delivery_time_reply: document.getElementById('deliveryReply').value,
     payment_method_reply: document.getElementById('paymentReply').value,

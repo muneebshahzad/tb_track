@@ -43,6 +43,7 @@ def _ensure_product_costs_table(cur):
 
 
 def _ensure_whatsapp_tables(cur):
+    cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS whatsapp_conversations (
             phone TEXT PRIMARY KEY,
@@ -91,9 +92,158 @@ def _ensure_whatsapp_tables(cur):
         ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'whatsapp'
     """)
     cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS chat_id UUID
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS public_chat_id TEXT
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS ai_mode TEXT NOT NULL DEFAULT 'human'
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN NOT NULL DEFAULT FALSE
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS ai_paused_reason TEXT NOT NULL DEFAULT ''
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS ai_last_decision JSONB NOT NULL DEFAULT '{}'::jsonb
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS ai_summary TEXT NOT NULL DEFAULT ''
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS labels JSONB NOT NULL DEFAULT '[]'::jsonb
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS order_state TEXT NOT NULL DEFAULT 'no_order'
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS order_candidate JSONB NOT NULL DEFAULT '{}'::jsonb
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS assigned_to TEXT NOT NULL DEFAULT ''
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS is_internal BOOLEAN NOT NULL DEFAULT FALSE
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS last_customer_message_at TIMESTAMPTZ
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS service_window_expires_at TIMESTAMPTZ
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS manual_lock BOOLEAN NOT NULL DEFAULT FALSE
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_conversations
+        ADD COLUMN IF NOT EXISTS updated_by TEXT NOT NULL DEFAULT ''
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_messages
+        ADD COLUMN IF NOT EXISTS chat_id UUID
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_messages
+        ADD COLUMN IF NOT EXISTS sender_type TEXT NOT NULL DEFAULT ''
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_messages
+        ADD COLUMN IF NOT EXISTS message_type TEXT NOT NULL DEFAULT 'text'
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_messages
+        ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_messages
+        ADD COLUMN IF NOT EXISTS ai_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+    """)
+    cur.execute("""
+        ALTER TABLE whatsapp_messages
+        ADD COLUMN IF NOT EXISTS internal_only BOOLEAN NOT NULL DEFAULT FALSE
+    """)
+    cur.execute("""
+        UPDATE whatsapp_conversations
+        SET chat_id = gen_random_uuid()
+        WHERE chat_id IS NULL
+    """)
+    cur.execute("""
+        UPDATE whatsapp_conversations
+        SET last_customer_message_at = last_message_at,
+            service_window_expires_at = CASE
+                WHEN channel = 'whatsapp' THEN last_message_at + INTERVAL '24 hours'
+                ELSE NULL
+            END
+        WHERE last_direction = 'inbound' AND last_customer_message_at IS NULL
+    """)
+    cur.execute("""
+        WITH numbered AS (
+            SELECT phone,
+                   CASE
+                       WHEN channel = 'facebook' THEN 'TB-FB-'
+                       WHEN channel = 'instagram' THEN 'TB-IG-'
+                       WHEN channel = 'internal' THEN 'TB-AI-'
+                       ELSE 'TB-WA-'
+                   END || LPAD(ROW_NUMBER() OVER (
+                       PARTITION BY CASE
+                           WHEN channel = 'facebook' THEN 'TB-FB-'
+                           WHEN channel = 'instagram' THEN 'TB-IG-'
+                           WHEN channel = 'internal' THEN 'TB-AI-'
+                           ELSE 'TB-WA-'
+                       END
+                       ORDER BY COALESCE(last_message_at, updated_at, NOW()), phone
+                   )::text, 6, '0') AS generated_id
+            FROM whatsapp_conversations
+            WHERE public_chat_id IS NULL OR public_chat_id = ''
+        )
+        UPDATE whatsapp_conversations c
+        SET public_chat_id = numbered.generated_id
+        FROM numbered
+        WHERE c.phone = numbered.phone
+    """)
+    cur.execute("""
+        UPDATE whatsapp_messages m
+        SET chat_id = c.chat_id,
+            sender_type = CASE
+                WHEN m.sender_type <> '' THEN m.sender_type
+                WHEN m.direction = 'inbound' THEN 'customer'
+                ELSE 'human'
+            END
+        FROM whatsapp_conversations c
+        WHERE m.phone = c.phone
+          AND (m.chat_id IS NULL OR m.sender_type = '')
+    """)
+    cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_channel_updated
         ON whatsapp_conversations (channel, last_message_at DESC, updated_at DESC)
     """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_chat_id ON whatsapp_conversations (chat_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_public_chat_id ON whatsapp_conversations (public_chat_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_ai_mode ON whatsapp_conversations (ai_mode)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_order_state ON whatsapp_conversations (order_state)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_conversations_last_message_at ON whatsapp_conversations (last_message_at DESC)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_chat_id_created ON whatsapp_messages (chat_id, created_at)")
     cur.execute("""
         CREATE TABLE IF NOT EXISTS whatsapp_rules (
             id BIGSERIAL PRIMARY KEY,
@@ -128,6 +278,17 @@ def _ensure_whatsapp_tables(cur):
             failed_count INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'draft',
             created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tickbot_knowledge (
+            id BIGSERIAL PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'assistant',
+            verified BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
 
@@ -384,6 +545,128 @@ def normalize_inbox_contact_key(channel: str, value: str) -> str:
     return f"{channel}:{raw_value}"
 
 
+def _safe_json(value, fallback):
+    if value is None:
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return __import__('json').loads(value)
+    except Exception:
+        return fallback
+
+
+def _chat_id_prefix(channel: str) -> str:
+    channel = str(channel or "whatsapp").lower()
+    if channel == "facebook":
+        return "TB-FB-"
+    if channel == "instagram":
+        return "TB-IG-"
+    if channel == "internal":
+        return "TB-AI-"
+    return "TB-WA-"
+
+
+def _next_public_chat_id(cur, channel: str) -> str:
+    prefix = _chat_id_prefix(channel)
+    cur.execute(
+        "SELECT public_chat_id FROM whatsapp_conversations WHERE public_chat_id LIKE %s ORDER BY public_chat_id DESC LIMIT 1",
+        (f"{prefix}%",),
+    )
+    row = cur.fetchone()
+    current = 0
+    if row:
+        public_id = row["public_chat_id"] if isinstance(row, dict) else row[0]
+        try:
+            current = int(str(public_id).rsplit("-", 1)[-1])
+        except Exception:
+            current = 0
+    return f"{prefix}{current + 1:06d}"
+
+
+def ensure_tickbot_assistant_chat() -> dict | None:
+    phone = "internal:tickbot-assistant"
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    INSERT INTO whatsapp_conversations (
+                        phone, channel, customer_name, display_handle, status, last_message,
+                        last_direction, unread_count, chat_id, public_chat_id, ai_mode,
+                        labels, is_pinned, is_internal
+                    )
+                    VALUES (
+                        %s, 'internal', 'TickBot Assistant', 'Internal assistant', 'open',
+                        'Ask TickBot about setup, unresolved questions, and knowledge gaps.',
+                        'system', 0, gen_random_uuid(), %s, 'human',
+                        '["assistant"]'::jsonb, TRUE, TRUE
+                    )
+                    ON CONFLICT (phone) DO UPDATE SET
+                        channel = 'internal',
+                        customer_name = 'TickBot Assistant',
+                        display_handle = 'Internal assistant',
+                        is_pinned = TRUE,
+                        is_internal = TRUE,
+                        public_chat_id = COALESCE(NULLIF(whatsapp_conversations.public_chat_id, ''), EXCLUDED.public_chat_id),
+                        updated_at = NOW()
+                    RETURNING *
+                """, (phone, _next_public_chat_id(cur, "internal")))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB ensure_tickbot_assistant_chat error: {e}")
+        return None
+
+
+def resolve_conversation_key(key: str) -> str:
+    conversation = get_conversation_by_any_key(key)
+    return conversation.get("phone") if conversation else normalize_inbox_contact_key("whatsapp", key)
+
+
+def get_conversation_by_any_key(key: str) -> dict | None:
+    key = str(key or "").strip()
+    if not key:
+        return None
+    candidates = [key]
+    if not key.startswith(("facebook:", "instagram:", "internal:")):
+        normalized = normalize_inbox_contact_key("whatsapp", key)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    SELECT *
+                    FROM whatsapp_conversations
+                    WHERE phone = ANY(%s)
+                       OR public_chat_id = %s
+                       OR chat_id::text = %s
+                    LIMIT 1
+                """, (candidates, key, key))
+                row = cur.fetchone()
+                if row:
+                    _set_last_db_error("")
+                    return dict(row)
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_conversation_by_any_key error: {e}")
+    return None
+
+
+def list_inbox_conversations() -> list[dict]:
+    ensure_tickbot_assistant_chat()
+    return list_whatsapp_conversations()
+
+
+def list_inbox_messages(key: str, limit: int = 100) -> list[dict]:
+    return list_whatsapp_messages(key, limit=limit)
+
+
 def save_whatsapp_message(
     phone: str,
     direction: str,
@@ -394,6 +677,11 @@ def save_whatsapp_message(
     channel: str = "whatsapp",
     display_handle: str = "",
     contact_phone: str = "",
+    sender_type: str = "",
+    message_type: str = "text",
+    attachments: list | None = None,
+    ai_metadata: dict | None = None,
+    internal_only: bool = False,
 ):
     channel = str(channel or "whatsapp").strip().lower() or "whatsapp"
     phone = normalize_inbox_contact_key(channel, phone)
@@ -404,6 +692,10 @@ def save_whatsapp_message(
         return None
     contact_phone = normalize_whatsapp_phone(contact_phone) if contact_phone else ""
     display_handle = str(display_handle or "").strip()
+    sender_type = (sender_type or ("customer" if direction == "inbound" else "human")).strip().lower()
+    if sender_type not in {"customer", "human", "ai", "system", "assistant"}:
+        sender_type = "customer" if direction == "inbound" else "human"
+    message_type = (message_type or "text").strip().lower()
 
     try:
         with get_conn() as conn:
@@ -411,9 +703,12 @@ def save_whatsapp_message(
                 _ensure_whatsapp_tables(cur)
                 try:
                     cur.execute("""
-                        INSERT INTO whatsapp_messages (phone, channel, direction, body, provider_message_id, metadata)
-                        VALUES (%s, %s, %s, %s, %s, %s::jsonb)
-                        RETURNING id, phone, channel, direction, body, provider_message_id, metadata, created_at
+                        INSERT INTO whatsapp_messages (
+                            phone, channel, direction, body, provider_message_id, metadata,
+                            sender_type, message_type, attachments, ai_metadata, internal_only
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s::jsonb, %s)
+                        RETURNING *
                     """, (
                         phone,
                         channel,
@@ -421,15 +716,27 @@ def save_whatsapp_message(
                         body,
                         provider_message_id or "",
                         __import__('json').dumps(metadata or {}),
+                        sender_type,
+                        message_type,
+                        __import__('json').dumps(attachments or []),
+                        __import__('json').dumps(ai_metadata or {}),
+                        bool(internal_only),
                     ))
                     message = dict(cur.fetchone())
                     unread_increment = 1 if direction == 'inbound' else 0
+                    public_chat_id = _next_public_chat_id(cur, channel)
                     cur.execute("""
                         INSERT INTO whatsapp_conversations (
                             phone, channel, customer_name, display_handle, contact_phone,
-                            status, last_message, last_direction, unread_count
+                            status, last_message, last_direction, unread_count, chat_id, public_chat_id,
+                            last_customer_message_at, service_window_expires_at, is_internal
                         )
-                        VALUES (%s, %s, %s, %s, %s, 'new', %s, %s, %s)
+                        VALUES (
+                            %s, %s, %s, %s, %s, 'new', %s, %s, %s, gen_random_uuid(), %s,
+                            CASE WHEN %s = 'inbound' THEN NOW() ELSE NULL END,
+                            CASE WHEN %s = 'inbound' AND %s = 'whatsapp' THEN NOW() + INTERVAL '24 hours' ELSE NULL END,
+                            %s
+                        )
                         ON CONFLICT (phone) DO UPDATE SET
                             channel = EXCLUDED.channel,
                             customer_name = CASE
@@ -447,10 +754,20 @@ def save_whatsapp_message(
                             last_message = EXCLUDED.last_message,
                             last_direction = EXCLUDED.last_direction,
                             last_message_at = NOW(),
+                            chat_id = COALESCE(whatsapp_conversations.chat_id, gen_random_uuid()),
+                            public_chat_id = COALESCE(NULLIF(whatsapp_conversations.public_chat_id, ''), EXCLUDED.public_chat_id),
                             unread_count = CASE
                                 WHEN EXCLUDED.last_direction = 'inbound'
                                 THEN whatsapp_conversations.unread_count + 1
                                 ELSE whatsapp_conversations.unread_count
+                            END,
+                            last_customer_message_at = CASE
+                                WHEN EXCLUDED.last_direction = 'inbound' THEN NOW()
+                                ELSE whatsapp_conversations.last_customer_message_at
+                            END,
+                            service_window_expires_at = CASE
+                                WHEN EXCLUDED.last_direction = 'inbound' AND EXCLUDED.channel = 'whatsapp' THEN NOW() + INTERVAL '24 hours'
+                                ELSE whatsapp_conversations.service_window_expires_at
                             END,
                             updated_at = NOW()
                     """, (
@@ -462,7 +779,22 @@ def save_whatsapp_message(
                         body,
                         direction,
                         unread_increment,
+                        public_chat_id,
+                        direction,
+                        direction,
+                        channel,
+                        bool(internal_only),
                     ))
+                    cur.execute("""
+                        UPDATE whatsapp_messages m
+                        SET chat_id = c.chat_id
+                        FROM whatsapp_conversations c
+                        WHERE m.id = %s AND c.phone = m.phone
+                        RETURNING m.*
+                    """, (message["id"],))
+                    refreshed = cur.fetchone()
+                    if refreshed:
+                        message = dict(refreshed)
                 except Exception:
                     cur.execute("""
                         INSERT INTO whatsapp_messages (phone, direction, body, provider_message_id, metadata)
@@ -522,11 +854,9 @@ def list_whatsapp_conversations() -> list[dict]:
                 _ensure_whatsapp_tables(cur)
                 try:
                     cur.execute("""
-                        SELECT phone, channel, customer_name, display_handle, contact_phone,
-                               status, last_message, last_direction,
-                               last_message_at, unread_count, updated_at
+                        SELECT *
                         FROM whatsapp_conversations
-                        ORDER BY last_message_at DESC NULLS LAST, updated_at DESC
+                        ORDER BY is_pinned DESC, last_message_at DESC NULLS LAST, updated_at DESC
                     """)
                     rows = [dict(row) for row in cur.fetchall()]
                 except Exception:
@@ -552,47 +882,11 @@ def list_whatsapp_conversations() -> list[dict]:
 
 
 def get_whatsapp_conversation(phone: str) -> dict | None:
-    for key in (phone, normalize_inbox_contact_key("whatsapp", phone)):
-        if not key:
-            continue
-        try:
-            with get_conn() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    _ensure_whatsapp_tables(cur)
-                    try:
-                        cur.execute("""
-                            SELECT phone, channel, customer_name, display_handle, contact_phone,
-                                   status, last_message, last_direction,
-                                   last_message_at, unread_count, updated_at
-                            FROM whatsapp_conversations
-                            WHERE phone = %s
-                        """, (key,))
-                        row = cur.fetchone()
-                    except Exception:
-                        cur.execute("""
-                            SELECT phone, customer_name, status, last_message, last_direction,
-                                   last_message_at, unread_count, updated_at
-                            FROM whatsapp_conversations
-                            WHERE phone = %s
-                        """, (key,))
-                        row = cur.fetchone()
-                        if row:
-                            row = dict(row)
-                            row.setdefault('channel', 'whatsapp')
-                            row.setdefault('display_handle', row.get('phone', ''))
-                            row.setdefault('contact_phone', row.get('phone', ''))
-                    if row:
-                        _set_last_db_error("")
-                        return dict(row)
-        except Exception as e:
-            _set_last_db_error(str(e))
-            print(f"DB get_whatsapp_conversation error: {e}")
-            return None
-    return None
+    return get_conversation_by_any_key(phone)
 
 
 def list_whatsapp_messages(phone: str, limit: int = 80) -> list[dict]:
-    conversation = get_whatsapp_conversation(phone)
+    conversation = get_conversation_by_any_key(phone)
     phone = conversation.get('phone') if conversation else normalize_inbox_contact_key("whatsapp", phone)
     if not phone:
         return []
@@ -607,12 +901,12 @@ def list_whatsapp_messages(phone: str, limit: int = 80) -> list[dict]:
                 """, (phone,))
                 try:
                     cur.execute("""
-                        SELECT id, phone, channel, direction, body, provider_message_id, metadata, created_at
+                        SELECT *
                         FROM whatsapp_messages
-                        WHERE phone = %s
+                        WHERE phone = %s OR (%s::uuid IS NOT NULL AND chat_id = %s::uuid)
                         ORDER BY created_at DESC
                         LIMIT %s
-                    """, (phone, limit))
+                    """, (phone, conversation.get("chat_id") if conversation else None, conversation.get("chat_id") if conversation else None, limit))
                     rows = [dict(row) for row in cur.fetchall()]
                 except Exception:
                     cur.execute("""
@@ -637,7 +931,7 @@ def list_whatsapp_messages(phone: str, limit: int = 80) -> list[dict]:
 
 
 def update_whatsapp_conversation_status(phone: str, status: str) -> bool:
-    conversation = get_whatsapp_conversation(phone)
+    conversation = get_conversation_by_any_key(phone)
     phone = conversation.get('phone') if conversation else normalize_inbox_contact_key("whatsapp", phone)
     status = (status or '').strip().lower()
     if status not in {'new', 'open', 'resolved'}:
@@ -657,6 +951,188 @@ def update_whatsapp_conversation_status(phone: str, status: str) -> bool:
     except Exception as e:
         _set_last_db_error(str(e))
         print(f"DB update_whatsapp_conversation_status error: {e}")
+        return False
+
+
+def update_conversation_ai_mode(key, ai_mode, reason=''):
+    ai_mode = str(ai_mode or "").strip().lower()
+    if ai_mode not in {"human", "suggest", "auto", "needs_human"}:
+        return False
+    conversation = get_conversation_by_any_key(key)
+    if not conversation:
+        return False
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    UPDATE whatsapp_conversations
+                    SET ai_mode = %s,
+                        ai_enabled = %s,
+                        ai_paused_reason = CASE WHEN %s <> '' THEN %s ELSE ai_paused_reason END,
+                        manual_lock = CASE
+                            WHEN %s = 'human' THEN TRUE
+                            WHEN %s IN ('suggest', 'auto') THEN FALSE
+                            ELSE manual_lock
+                        END,
+                        updated_at = NOW()
+                    WHERE phone = %s
+                """, (ai_mode, ai_mode == "auto", reason or "", reason or "", ai_mode, ai_mode, conversation["phone"]))
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_conversation_ai_mode error: {e}")
+        return False
+
+
+def update_conversation_labels(key, add=None, remove=None):
+    conversation = get_conversation_by_any_key(key)
+    if not conversation:
+        return None
+    labels = set(_safe_json(conversation.get("labels"), []))
+    for label in add or []:
+        label = str(label or "").strip().lower()
+        if label:
+            labels.add(label)
+    for label in remove or []:
+        labels.discard(str(label or "").strip().lower())
+    labels = sorted(labels)
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    UPDATE whatsapp_conversations
+                    SET labels = %s::jsonb, updated_at = NOW()
+                    WHERE phone = %s
+                    RETURNING *
+                """, (__import__('json').dumps(labels), conversation["phone"]))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_conversation_labels error: {e}")
+        return None
+
+
+def update_order_candidate(key, order_state, order_candidate):
+    conversation = get_conversation_by_any_key(key)
+    if not conversation:
+        return False
+    order_state = str(order_state or "no_order").strip().lower()
+    if order_state not in {"no_order", "collecting_details", "new_order", "pending_human_order_creation", "order_added", "cancelled"}:
+        order_state = "no_order"
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    UPDATE whatsapp_conversations
+                    SET order_state = %s, order_candidate = %s::jsonb, updated_at = NOW()
+                    WHERE phone = %s
+                """, (order_state, __import__('json').dumps(order_candidate or {}), conversation["phone"]))
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_order_candidate error: {e}")
+        return False
+
+
+def mark_conversation_needs_human(key, reason, labels=None):
+    conversation = update_conversation_labels(key, add=["needs_human", *(labels or [])])
+    if not conversation:
+        return False
+    return update_conversation_ai_mode(conversation["phone"], "needs_human", reason or "Needs human review")
+
+
+def mark_new_order(key, order_candidate):
+    ok = update_order_candidate(key, "new_order", order_candidate or {})
+    if ok:
+        update_conversation_labels(key, add=["new_order", "pending_human_order_creation"], remove=["order_added"])
+    return ok
+
+
+def mark_order_added(key, human_user=''):
+    conversation = get_conversation_by_any_key(key)
+    if not conversation:
+        return False
+    candidate = _safe_json(conversation.get("order_candidate"), {})
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    UPDATE whatsapp_conversations
+                    SET order_state = 'order_added',
+                        order_candidate = %s::jsonb,
+                        labels = (
+                            SELECT jsonb_agg(DISTINCT value)
+                            FROM jsonb_array_elements_text(
+                                (labels - 'new_order' - 'pending_human_order_creation') || '["order_added"]'::jsonb
+                            ) AS value
+                        ),
+                        ai_mode = CASE WHEN ai_mode = 'auto' THEN 'suggest' ELSE ai_mode END,
+                        ai_enabled = FALSE,
+                        updated_by = %s,
+                        updated_at = NOW()
+                    WHERE phone = %s
+                """, (__import__('json').dumps(candidate), human_user or "", conversation["phone"]))
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB mark_order_added error: {e}")
+        return False
+
+
+def save_internal_assistant_message(body, metadata=None):
+    assistant = ensure_tickbot_assistant_chat()
+    if not assistant:
+        return None
+    return save_whatsapp_message(
+        assistant["phone"],
+        "outbound",
+        body,
+        metadata=metadata or {},
+        channel="internal",
+        display_handle="Internal assistant",
+        sender_type="assistant",
+        internal_only=True,
+    )
+
+
+def save_ai_decision(key, decision_json):
+    conversation = get_conversation_by_any_key(key)
+    if not conversation:
+        return False
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_whatsapp_tables(cur)
+                cur.execute("""
+                    UPDATE whatsapp_conversations
+                    SET ai_last_decision = %s::jsonb,
+                        ai_summary = %s,
+                        updated_at = NOW()
+                    WHERE phone = %s
+                """, (
+                    __import__('json').dumps(decision_json or {}),
+                    str((decision_json or {}).get("internal_note") or (decision_json or {}).get("intent") or "")[:1000],
+                    conversation["phone"],
+                ))
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB save_ai_decision error: {e}")
         return False
 
 

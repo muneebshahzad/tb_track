@@ -137,6 +137,7 @@ daraz_orders = []
 order_details_lock = threading.RLock()
 app.order_details_provider = lambda: order_details
 app.daraz_orders_provider = lambda: daraz_orders
+app.active_products_provider = lambda: get_active_shopify_products(limit=250)
 
 RATE_LIMIT = 2
 LAST_REQUEST_TIME = 0
@@ -968,6 +969,11 @@ def get_active_shopify_products(limit=120):
                 'price': float(getattr(variant, 'price', 0) or 0),
                 'image': variant_image,
                 'sku': getattr(variant, 'sku', '') or '',
+                'handle': getattr(product, 'handle', '') or '',
+                'product_url': (
+                    getattr(product, 'online_store_url', '') or
+                    (f"https://tickbags.com/products/{getattr(product, 'handle', '')}" if getattr(product, 'handle', '') else '')
+                ),
             })
     return results
 

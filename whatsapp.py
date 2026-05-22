@@ -50,6 +50,7 @@ whatsapp_bp = Blueprint("whatsapp", __name__, template_folder="templates")
 UPLOAD_DIR_NAME = "whatsapp_uploads"
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 SOCIAL_PROFILE_CACHE: dict[tuple[str, str], dict[str, str]] = {}
+PRODUCT_CACHE: dict[str, Any] = {"loaded_at": 0.0, "items": []}
 
 
 def _json_default(value):
@@ -71,6 +72,22 @@ def get_order_source() -> tuple[list[dict], list[dict]]:
         list(getattr(current_app, "order_details_provider", lambda: [])() or []),
         list(getattr(current_app, "daraz_orders_provider", lambda: [])() or []),
     )
+
+
+def get_product_source() -> list[dict]:
+    import time
+    now = time.time()
+    if PRODUCT_CACHE["items"] and now - float(PRODUCT_CACHE["loaded_at"] or 0) < 300:
+        return list(PRODUCT_CACHE["items"] or [])
+    try:
+        provider = getattr(current_app, "active_products_provider", None)
+        items = list(provider() or []) if provider else []
+    except Exception as e:
+        print(f"Could not fetch active products for TickBot: {e}")
+        items = []
+    PRODUCT_CACHE["loaded_at"] = now
+    PRODUCT_CACHE["items"] = items
+    return list(items)
 
 
 def clean_digits(value: str) -> str:
@@ -510,7 +527,7 @@ def _safe_json_list(value: Any) -> list:
 
 
 def _normalized_customer_text(value: str) -> str:
-    text = re.sub(r"[^a-z0-9\s?]", " ", str(value or "").lower())
+    text = re.sub(r"[^a-z0-9\s]", " ", str(value or "").lower())
     text = re.sub(r"\s+", " ", text).strip()
     replacements = {
         "bary": "baray",
@@ -528,6 +545,21 @@ def _normalized_customer_text(value: str) -> str:
     }
     words = [replacements.get(word, word) for word in text.split()]
     return " ".join(words)
+
+
+def _product_match_text(value: str) -> str:
+    text = _normalized_customer_text(value)
+    stop_words = {
+        "price", "cost", "rate", "how", "much", "kitna", "kitnay", "kya", "kia",
+        "hai", "he", "please", "plz", "pls", "tell", "about", "bata", "sakty",
+        "hain", "main", "ke", "k", "ka", "ki", "product", "details", "detail",
+        "wrong", "answer",
+    }
+    return " ".join(word for word in text.split() if word not in stop_words)
+
+
+def _product_tokens(value: str) -> set[str]:
+    return {word for word in _product_match_text(value).split() if len(word) >= 3}
 
 
 def normalize_ai_decision(raw: dict | None) -> dict:
@@ -613,6 +645,10 @@ def _recent_product_context(messages: list[dict] | None, conversation: dict | No
         body = str((msg or {}).get("body") or "").strip()
         if not body or len(body) < 4:
             continue
+        detail_match = re.search(r"details (?:i found )?for ([^:\n]+)", body, flags=re.I)
+        if detail_match:
+            candidate = detail_match.group(1).strip()
+            return candidate[:120]
         if "tick bag" in body.lower() or "beanbag" in body.lower() or "bean bag" in body.lower():
             for sentence in re.split(r"[\n.!?]+", body):
                 sentence = sentence.strip()
@@ -627,6 +663,90 @@ def _recent_product_context(messages: list[dict] | None, conversation: dict | No
                 candidate = match.group(1).strip()
             return candidate[:120]
     return ""
+
+
+def _find_product_matches(query: str, messages: list[dict] | None = None, conversation: dict | None = None, limit: int = 4) -> list[dict]:
+    lookup_query = _product_match_text(query)
+    context = _recent_product_context(messages, conversation)
+    if len(_product_tokens(lookup_query)) < 1 and context:
+        lookup_query = _product_match_text(context)
+    query_tokens = _product_tokens(lookup_query)
+    if not query_tokens:
+        return []
+    matches = []
+    for item in get_product_source():
+        title = str(item.get("title") or item.get("product_title") or "")
+        haystack = " ".join([
+            title,
+            str(item.get("product_title") or ""),
+            str(item.get("variant_title") or ""),
+            str(item.get("sku") or ""),
+            str(item.get("handle") or ""),
+        ])
+        product_tokens = _product_tokens(haystack)
+        if not product_tokens:
+            continue
+        overlap = len(query_tokens & product_tokens)
+        if not overlap:
+            continue
+        score = overlap / max(len(query_tokens), 1)
+        if lookup_query and lookup_query in _product_match_text(haystack):
+            score += 0.75
+        if score >= 0.45 or overlap >= 2:
+            enriched = dict(item)
+            enriched["_score"] = score
+            matches.append(enriched)
+    matches.sort(key=lambda item: (item.get("_score") or 0, -len(str(item.get("title") or ""))), reverse=True)
+    return matches[:limit]
+
+
+def _format_money(value: Any) -> str:
+    try:
+        amount = float(value or 0)
+    except Exception:
+        amount = 0
+    if amount <= 0:
+        return "Price not available"
+    if amount.is_integer():
+        return f"PKR {int(amount):,}"
+    return f"PKR {amount:,.2f}".rstrip("0").rstrip(".")
+
+
+def _product_url(item: dict) -> str:
+    if item.get("product_url"):
+        return str(item.get("product_url") or "")
+    handle = str(item.get("handle") or "").strip()
+    return f"https://tickbags.com/products/{handle}" if handle else ""
+
+
+def _product_details_reply(matches: list[dict], query: str, asking_price: bool = False) -> str:
+    if not matches:
+        return ""
+    primary_title = str(matches[0].get("product_title") or matches[0].get("title") or "Product")
+    variants = []
+    seen = set()
+    for item in matches:
+        title = str(item.get("title") or primary_title)
+        price = _format_money(item.get("price"))
+        key = (title, price)
+        if key in seen:
+            continue
+        seen.add(key)
+        variants.append(f"- {title}: {price}")
+        if len(variants) >= 3:
+            break
+    url = _product_url(matches[0])
+    image = str(matches[0].get("image") or "").strip()
+    intro = f"Here are the actual details I found for {primary_title}:"
+    if asking_price:
+        intro = f"The current price details I found for {primary_title}:"
+    lines = [intro, *variants]
+    if url:
+        lines.append(f"Link: {url}")
+    if image:
+        lines.append(f"Image: {image}")
+    lines.append("Would you like to order this? Please share your name, phone number, complete address, and quantity.")
+    return "\n".join(lines)
 
 
 def _contextual_followup_reply(body: str, product_context: str, settings: dict) -> str:
@@ -659,6 +779,9 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
     payment_reply = settings.get("payment_method_reply") or "We mainly offer Cash on Delivery. Bank transfer can be arranged in special cases."
     product_context = _recent_product_context(messages, conversation)
     contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
+    asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
+    product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
+    product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
     if text.strip() in {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}:
         decision.update({
             "intent": "greeting",
@@ -720,6 +843,18 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "needs_human": False,
             "labels": ["ai"],
             "reply_text": "I am from TickBags support. Share the product you like or your order question and I will help.",
+        })
+    elif product_reply:
+        decision.update({
+            "intent": "price_question" if asking_price else "product_question",
+            "confidence": 0.90,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest"] + (["price_question"] if asking_price else []),
+            "reply_text": product_reply,
+            "order_state": "collecting_details",
+            "order_candidate": {"product": str(product_matches[0].get("product_title") or product_matches[0].get("title") or "")},
+            "product_attachment_url": str(product_matches[0].get("image") or ""),
         })
     elif contextual_reply:
         decision.update({
@@ -787,6 +922,9 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
     simple_greetings = {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}
     product_context = _recent_product_context(messages, conversation)
     contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
+    asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
+    product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
+    product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
     default_unavailable = (
         str(decision.get("escalation_reason") or "").strip().lower() == "ai decision unavailable."
         and not decision.get("reply_text")
@@ -823,6 +961,26 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             "needs_human": False,
             "labels": sorted(set((decision.get("labels") or []) + ["ai"])),
             "reply_text": "I am good, thank you. How can I help you with TickBags today?",
+            "escalation_reason": "",
+        })
+    elif product_reply and (
+        asking_price
+        or str(decision.get("intent") or "").lower() in {"product_question", "price_question"}
+        or not decision.get("reply_text")
+        or "share the product name" in str(decision.get("reply_text") or "").lower()
+        or "varies by size" in str(decision.get("reply_text") or "").lower()
+        or decision.get("needs_human")
+    ):
+        decision.update({
+            "intent": "price_question" if asking_price else "product_question",
+            "confidence": max(float(decision.get("confidence") or 0), 0.90),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["product_interest"] + (["price_question"] if asking_price else []))),
+            "reply_text": product_reply,
+            "order_state": decision.get("order_state") if decision.get("order_state") != "no_order" else "collecting_details",
+            "order_candidate": {"product": str(product_matches[0].get("product_title") or product_matches[0].get("title") or "")},
+            "product_attachment_url": str(product_matches[0].get("image") or ""),
             "escalation_reason": "",
         })
     elif contextual_reply and (
@@ -1205,19 +1363,44 @@ def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: s
     elif not reply:
         reply = fallback_reply(contact_phone or contact_key, body)
     if reply and not (rule and rule.get("hold_for_review")):
-        ok, provider_id, meta = send_channel_text_message(channel, contact_key, render_template_body(reply, contact_phone or contact_key))
+        rendered_reply = render_template_body(reply, contact_phone or contact_key)
+        product_image_url = str((locals().get("decision") or {}).get("product_attachment_url") or "").strip()
+        if product_image_url and channel == "whatsapp":
+            ok, provider_id, meta = send_channel_image_message(channel, contact_key, product_image_url, caption=rendered_reply)
+        else:
+            if product_image_url:
+                image_ok, image_provider_id, image_meta = send_channel_image_message(channel, contact_key, product_image_url)
+                if image_ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
+                    save_whatsapp_message(
+                        contact_key,
+                        "outbound",
+                        "[Image]",
+                        customer_name=customer_name,
+                        provider_message_id=image_provider_id if image_ok else "dry-run",
+                        metadata={"source": "auto_reply_product_image", "attachment_url": product_image_url, "dry_run": not image_ok, "meta": image_meta},
+                        channel=channel,
+                        display_handle=display_handle,
+                        contact_phone=contact_phone,
+                        sender_type="ai",
+                        message_type="image",
+                        attachments=[{"type": "image", "url": product_image_url}],
+                        ai_metadata={"decision": decision} if "decision" in locals() else {},
+                    )
+            ok, provider_id, meta = send_channel_text_message(channel, contact_key, rendered_reply)
         if ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
             save_whatsapp_message(
                 contact_key,
                 "outbound",
-                render_template_body(reply, contact_phone or contact_key),
+                rendered_reply,
                 customer_name=customer_name,
                 provider_message_id=provider_id if ok else "dry-run",
-                metadata={"source": "auto_reply", "rule_id": rule.get("id") if rule else None, "dry_run": not ok, "meta": meta},
+                metadata={"source": "auto_reply", "rule_id": rule.get("id") if rule else None, "dry_run": not ok, "meta": meta, "attachment_url": product_image_url},
                 channel=channel,
                 display_handle=display_handle,
                 contact_phone=contact_phone,
                 sender_type="ai" if rule and str(rule.get("id", "")).startswith("ai") else "system",
+                message_type="image" if product_image_url and channel == "whatsapp" else "text",
+                attachments=[{"type": "image", "url": product_image_url}] if product_image_url else [],
                 ai_metadata={"decision": decision} if "decision" in locals() else {},
             )
         else:

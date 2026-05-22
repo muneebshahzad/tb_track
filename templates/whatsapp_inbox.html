@@ -13,6 +13,7 @@
   .wa-layout { flex:1; min-height:0; display:grid; grid-template-columns:minmax(320px,31vw) minmax(0,1fr) 330px; gap:0; overflow:hidden; }
   .wa-pane { min-height:0; background:#111b21; border-right:1px solid #2a3942; display:flex; flex-direction:column; overflow:hidden; }
   .wa-pane:last-child { border-right:0; border-left:1px solid #2a3942; }
+  .mobile-list-header { display:none; }
   .wa-toolbar { padding:10px 12px; border-bottom:1px solid #222e35; display:flex; gap:8px; align-items:center; flex-wrap:wrap; background:#111b21; }
   .wa-search { width:100%; border:0; background:#202c33; color:#e9edef; border-radius:8px; padding:10px 12px; font:inherit; font-size:13px; outline:none; }
   .wa-search::placeholder { color:#8696a0; }
@@ -59,7 +60,14 @@
   .wa-btn.primary { background:#00a884; border-color:#00a884; color:#001f1a; }
   .wa-btn.blue { background:#00a884; border-color:#00a884; color:#001f1a; }
   .wa-btn:disabled { opacity:.5; cursor:not-allowed; }
-  .chat-body { min-height:0; flex:1; overflow:auto; padding:22px 6%; background:#0b141a; display:flex; flex-direction:column; gap:10px; }
+  .chat-body {
+    min-height:0; flex:1; overflow:auto; padding:22px 6%; background:#0b141a; display:flex; flex-direction:column; gap:10px;
+    background-image:
+      radial-gradient(circle at 18px 18px, rgba(255,255,255,.035) 1px, transparent 1px),
+      radial-gradient(circle at 72px 58px, rgba(255,255,255,.025) 1px, transparent 1px),
+      linear-gradient(135deg, rgba(255,255,255,.018) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.018) 75%);
+    background-size:96px 96px, 120px 120px, 44px 44px;
+  }
   .bubble-row { display:flex; }
   .bubble-row.outbound { justify-content:flex-end; }
   .bubble { max-width:min(620px,78%); border-radius:12px; padding:9px 11px; font-size:13px; line-height:1.45; box-shadow:0 1px 4px rgba(20,33,61,.06); }
@@ -99,14 +107,41 @@
     .wa-pane.chat-panel { transform:translateX(100%); transition:transform .18s ease; z-index:3; }
     .wa-shell.mobile-chat-open .wa-pane.conversations { transform:translateX(-30%); }
     .wa-shell.mobile-chat-open .wa-pane.chat-panel { transform:translateX(0); }
+    .mobile-list-header { display:flex; align-items:center; justify-content:space-between; padding:18px 18px 10px; background:#111b21; color:#e9edef; }
+    .mobile-list-title { font-size:28px; font-weight:900; letter-spacing:0; }
+    .mobile-list-actions { display:flex; gap:18px; color:#e9edef; font-size:24px; line-height:1; }
+    .wa-toolbar { padding:8px 18px 12px; gap:10px; border-bottom:1px solid #222e35; }
+    .wa-search { height:52px; border-radius:26px; padding:0 18px; font-size:15px; background:#202c33; }
+    .wa-channel-tabs, .wa-tabs { width:auto; overflow-x:auto; flex-wrap:nowrap; scrollbar-width:none; }
+    .wa-channel-tabs::-webkit-scrollbar, .wa-tabs::-webkit-scrollbar { display:none; }
+    .wa-channel-tab, .wa-tab { flex:0 0 auto; min-height:40px; padding:0 18px; font-size:14px; border-radius:22px; }
+    .wa-tab { min-width:82px; }
+    .wa-list { background:#111b21; }
+    .wa-convo { grid-template-columns:56px minmax(0,1fr) auto; gap:14px; padding:14px 18px; min-height:86px; border-bottom:0; align-items:center; }
+    .wa-convo.active { background:#111b21; }
+    .wa-avatar { width:56px; height:56px; font-size:16px; }
+    .wa-convo-name { font-size:17px; line-height:1.2; }
+    .wa-convo-msg { font-size:15px; margin-top:5px; color:#8696a0; }
+    .wa-convo-meta { gap:7px; justify-content:center; }
+    .wa-time { font-size:12px; font-family:'DM Sans', sans-serif; }
+    .wa-convo-meta .wa-status { display:none; }
+    .desktop-chat-id { display:none; }
+    .row-labels { display:none; }
+    .wa-unread { min-width:24px; height:24px; font-size:12px; background:#00a884; color:#001f1a; }
     .mobile-back { display:inline-flex; align-items:center; justify-content:center; }
-    .chat-head { grid-template-columns:32px 38px minmax(0,1fr); gap:8px; }
+    .chat-head { min-height:56px; grid-template-columns:34px 42px minmax(0,1fr); gap:8px; padding:7px 12px; }
+    .chat-name { font-size:17px; }
+    .chat-phone { font-family:'DM Sans', sans-serif; font-size:12px; }
     .chat-actions { display:none; }
     .chat-body { padding:18px 12px; }
-    .reply-actions { flex-wrap:nowrap; overflow-x:auto; justify-content:flex-start; }
-    .reply-box { padding:8px; }
-    .reply-box .wa-textarea { min-height:44px; max-height:96px; border-radius:22px; resize:none; }
+    .reply-box { display:grid; grid-template-columns:minmax(0,1fr) 44px 48px; align-items:center; gap:8px; padding:8px; }
+    .reply-box .wa-textarea { grid-column:1; min-height:44px; max-height:96px; border-radius:22px; resize:none; padding:11px 16px; background:#202c33; border:0; font-size:16px; }
+    .reply-actions { display:contents; }
     #sendHint, #draftBtn, #statusBtn { display:none; }
+    #imageBtn { grid-column:2; width:44px; min-height:44px; border-radius:50%; padding:0; font-size:0; background:#202c33; border:0; }
+    #imageBtn::before { content:'+'; font-size:28px; line-height:1; color:#aebac1; }
+    #sendBtn { grid-column:3; width:48px; min-height:48px; border-radius:50%; padding:0; font-size:0; }
+    #sendBtn::before { content:'>'; font-size:22px; line-height:1; transform:scaleX(1.25); }
     .bubble { max-width:88%; }
   }
 </style>
@@ -124,6 +159,10 @@
 
   <div class="wa-layout">
     <section class="wa-pane conversations">
+      <div class="mobile-list-header">
+        <div class="mobile-list-title">TickBot</div>
+        <div class="mobile-list-actions" aria-hidden="true"><span>+</span><span>⋮</span></div>
+      </div>
       <div class="wa-toolbar">
         <input class="wa-search" id="conversationSearch" placeholder="Search name, phone, labels, or chat ID" oninput="renderConversations()">
         <div class="wa-channel-tabs">
@@ -456,8 +495,8 @@ function renderConversations() {
       <div class="wa-avatar">${avatarMarkup(item)}</div>
       <div class="wa-convo-main">
         <div class="wa-convo-name">${escapeHtml(conversationIdentity(item).title)}</div>
-        <div class="wa-convo-msg">${escapeHtml(item.public_chat_id || '')} · ${item.last_direction === 'outbound' ? 'You: ' : ''}${escapeHtml(item.last_message || '')}</div>
-        <div class="chip-row">${labelsOf(item).slice(0, 3).map(label => `<span class="label-chip ${label === 'new_order' ? 'new-order' : ''}">${escapeHtml(label.replaceAll('_', ' '))}</span>`).join('')}</div>
+        <div class="wa-convo-msg"><span class="desktop-chat-id">${escapeHtml(item.public_chat_id || '')} · </span>${item.last_direction === 'outbound' ? 'You: ' : ''}${escapeHtml(item.last_message || '')}</div>
+        <div class="chip-row row-labels">${labelsOf(item).slice(0, 3).map(label => `<span class="label-chip ${label === 'new_order' ? 'new-order' : ''}">${escapeHtml(label.replaceAll('_', ' '))}</span>`).join('')}</div>
       </div>
       <div class="wa-convo-meta">
         <span class="wa-time">${escapeHtml(fmtTime(item.last_message_at))}</span>

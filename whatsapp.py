@@ -462,12 +462,20 @@ AI_LOCATION_PHRASES = (
 
 AI_SUGGESTION_PHRASES = (
     "suggest", "recommend", "which beanbag", "which bean bag", "beanbag",
-    "bean bag", "best one", "kon sa", "konsa",
+    "bean bag", "best one", "kon sa", "konsa", "mujhy product",
+    "mujhe product", "product ke bary", "product ke baray", "product ke barey",
+    "product ke baare", "product k bary", "product k baray", "product k barey",
+    "product k baare", "product bata", "product bta", "bary main bata",
+    "baray main bata", "barey main bata", "baare main bata", "bata skty",
+    "bata sakty", "bta skty", "bta sakty",
 )
 
 AI_SMALL_TALK_PHRASES = (
     "how are you", "how r u", "how are u", "how are you doing", "how r you",
     "kaise ho", "kaisay ho", "kesay ho", "kese ho", "ap kese", "aap kese",
+    "kia haal hai", "kya haal hai", "kia hal hai", "kya hal hai",
+    "ka haal hai", "ap ka kia haal", "aap ka kia haal", "ap ka kya haal",
+    "aap ka kya haal", "apka kia haal", "apka kya haal",
 )
 
 AI_FOLLOWUP_PHRASES = (
@@ -499,6 +507,27 @@ def _safe_json_list(value: Any) -> list:
         return parsed if isinstance(parsed, list) else []
     except Exception:
         return []
+
+
+def _normalized_customer_text(value: str) -> str:
+    text = re.sub(r"[^a-z0-9\s?]", " ", str(value or "").lower())
+    text = re.sub(r"\s+", " ", text).strip()
+    replacements = {
+        "bary": "baray",
+        "barey": "baray",
+        "baare": "baray",
+        "baryy": "baray",
+        "skty": "sakty",
+        "skte": "sakty",
+        "sktay": "sakty",
+        "bta": "bata",
+        "mujhy": "mujhe",
+        "mjy": "mujhe",
+        "kia": "kya",
+        "hal": "haal",
+    }
+    words = [replacements.get(word, word) for word in text.split()]
+    return " ".join(words)
 
 
 def normalize_ai_decision(raw: dict | None) -> dict:
@@ -601,7 +630,7 @@ def _recent_product_context(messages: list[dict] | None, conversation: dict | No
 
 
 def _contextual_followup_reply(body: str, product_context: str, settings: dict) -> str:
-    text = (body or "").lower()
+    text = _normalized_customer_text(body)
     subject = f"this product ({product_context})" if product_context else "this product"
     if any(word in text for word in ("material", "fabric", "which fabric")):
         return (
@@ -622,7 +651,7 @@ def _contextual_followup_reply(body: str, product_context: str, settings: dict) 
 
 
 def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
-    text = (body or "").lower()
+    text = _normalized_customer_text(body)
     decision = dict(AI_DECISION_DEFAULT)
     decision.update({"needs_human": False, "labels": [], "confidence": 0.72, "should_auto_reply": False})
     delivery_reply = settings.get("delivery_time_reply") or "Our usual delivery time is 3 to 7 working days depending on your city and order type."
@@ -724,7 +753,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "should_auto_reply": True,
             "needs_human": False,
             "labels": ["product_interest"],
-            "reply_text": "Sure. Please share your room size or the beanbag style you like, and I will suggest a suitable option.",
+            "reply_text": "Ji bilkul. TickBags mein bean bags, ottomans, floor cushions, aur home decor options available hain. Aap kis product ke baare mein details chahte hain, ya product ka screenshot/link share kar dein.",
             "order_state": "collecting_details",
         })
     elif any(word in text for word in ("order", "buy", "want this", "address", "phone", "name")):
@@ -754,7 +783,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
 
 
 def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
-    text = (body or "").strip().lower()
+    text = _normalized_customer_text(body)
     simple_greetings = {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}
     product_context = _recent_product_context(messages, conversation)
     contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""

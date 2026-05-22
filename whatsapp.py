@@ -912,7 +912,7 @@ def verify_meta_signature(req) -> bool:
 
 @whatsapp_bp.route("/whatsapp/inbox")
 def inbox():
-    return render_template("whatsapp_inbox.html")
+    return render_template("whatsapp_inbox.html", embedded_mode=True, skip_base_password_prompt=True)
 
 
 @whatsapp_bp.route("/api/whatsapp/conversations")

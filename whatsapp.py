@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Any
@@ -469,6 +470,12 @@ AI_SMALL_TALK_PHRASES = (
     "kaise ho", "kaisay ho", "kesay ho", "kese ho", "ap kese", "aap kese",
 )
 
+AI_FOLLOWUP_PHRASES = (
+    "material", "fabric", "which fabric", "filling", "filled with", "color",
+    "colors", "size", "dimensions", "price", "cost", "rate", "delivery",
+    "deliver", "warranty",
+)
+
 
 def _safe_json_dict(value: Any) -> dict:
     if isinstance(value, dict):
@@ -567,13 +574,62 @@ def build_ai_context(conversation: dict, messages: list[dict], orders: list[dict
     }
 
 
-def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
+def _recent_product_context(messages: list[dict] | None, conversation: dict | None = None) -> str:
+    candidate = ""
+    order_candidate = _safe_json_dict((conversation or {}).get("order_candidate"))
+    for key in ("product", "product_link", "product_image_reference"):
+        if order_candidate.get(key):
+            return str(order_candidate[key]).strip()[:120]
+    for msg in reversed(messages or []):
+        body = str((msg or {}).get("body") or "").strip()
+        if not body or len(body) < 4:
+            continue
+        if "tick bag" in body.lower() or "beanbag" in body.lower() or "bean bag" in body.lower():
+            for sentence in re.split(r"[\n.!?]+", body):
+                sentence = sentence.strip()
+                if "tick bag" in sentence.lower() or "beanbag" in sentence.lower() or "bean bag" in sentence.lower():
+                    candidate = sentence
+                    break
+        if not candidate and ("tickbags.com" in body.lower() or "http" in body.lower()):
+            candidate = body
+        if candidate:
+            match = re.match(r"^(?:the\s+)?(.+?)\s+(?:is|with price|costs|comes|has|features)\b", candidate, flags=re.I)
+            if match:
+                candidate = match.group(1).strip()
+            return candidate[:120]
+    return ""
+
+
+def _contextual_followup_reply(body: str, product_context: str, settings: dict) -> str:
+    text = (body or "").lower()
+    subject = f"this product ({product_context})" if product_context else "this product"
+    if any(word in text for word in ("material", "fabric", "which fabric")):
+        return (
+            f"For {subject}, I do not have the exact fabric name saved in our system yet. "
+            "It is a durable upholstery-style fabric made for regular use. I can confirm the exact fabric/color option for you."
+        )
+    if any(word in text for word in ("filling", "filled with")):
+        return f"For {subject}, the filling detail is not saved here yet. I can have the team confirm the exact filling before you order."
+    if any(word in text for word in ("color", "colors")):
+        return f"For {subject}, please share the color you prefer and I will check available options."
+    if any(word in text for word in ("size", "dimensions")):
+        return f"For {subject}, I can check the exact size. Please confirm if you want the standard size or a larger option."
+    if any(word in text for word in ("price", "cost", "rate")):
+        return settings.get("price_reply") or f"Please share the exact variant for {subject}, and I will confirm the latest price."
+    if any(word in text for word in ("delivery", "deliver")):
+        return settings.get("delivery_time_reply") or "Our usual delivery time is 3 to 7 working days depending on your city and order type."
+    return ""
+
+
+def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
     text = (body or "").lower()
     decision = dict(AI_DECISION_DEFAULT)
     decision.update({"needs_human": False, "labels": [], "confidence": 0.72, "should_auto_reply": False})
     delivery_reply = settings.get("delivery_time_reply") or "Our usual delivery time is 3 to 7 working days depending on your city and order type."
     price_reply = settings.get("price_reply") or "Please share the product name, picture, or link and I will confirm the latest price."
     payment_reply = settings.get("payment_method_reply") or "We mainly offer Cash on Delivery. Bank transfer can be arranged in special cases."
+    product_context = _recent_product_context(messages, conversation)
+    contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
     if text.strip() in {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}:
         decision.update({
             "intent": "greeting",
@@ -636,6 +692,16 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
             "labels": ["ai"],
             "reply_text": "I am from TickBags support. Share the product you like or your order question and I will help.",
         })
+    elif contextual_reply:
+        decision.update({
+            "intent": "product_question",
+            "confidence": 0.86,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest"],
+            "reply_text": contextual_reply,
+            "order_state": "collecting_details",
+        })
     elif any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay")):
         decision.update({"intent": "price_question", "confidence": 0.86, "labels": ["price_question"], "reply_text": price_reply, "should_auto_reply": True})
     elif any(word in text for word in ("delivery", "deliver", "kitne din", "days")):
@@ -687,9 +753,11 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
     return normalize_ai_decision(decision)
 
 
-def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict) -> dict:
+def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
     text = (body or "").strip().lower()
     simple_greetings = {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}
+    product_context = _recent_product_context(messages, conversation)
+    contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
     default_unavailable = (
         str(decision.get("escalation_reason") or "").strip().lower() == "ai decision unavailable."
         and not decision.get("reply_text")
@@ -707,7 +775,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict) -> di
         )
     )
     if (default_unavailable or soft_unknown_escalation or (decision.get("needs_human") and safe_sales_question)) and not any(word in text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES):
-        decision = heuristic_ai_decision("", body, settings)
+        decision = heuristic_ai_decision("", body, settings, messages=messages, conversation=conversation)
     if text in simple_greetings:
         decision.update({
             "intent": "greeting",
@@ -726,6 +794,21 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict) -> di
             "needs_human": False,
             "labels": sorted(set((decision.get("labels") or []) + ["ai"])),
             "reply_text": "I am good, thank you. How can I help you with TickBags today?",
+            "escalation_reason": "",
+        })
+    elif contextual_reply and (
+        not decision.get("reply_text")
+        or "share the product name" in str(decision.get("reply_text") or "").lower()
+        or decision.get("needs_human")
+    ):
+        decision.update({
+            "intent": "product_question",
+            "confidence": max(float(decision.get("confidence") or 0), 0.86),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["product_interest"])),
+            "reply_text": contextual_reply,
+            "order_state": decision.get("order_state") if decision.get("order_state") != "no_order" else "collecting_details",
             "escalation_reason": "",
         })
     elif any(phrase in text for phrase in ("why don't you", "why dont you", "no reply", "reply?", "respond")):
@@ -760,7 +843,13 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
     orders = customer_orders_for_conversation(conversation)
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return strengthen_safe_ai_decision(body, heuristic_ai_decision(channel, body, settings), settings)
+        return strengthen_safe_ai_decision(
+            body,
+            heuristic_ai_decision(channel, body, settings, messages=messages, conversation=conversation),
+            settings,
+            messages=messages,
+            conversation=conversation,
+        )
     system_prompt = (
         "You are TickBot, a warm, persuasive, professional sales/support agent for TickBags. "
         "Return only valid JSON. Never mention being AI. Reply in the customer's language when possible: English, Urdu, or Roman Urdu. "
@@ -807,12 +896,24 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         data = response.json() if response.content else {}
         if response.ok:
             content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "{}").strip()
-            return strengthen_safe_ai_decision(body, normalize_ai_decision(json.loads(content)), settings)
+            return strengthen_safe_ai_decision(
+                body,
+                normalize_ai_decision(json.loads(content)),
+                settings,
+                messages=messages,
+                conversation=conversation,
+            )
     except Exception as e:
-        safe = heuristic_ai_decision(channel, body, settings)
+        safe = heuristic_ai_decision(channel, body, settings, messages=messages, conversation=conversation)
         safe["internal_note"] = f"AI provider failed safely: {e}"
-        return strengthen_safe_ai_decision(body, safe, settings)
-    return strengthen_safe_ai_decision(body, heuristic_ai_decision(channel, body, settings), settings)
+        return strengthen_safe_ai_decision(body, safe, settings, messages=messages, conversation=conversation)
+    return strengthen_safe_ai_decision(
+        body,
+        heuristic_ai_decision(channel, body, settings, messages=messages, conversation=conversation),
+        settings,
+        messages=messages,
+        conversation=conversation,
+    )
 
 
 def should_auto_send_ai_reply(conversation: dict, decision: dict, settings: dict) -> bool:

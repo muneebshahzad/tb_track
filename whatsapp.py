@@ -546,7 +546,25 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
     text = (body or "").lower()
     decision = dict(AI_DECISION_DEFAULT)
     decision.update({"needs_human": False, "labels": [], "confidence": 0.72, "should_auto_reply": False})
-    if "[image]" in text:
+    if text.strip() in {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}:
+        decision.update({
+            "intent": "greeting",
+            "confidence": 0.94,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["ai"],
+            "reply_text": "Hi! How can I help you with TickBags today?",
+        })
+    elif any(phrase in text for phrase in ("why don't you", "why dont you", "no reply", "reply?", "respond", "where are you")):
+        decision.update({
+            "intent": "greeting",
+            "confidence": 0.88,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["ai"],
+            "reply_text": "Sorry for the delay. I am here now. How can I help you with your TickBags order or product?",
+        })
+    elif "[image]" in text:
         decision.update({
             "intent": "product_question",
             "labels": ["unclear_product", "image_received"],
@@ -591,6 +609,34 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict) -> dict:
     return normalize_ai_decision(decision)
 
 
+def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict) -> dict:
+    text = (body or "").strip().lower()
+    simple_greetings = {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}
+    if text in simple_greetings:
+        decision.update({
+            "intent": "greeting",
+            "confidence": max(float(decision.get("confidence") or 0), 0.94),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["ai"])),
+            "reply_text": decision.get("reply_text") or "Hi! How can I help you with TickBags today?",
+            "escalation_reason": "",
+        })
+    elif any(phrase in text for phrase in ("why don't you", "why dont you", "no reply", "reply?", "respond")):
+        decision.update({
+            "intent": "greeting",
+            "confidence": max(float(decision.get("confidence") or 0), 0.88),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["ai"])),
+            "reply_text": decision.get("reply_text") or "Sorry for the delay. I am here now. How can I help you with your TickBags order or product?",
+            "escalation_reason": "",
+        })
+    elif decision.get("needs_human") and not decision.get("reply_text"):
+        decision["reply_text"] = settings.get("escalation_reply") or settings.get("human_handoff_reply") or "Let me have our team check this and reply with the correct details."
+    return normalize_ai_decision(decision)
+
+
 def analyze_inbound_message(channel: str, contact_key: str, body: str, conversation: dict | None = None) -> dict:
     settings = get_whatsapp_settings()
     conversation = conversation or get_conversation_by_any_key(contact_key) or {}
@@ -598,7 +644,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
     orders = customer_orders_for_conversation(conversation)
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return heuristic_ai_decision(channel, body, settings)
+        return strengthen_safe_ai_decision(body, heuristic_ai_decision(channel, body, settings), settings)
     system_prompt = (
         "You are TickBot, a warm, persuasive, professional sales/support agent for TickBags. "
         "Return only valid JSON. Never mention being AI. Reply in the customer's language when possible: English, Urdu, or Roman Urdu. "
@@ -645,12 +691,12 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         data = response.json() if response.content else {}
         if response.ok:
             content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "{}").strip()
-            return normalize_ai_decision(json.loads(content))
+            return strengthen_safe_ai_decision(body, normalize_ai_decision(json.loads(content)), settings)
     except Exception as e:
         safe = heuristic_ai_decision(channel, body, settings)
         safe["internal_note"] = f"AI provider failed safely: {e}"
-        return safe
-    return heuristic_ai_decision(channel, body, settings)
+        return strengthen_safe_ai_decision(body, safe, settings)
+    return strengthen_safe_ai_decision(body, heuristic_ai_decision(channel, body, settings), settings)
 
 
 def should_auto_send_ai_reply(conversation: dict, decision: dict, settings: dict) -> bool:
@@ -927,6 +973,25 @@ def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: s
                 contact_phone=contact_phone,
                 sender_type="ai" if rule and str(rule.get("id", "")).startswith("ai") else "system",
                 ai_metadata={"decision": decision} if "decision" in locals() else {},
+            )
+        else:
+            save_whatsapp_message(
+                contact_key,
+                "outbound",
+                f"AI reply failed to send: {provider_id}",
+                customer_name=customer_name,
+                provider_message_id="send-failed",
+                metadata={"source": "auto_reply_send_failed", "error": provider_id, "meta": meta},
+                channel=channel,
+                display_handle=display_handle,
+                contact_phone=contact_phone,
+                sender_type="system",
+                internal_only=True,
+                ai_metadata={"decision": decision} if "decision" in locals() else {},
+            )
+            save_internal_assistant_message(
+                f"AI reply failed for {contact_key}: {provider_id}",
+                metadata={"source": "auto_reply_send_failed", "conversation": contact_key, "meta": meta},
             )
 
 

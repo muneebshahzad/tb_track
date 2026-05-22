@@ -227,6 +227,25 @@ let messagesLoading = false;
 const conversationShadow = new Map();
 const MISSING_CONVERSATION_GRACE_MS = 45000;
 
+function conversationIdentity(item) {
+  const channel = item?.channel || 'whatsapp';
+  const name = (item?.customer_name || '').trim();
+  const handle = (item?.display_handle || '').trim();
+  const phone = (item?.contact_phone || item?.phone || '').trim();
+  if (channel === 'whatsapp') {
+    return {
+      title: name || phone || 'WhatsApp customer',
+      subtitle: phone || handle || 'WhatsApp',
+    };
+  }
+  const cleanHandle = handle && handle !== name ? handle : '';
+  const fallbackHandle = (item?.phone || '').replace(`${channel}:`, '@');
+  return {
+    title: name || cleanHandle || `${channelLabel(channel)} user`,
+    subtitle: cleanHandle || fallbackHandle || channelLabel(channel),
+  };
+}
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
@@ -334,7 +353,7 @@ function renderConversations() {
     <button class="wa-convo ${item.phone === selectedPhone ? 'active' : ''}" onclick="selectConversation('${escapeHtml(item.phone)}')">
       <div class="wa-avatar">${avatarMarkup(item)}</div>
       <div class="wa-convo-main">
-        <div class="wa-convo-name">${escapeHtml(item.customer_name || item.phone)}</div>
+        <div class="wa-convo-name">${escapeHtml(conversationIdentity(item).title)}</div>
         <div class="wa-convo-msg">${item.last_direction === 'outbound' ? 'You: ' : ''}${escapeHtml(item.last_message || '')}</div>
       </div>
       <div class="wa-convo-meta">
@@ -386,9 +405,9 @@ async function selectConversation(phone, options = {}) {
   selectedConversation = conversation;
   selectedChannel = conversation.channel || 'whatsapp';
   renderConversations();
-  document.getElementById('chatName').textContent = conversation.customer_name || phone;
-  const handle = conversation.display_handle || phone;
-  document.getElementById('chatPhone').textContent = `${channelLabel(selectedChannel)} · ${handle}`;
+  const identity = conversationIdentity(conversation);
+  document.getElementById('chatName').textContent = identity.title;
+  document.getElementById('chatPhone').textContent = `${channelLabel(selectedChannel)} · ${identity.subtitle}`;
   const chatAvatar = document.getElementById('chatAvatar');
   chatAvatar.innerHTML = avatarMarkup(conversation);
   if (!conversation.avatar_url) {
@@ -401,9 +420,7 @@ async function selectConversation(phone, options = {}) {
   document.getElementById('statusBtn').disabled = false;
   document.getElementById('imageBtn').disabled = false;
   await loadMessages();
-  if (!options.skipReloadConversations) {
-    await loadConversations(true);
-  }
+  if (!options.skipReloadConversations) await loadConversations(false);
 }
 
 async function loadMessages() {
@@ -414,7 +431,15 @@ async function loadMessages() {
     const response = await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/messages`);
     const payload = await response.json();
     if (requestId !== messagesRequestId) return;
-    selectedConversation = payload.conversation || selectedConversation;
+    if (payload.conversation) {
+      selectedConversation = payload.conversation;
+      const existing = conversationShadow.get(payload.conversation.phone);
+      conversationShadow.set(payload.conversation.phone, { item: payload.conversation, missingSince: existing ? existing.missingSince : null });
+      conversations = stableConversationsFromSnapshot(
+        conversations.map(item => item.phone === payload.conversation.phone ? payload.conversation : item)
+      );
+      renderConversations();
+    }
     messages = payload.messages || [];
     orders = payload.orders || [];
     renderMessages();
@@ -693,10 +718,10 @@ loadRules();
 loadTemplates();
 loadBlasts();
 loadInboxSettings();
-window.setInterval(() => {
+window.setInterval(async () => {
   if (document.hidden || conversationsLoading || messagesLoading) return;
-  loadConversations(false);
-  if (selectedPhone) loadMessages();
+  await loadConversations(false);
+  if (selectedPhone) await loadMessages();
 }, 12000);
 </script>
 {% endblock %}

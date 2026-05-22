@@ -36,6 +36,7 @@ from db import (
 whatsapp_bp = Blueprint("whatsapp", __name__, template_folder="templates")
 UPLOAD_DIR_NAME = "whatsapp_uploads"
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+SOCIAL_PROFILE_CACHE: dict[tuple[str, str], dict[str, str]] = {}
 
 
 def _json_default(value):
@@ -80,12 +81,69 @@ def meta_error_message(data: dict, fallback_text: str = "") -> str:
     return message
 
 
+def get_whatsapp_access_token() -> str:
+    return (
+        os.getenv("WHATSAPP_ACCESS_TOKEN")
+        or os.getenv("META_WHATSAPP_TOKEN")
+        or os.getenv("META_WHATSAPP_ACCESS_TOKEN")
+        or ""
+    ).strip()
+
+
+def get_whatsapp_phone_number_id() -> str:
+    return (
+        os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        or os.getenv("META_WHATSAPP_PHONE_NUMBER_ID")
+        or ""
+    ).strip()
+
+
 def channel_label(channel: str) -> str:
     return {
         "whatsapp": "WhatsApp",
         "facebook": "Facebook",
         "instagram": "Instagram",
     }.get(str(channel or "").lower(), "Inbox")
+
+
+def fetch_social_profile(sender_id: str, channel: str) -> dict[str, str]:
+    sender_id = str(sender_id or "").strip()
+    channel = str(channel or "").strip().lower() or "facebook"
+    if not sender_id or channel not in {"facebook", "instagram"}:
+        return {}
+    cache_key = (channel, sender_id)
+    cached = SOCIAL_PROFILE_CACHE.get(cache_key)
+    if cached:
+        return dict(cached)
+
+    token = (os.getenv("META_PAGE_ACCESS_TOKEN") or os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN") or "").strip()
+    api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
+    if not token:
+        return {}
+
+    fields = "name,profile_pic"
+    if channel == "instagram":
+        fields = "username,name,profile_pic"
+
+    try:
+        response = requests.get(
+            f"https://graph.facebook.com/{api_version}/{sender_id}",
+            params={"fields": fields},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        data = response.json() if response.content else {}
+        if not response.ok:
+            return {}
+        profile = {
+            "name": str(data.get("name") or "").strip(),
+            "username": str(data.get("username") or "").strip(),
+            "profile_pic": str(data.get("profile_pic") or "").strip(),
+        }
+        SOCIAL_PROFILE_CACHE[cache_key] = profile
+        return dict(profile)
+    except Exception:
+        return {}
 
 
 def get_upload_dir() -> Path:
@@ -346,8 +404,8 @@ def ai_reply_for_message(channel: str, contact_key: str, body: str, conversation
 
 
 def send_meta_text_message(phone: str, body: str) -> tuple[bool, str, dict]:
-    token = os.getenv("META_WHATSAPP_TOKEN") or os.getenv("WHATSAPP_ACCESS_TOKEN")
-    phone_number_id = os.getenv("META_WHATSAPP_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    token = get_whatsapp_access_token()
+    phone_number_id = get_whatsapp_phone_number_id()
     api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
 
     if not token or not phone_number_id:
@@ -417,8 +475,8 @@ def send_channel_image_message(channel: str, contact_key: str, image_url: str, c
     if not image_url:
         return False, "Image URL missing.", {}
     if channel == "whatsapp":
-        token = os.getenv("META_WHATSAPP_TOKEN") or os.getenv("WHATSAPP_ACCESS_TOKEN")
-        phone_number_id = os.getenv("META_WHATSAPP_PHONE_NUMBER_ID") or os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        token = get_whatsapp_access_token()
+        phone_number_id = get_whatsapp_phone_number_id()
         api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
         if not token or not phone_number_id:
             return False, "Meta WhatsApp credentials are not configured.", {}
@@ -846,13 +904,20 @@ def meta_social_webhook():
             sender_id = str(sender.get("id") or "").strip()
             if not sender_id:
                 continue
+            profile = fetch_social_profile(sender_id, channel)
             customer_name = (
-                ((event.get("sender") or {}).get("name"))
+                profile.get("name")
+                or profile.get("username")
+                or ((event.get("sender") or {}).get("name"))
                 or ((event.get("profile") or {}).get("name"))
                 or f"{channel_label(channel)} user"
             )
             contact_key = normalize_inbox_contact_key(channel, sender_id)
-            display_handle = f"{channel_label(channel)} · {sender_id[-6:]}" if sender_id else channel_label(channel)
+            display_handle = (
+                (f"@{profile.get('username')}" if profile.get("username") else "")
+                or profile.get("name")
+                or (f"{channel_label(channel)} · {sender_id[-6:]}" if sender_id else channel_label(channel))
+            )
             body = text
             metadata = {
                 "webhook": True,
@@ -861,6 +926,8 @@ def meta_social_webhook():
                 "recipient_id": recipient.get("id") or "",
                 "timestamp": event.get("timestamp"),
             }
+            if profile.get("profile_pic"):
+                metadata["profile_pic"] = profile["profile_pic"]
             if attachments:
                 image = next((item for item in attachments if (item or {}).get("type") == "image"), None)
                 if image:

@@ -585,6 +585,11 @@ AI_AVAILABILITY_PHRASES = (
     "mil jaye ga", "hai kya", "hy kya", "ye hai", "is this available",
 )
 
+AI_BROAD_CATEGORY_TERMS = (
+    "bean bag", "bean bags", "beanbag", "beanbags", "ottoman", "ottomans",
+    "floor cushion", "floor cushions", "cushion", "cushions", "home decor",
+)
+
 
 def _safe_json_dict(value: Any) -> dict:
     if isinstance(value, dict):
@@ -785,6 +790,16 @@ def _image_availability_reply() -> str:
 
 def _availability_without_product_reply() -> str:
     return "Ji, availability confirm karne ke liye product ka name, link ya picture send kar dein. Main latest price aur stock check kar dunga."
+
+
+def _broad_category_availability_reply(text: str) -> str:
+    if any(word in text for word in ("salam", "assalam", "hello", "hi", "hey")):
+        return "Hello! Yes, bean bags are available. Please share which color/size you want, or send the product picture/link and I will guide you."
+    return "Yes, bean bags are available. Please share your preferred color/size, or send the product picture/link and I will guide you."
+
+
+def _is_broad_category_availability(text: str) -> bool:
+    return any(phrase in text for phrase in AI_AVAILABILITY_PHRASES) and any(term in text for term in AI_BROAD_CATEGORY_TERMS)
 
 
 def _find_product_matches(query: str, messages: list[dict] | None = None, conversation: dict | None = None, limit: int = 4) -> list[dict]:
@@ -1264,6 +1279,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
     labels = set(decision.get("labels") or [])
     risk_hit = any(word in text for word in AI_RISK_PHRASES)
     outside_scope = any(word in text for word in AI_OUT_OF_SCOPE_PHRASES)
+    broad_category_availability = _is_broad_category_availability(text)
     if risk_hit or outside_scope:
         labels.add("needs_human")
         if risk_hit:
@@ -1279,6 +1295,26 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
         })
         return normalize_ai_decision(decision)
 
+    reply_lower = str(decision.get("reply_text") or "").lower()
+    handoff_reply = (
+        "team check" in reply_lower
+        or "correct details" in reply_lower
+        or "reply shortly" in reply_lower
+        or "human" in reply_lower and "check" in reply_lower
+    )
+    if broad_category_availability and (decision.get("needs_human") or handoff_reply or not decision.get("reply_text")):
+        decision.update({
+            "intent": "product_question",
+            "needs_human": False,
+            "should_auto_reply": True,
+            "confidence": max(float(decision.get("confidence") or 0), 0.82),
+            "labels": sorted(labels | {"ai", "product_interest"}),
+            "reply_text": _broad_category_availability_reply(text),
+            "order_state": "collecting_details",
+            "escalation_reason": "",
+        })
+        return normalize_ai_decision(decision)
+
     if decision.get("reply_text") and not decision.get("needs_human"):
         decision["should_auto_reply"] = True
         decision["confidence"] = max(float(decision.get("confidence") or 0), 0.72)
@@ -1286,7 +1322,6 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
     if decision.get("needs_human") and not decision.get("reply_text"):
         decision["reply_text"] = settings.get("escalation_reply") or settings.get("human_handoff_reply") or "Let me have our team check this and reply with the correct details."
 
-    reply_lower = str(decision.get("reply_text") or "").lower()
     if "order confirmed" in reply_lower and str((conversation or {}).get("order_state") or "") != "order_added":
         decision.update({
             "needs_human": True,
@@ -1352,8 +1387,9 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         "Return only valid JSON. Never mention being AI. Reply in the customer's language when possible: English, Urdu, or Roman Urdu. "
         "Talk naturally like a good customer support rep. Basic greetings, small talk, and style/color recommendations are allowed. "
         "Do not force every message into product collection. If the customer is just greeting or chatting, respond warmly and briefly. "
+        "TickBags sells bean bags, ottomans, floor cushions, and home decor. For broad category questions like 'bean bags available?', it is safe to say yes and ask the customer for color/size or a product picture/link. "
         "When the customer asks for product details, price, stock, image, or link, use matched_products/product context only. "
-        "If matched_products is empty, ask for the product name, link, screenshot, or picture instead of inventing facts. "
+        "If matched_products is empty for exact price, exact stock, exact variant, or exact product details, ask for the product name, link, screenshot, or picture instead of inventing facts. "
         "Collect order details only when the customer shows buying intent: product, name, phone, complete address, quantity, and variant/color. "
         "Never invent prices, availability, discounts, delivery promises, tracking, refund policy, or order status. "
         "Never say an order is confirmed unless order_state is already order_added or a real order exists in recent_orders. "

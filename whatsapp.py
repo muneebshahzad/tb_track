@@ -1221,6 +1221,67 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
     return normalize_ai_decision(decision)
 
 
+def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
+    """Keep GPT in charge of wording while enforcing business safety rules."""
+    text = _normalized_customer_text(body)
+    decision = normalize_ai_decision(decision)
+    labels = set(decision.get("labels") or [])
+    risk_hit = any(word in text for word in AI_RISK_PHRASES)
+    outside_scope = any(word in text for word in AI_OUT_OF_SCOPE_PHRASES)
+    if risk_hit or outside_scope:
+        labels.add("needs_human")
+        if risk_hit:
+            labels.add("complaint")
+        if outside_scope:
+            labels.add("outside_policy")
+        decision.update({
+            "needs_human": True,
+            "should_auto_reply": False,
+            "labels": sorted(labels),
+            "escalation_reason": decision.get("escalation_reason") or "Message requires human review.",
+            "reply_text": settings.get("escalation_reply") or settings.get("human_handoff_reply") or "Let me have our team check this and reply with the correct details.",
+        })
+        return normalize_ai_decision(decision)
+
+    if decision.get("reply_text") and not decision.get("needs_human"):
+        decision["should_auto_reply"] = True
+        decision["confidence"] = max(float(decision.get("confidence") or 0), 0.72)
+
+    if decision.get("needs_human") and not decision.get("reply_text"):
+        decision["reply_text"] = settings.get("escalation_reply") or settings.get("human_handoff_reply") or "Let me have our team check this and reply with the correct details."
+
+    reply_lower = str(decision.get("reply_text") or "").lower()
+    if "order confirmed" in reply_lower and str((conversation or {}).get("order_state") or "") != "order_added":
+        decision.update({
+            "needs_human": True,
+            "should_auto_reply": False,
+            "labels": sorted(labels | {"needs_human", "pending_human_order_creation"}),
+            "escalation_reason": "GPT attempted to confirm an order before human/Shopify confirmation.",
+            "reply_text": settings.get("escalation_reply") or "Let me have our team check this and reply with the correct details.",
+        })
+        return normalize_ai_decision(decision)
+
+    product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
+    if product_matches:
+        decision["product_attachment_url"] = str(product_matches[0].get("image") or "")
+        order_candidate = decision.get("order_candidate") if isinstance(decision.get("order_candidate"), dict) else {}
+        order_candidate.setdefault("product", str(product_matches[0].get("product_title") or product_matches[0].get("title") or ""))
+        order_candidate.setdefault("product_link", _product_url(product_matches[0]))
+        decision["order_candidate"] = order_candidate
+
+    asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
+    if asking_price and "pkr" in reply_lower and not product_matches:
+        decision.update({
+            "needs_human": False,
+            "should_auto_reply": True,
+            "confidence": max(float(decision.get("confidence") or 0), 0.72),
+            "labels": sorted(labels | {"price_question"}),
+            "reply_text": settings.get("price_reply") or "Please share the product name, picture, or link and I will confirm the latest price.",
+        })
+
+    return normalize_ai_decision(decision)
+
+
 def analyze_inbound_message(channel: str, contact_key: str, body: str, conversation: dict | None = None) -> dict:
     settings = get_whatsapp_settings()
     conversation = conversation or get_conversation_by_any_key(contact_key) or {}
@@ -1235,14 +1296,33 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
             messages=messages,
             conversation=conversation,
         )
+    context = build_ai_context(conversation, messages, orders, settings)
+    product_matches = _find_product_matches(body, messages=messages, conversation=conversation, limit=5)
+    context["matched_products"] = [
+        {
+            "title": item.get("title"),
+            "product_title": item.get("product_title"),
+            "variant_title": item.get("variant_title"),
+            "price": _format_money(item.get("price")),
+            "available": item.get("available"),
+            "product_url": _product_url(item),
+            "image": item.get("image"),
+        }
+        for item in product_matches
+    ]
     system_prompt = (
-        "You are TickBot, a warm, persuasive, professional sales/support agent for TickBags. "
+        "You are TickBot, a warm, human-sounding chat support and sales representative for TickBags.com. "
+        "Your core purpose is to help customers choose products, place orders, track orders, and get safe support. "
         "Return only valid JSON. Never mention being AI. Reply in the customer's language when possible: English, Urdu, or Roman Urdu. "
-        "Keep replies short and natural. Collect order details when the customer shows buying intent. "
-        "Do not invent product availability, prices, discounts, delivery promises, tracking, refunds, or policies. "
-        "If unsure or risky, set needs_human=true. Never say an order is confirmed unless order_state is already order_added or a real order exists. "
-        "If complete order details are present, set order_state=new_order and label new_order. "
-        "Escalate angry customers, refunds, damaged items, payment issues, unclear products, legal threats, or anything outside TickBags/products/orders/support."
+        "Talk naturally like a good customer support rep. Basic greetings, small talk, and style/color recommendations are allowed. "
+        "Do not force every message into product collection. If the customer is just greeting or chatting, respond warmly and briefly. "
+        "When the customer asks for product details, price, stock, image, or link, use matched_products/product context only. "
+        "If matched_products is empty, ask for the product name, link, screenshot, or picture instead of inventing facts. "
+        "Collect order details only when the customer shows buying intent: product, name, phone, complete address, quantity, and variant/color. "
+        "Never invent prices, availability, discounts, delivery promises, tracking, refund policy, or order status. "
+        "Never say an order is confirmed unless order_state is already order_added or a real order exists in recent_orders. "
+        "If complete order details are present, set order_state=new_order and label new_order, but do not tell the customer it is confirmed. "
+        "Escalate angry customers, refunds, damaged items, payment issues, legal threats, sensitive issues, or anything outside TickBags/products/orders/support."
     )
     schema_hint = {
         "intent": "greeting|product_question|price_question|delivery_question|payment_question|order_tracking|order_intent|order_details_provided|complaint|refund_exchange|damaged_item|payment_issue|discount_negotiation|out_of_scope|unknown",
@@ -1264,7 +1344,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
                 "model": settings.get("openai_model", "gpt-4.1-mini"),
-                "temperature": 0.2,
+                "temperature": 0.45,
                 "response_format": {"type": "json_object"},
                 "messages": [
                     {"role": "system", "content": system_prompt},
@@ -1272,7 +1352,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
                         "schema": schema_hint,
                         "channel": channel,
                         "latest_customer_message": body,
-                        "context": build_ai_context(conversation, messages, orders, settings),
+                        "context": context,
                     }, ensure_ascii=False, default=_json_default)},
                 ],
             },
@@ -1281,7 +1361,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         data = response.json() if response.content else {}
         if response.ok:
             content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "{}").strip()
-            return strengthen_safe_ai_decision(
+            return guardrail_gpt_decision(
                 body,
                 normalize_ai_decision(json.loads(content)),
                 settings,

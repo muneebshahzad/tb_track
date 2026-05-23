@@ -373,6 +373,58 @@ def phone_matches(left: str, right: str) -> bool:
     return left_digits[-10:] == right_digits[-10:] or left_digits == right_digits
 
 
+def order_id_matches(left: Any, right: Any) -> bool:
+    left_digits = clean_digits(str(left or ""))
+    right_digits = clean_digits(str(right or ""))
+    return bool(left_digits and right_digits and (left_digits == right_digits or left_digits.endswith(right_digits) or right_digits.endswith(left_digits)))
+
+
+def extract_order_reference(text: str) -> str:
+    match = re.search(r"(?:order\s*#?|#)\s*([0-9]{5,})", str(text or ""), flags=re.I)
+    if match:
+        return match.group(1)
+    match = re.search(r"\b([0-9]{7,})\b", str(text or ""))
+    return match.group(1) if match else ""
+
+
+def serialize_shopify_order(order: dict) -> dict:
+    return {
+        "source": "Shopify",
+        "order_id": order.get("order_id"),
+        "status": order.get("status"),
+        "total_price": order.get("total_price"),
+        "created_at": order.get("created_at"),
+        "items": [
+            {
+                "title": item.get("product_title"),
+                "quantity": item.get("quantity"),
+                "tracking_number": item.get("tracking_number"),
+                "status": item.get("status"),
+            }
+            for item in order.get("line_items", [])
+        ],
+    }
+
+
+def serialize_daraz_order(order: dict) -> dict:
+    return {
+        "source": "Daraz",
+        "order_id": order.get("order_id"),
+        "status": order.get("status"),
+        "total_price": order.get("total_price"),
+        "created_at": order.get("date"),
+        "items": [
+            {
+                "title": item.get("name") or item.get("item_title"),
+                "quantity": item.get("quantity"),
+                "tracking_number": item.get("tracking_number"),
+                "status": item.get("status"),
+            }
+            for item in order.get("items_list", [])
+        ],
+    }
+
+
 def customer_orders_for_phone(phone: str) -> list[dict]:
     shopify_orders, daraz_orders = get_order_source()
     matches = []
@@ -387,45 +439,29 @@ def customer_orders_for_phone(phone: str) -> list[dict]:
                     break
         if not phone_matches(phone, order_phone):
             continue
-        matches.append({
-            "source": "Shopify",
-            "order_id": order.get("order_id"),
-            "status": order.get("status"),
-            "total_price": order.get("total_price"),
-            "created_at": order.get("created_at"),
-            "items": [
-                {
-                    "title": item.get("product_title"),
-                    "quantity": item.get("quantity"),
-                    "tracking_number": item.get("tracking_number"),
-                    "status": item.get("status"),
-                }
-                for item in order.get("line_items", [])
-            ],
-        })
+        matches.append(serialize_shopify_order(order))
 
     for order in daraz_orders:
         if not phone_matches(phone, order.get("customer_phone", "")):
             continue
-        matches.append({
-            "source": "Daraz",
-            "order_id": order.get("order_id"),
-            "status": order.get("status"),
-            "total_price": order.get("total_price"),
-            "created_at": order.get("date"),
-            "items": [
-                {
-                    "title": item.get("name") or item.get("item_title"),
-                    "quantity": item.get("quantity"),
-                    "tracking_number": item.get("tracking_number"),
-                    "status": item.get("status"),
-                }
-                for item in order.get("items_list", [])
-            ],
-        })
+        matches.append(serialize_daraz_order(order))
 
     matches.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
     return matches[:12]
+
+
+def find_order_by_reference(reference: str) -> dict | None:
+    reference = str(reference or "").strip()
+    if not reference:
+        return None
+    shopify_orders, daraz_orders = get_order_source()
+    for order in shopify_orders:
+        if order_id_matches(order.get("order_id"), reference):
+            return serialize_shopify_order(order)
+    for order in daraz_orders:
+        if order_id_matches(order.get("order_id"), reference):
+            return serialize_daraz_order(order)
+    return None
 
 
 def customer_orders_for_conversation(conversation: dict | None) -> list[dict]:
@@ -452,6 +488,26 @@ def latest_order_summary(phone_or_contact: str) -> str:
     summary = f"Latest order {latest.get('order_id')} is {latest.get('status') or 'being processed'}."
     if tracking:
         summary += f" Tracking: {tracking}."
+    return summary
+
+
+def order_summary(order: dict | None) -> str:
+    if not order:
+        return ""
+    tracking = ""
+    item_status = ""
+    for item in order.get("items", []) or []:
+        if not item_status and item.get("status"):
+            item_status = str(item.get("status"))
+        if item.get("tracking_number"):
+            tracking = str(item.get("tracking_number"))
+            break
+    status = order.get("status") or item_status or "being processed"
+    summary = f"Order {order.get('order_id')} is {status}."
+    if tracking:
+        summary += f" Tracking number: {tracking}."
+    else:
+        summary += " Tracking number is not available yet."
     return summary
 
 
@@ -492,6 +548,11 @@ def find_keyword_reply(message: str) -> tuple[str, dict | None]:
 def fallback_reply(phone: str, message: str) -> str:
     text = (message or "").lower()
     settings = get_whatsapp_settings()
+    order_reference = extract_order_reference(message)
+    if order_reference:
+        summary = order_summary(find_order_by_reference(order_reference))
+        if summary:
+            return summary
     orders = customer_orders_for_phone(phone)
     if orders and any(word in text for word in ("track", "tracking", "order", "status")):
         return latest_order_summary(phone)
@@ -1280,6 +1341,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
     risk_hit = any(word in text for word in AI_RISK_PHRASES)
     outside_scope = any(word in text for word in AI_OUT_OF_SCOPE_PHRASES)
     broad_category_availability = _is_broad_category_availability(text)
+    tracking_request = any(word in text for word in ("track", "tracking", "order status", "status")) or bool(extract_order_reference(body))
     if risk_hit or outside_scope:
         labels.add("needs_human")
         if risk_hit:
@@ -1292,6 +1354,32 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
             "labels": sorted(labels),
             "escalation_reason": decision.get("escalation_reason") or "Message requires human review.",
             "reply_text": settings.get("escalation_reply") or settings.get("human_handoff_reply") or "Let me have our team check this and reply with the correct details.",
+        })
+        return normalize_ai_decision(decision)
+
+    order_reference = extract_order_reference(body)
+    referenced_order = find_order_by_reference(order_reference) if order_reference else None
+    if referenced_order:
+        decision.update({
+            "intent": "order_tracking",
+            "needs_human": False,
+            "should_auto_reply": True,
+            "confidence": max(float(decision.get("confidence") or 0), 0.92),
+            "labels": sorted(labels | {"order_tracking"}),
+            "reply_text": order_summary(referenced_order),
+            "escalation_reason": "",
+        })
+        return normalize_ai_decision(decision)
+
+    if tracking_request and decision.get("needs_human"):
+        decision.update({
+            "intent": "order_tracking",
+            "needs_human": False,
+            "should_auto_reply": True,
+            "confidence": max(float(decision.get("confidence") or 0), 0.80),
+            "labels": sorted(labels | {"order_tracking"}),
+            "reply_text": "Please share your order number or the phone number used for the order, and I will check the status for you.",
+            "escalation_reason": "",
         })
         return normalize_ai_decision(decision)
 
@@ -1368,6 +1456,9 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
             conversation=conversation,
         )
     context = build_ai_context(conversation, messages, orders, settings)
+    order_reference = extract_order_reference(body)
+    referenced_order = find_order_by_reference(order_reference) if order_reference else None
+    context["referenced_order"] = referenced_order or {}
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation, limit=5)
     context["matched_products"] = [
         {
@@ -1391,6 +1482,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         "When the customer asks for product details, price, stock, image, or link, use matched_products/product context only. "
         "If matched_products is empty for exact price, exact stock, exact variant, or exact product details, ask for the product name, link, screenshot, or picture instead of inventing facts. "
         "Collect order details only when the customer shows buying intent: product, name, phone, complete address, quantity, and variant/color. "
+        "For order tracking, if referenced_order is present, answer using that exact order status and tracking number. If it is missing, ask for order number or order phone. "
         "Never invent prices, availability, discounts, delivery promises, tracking, refund policy, or order status. "
         "Never say an order is confirmed unless order_state is already order_added or a real order exists in recent_orders. "
         "If complete order details are present, set order_state=new_order and label new_order, but do not tell the customer it is confirmed. "

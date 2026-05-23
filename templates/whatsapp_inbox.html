@@ -365,6 +365,7 @@ let messagesRequestId = 0;
 let conversationsLoading = false;
 let messagesLoading = false;
 let ordersRequestId = 0;
+let sendingReply = false;
 const conversationShadow = new Map();
 const messageCache = new Map();
 const orderCache = new Map();
@@ -997,24 +998,40 @@ async function markOrderAdded() {
 }
 
 async function sendReply() {
+  if (sendingReply) return;
   const textarea = document.getElementById('replyText');
   const body = textarea.value.trim();
-  if (!selectedPhone || (!body && !uploadedAttachmentUrl)) return;
-  document.getElementById('sendBtn').disabled = true;
-  const response = await fetch('/whatsapp/send', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      phone:selectedPhone,
-      body,
-      attachment_url: uploadedAttachmentUrl,
-      channel:selectedChannel,
-      display_handle:(selectedConversation && selectedConversation.display_handle) || ''
-    })
-  });
-  const payload = await response.json();
-  document.getElementById('sendBtn').disabled = false;
+  const attachmentUrl = uploadedAttachmentUrl;
+  if (!selectedPhone || (!body && !attachmentUrl)) return;
+  sendingReply = true;
+  const sendBtn = document.getElementById('sendBtn');
+  sendBtn.disabled = true;
+  textarea.value = '';
+  uploadedAttachmentUrl = '';
+  updateAttachmentPreview();
+  let payload = {};
+  try {
+    const response = await fetch('/whatsapp/send', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        phone:selectedPhone,
+        body,
+        attachment_url: attachmentUrl,
+        channel:selectedChannel,
+        display_handle:(selectedConversation && selectedConversation.display_handle) || ''
+      })
+    });
+    payload = await response.json();
+  } catch (error) {
+    payload = { success:false, error:'Could not send message' };
+  }
+  sendingReply = false;
+  sendBtn.disabled = false;
   if (!payload.success) {
+    textarea.value = body;
+    uploadedAttachmentUrl = attachmentUrl;
+    updateAttachmentPreview();
     showToast(payload.error || 'Could not send message');
     return;
   }
@@ -1218,6 +1235,12 @@ loadRules();
 loadTemplates();
 loadBlasts();
 loadInboxSettings();
+document.getElementById('replyText').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendReply();
+  }
+});
 window.setInterval(async () => {
   if (document.hidden || conversationsLoading || messagesLoading) return;
   await loadConversations(false);

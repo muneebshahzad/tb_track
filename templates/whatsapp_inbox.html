@@ -94,6 +94,10 @@
   .upload-row { display:flex; gap:8px; align-items:center; }
   .wa-file { display:none; }
   .bubble-media { margin-top:8px; border-radius:10px; max-width:260px; display:block; box-shadow:0 1px 4px rgba(0,0,0,.08); }
+  .bubble-attachment { margin-top:8px; border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:9px 10px; background:rgba(255,255,255,.04); color:#e9edef; display:block; text-decoration:none; max-width:280px; }
+  .bubble-attachment-title { font-size:12px; font-weight:800; }
+  .bubble-attachment-sub { margin-top:3px; font-size:11px; color:#aebac1; overflow-wrap:anywhere; }
+  .bubble-video { margin-top:8px; border-radius:10px; max-width:280px; width:100%; display:block; background:#000; }
   .switch-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; font-size:12px; color:#6f7280; }
   .switch-row input { width:16px; height:16px; }
   .empty { color:#8696a0; font-size:13px; padding:24px; text-align:center; }
@@ -604,7 +608,13 @@ function setConversationFilter(btn) {
 }
 
 async function selectConversation(phone, options = {}) {
+  const previousPhone = selectedPhone;
   selectedPhone = phone;
+  if (previousPhone !== phone) {
+    messages = [];
+    orders = [];
+    document.getElementById('messageList').innerHTML = '<div class="empty">Loading messages...</div>';
+  }
   const conversation = conversations.find(item => item.phone === phone) || { phone };
   selectedConversation = conversation;
   selectedChannel = conversation.channel || 'whatsapp';
@@ -646,11 +656,13 @@ async function selectConversation(phone, options = {}) {
 async function loadMessages() {
   if (!selectedPhone) return;
   const requestId = ++messagesRequestId;
+  const requestedPhone = selectedPhone;
   messagesLoading = true;
   try {
-    const response = await fetch(`/api/whatsapp/conversations/${encodeURIComponent(selectedPhone)}/messages`);
+    const response = await fetch(`/api/whatsapp/conversations/${encodeURIComponent(requestedPhone)}/messages`);
     const payload = await response.json();
-    if (requestId !== messagesRequestId) return;
+    if (requestId !== messagesRequestId || requestedPhone !== selectedPhone) return;
+    if (!response.ok || payload.success === false || !Array.isArray(payload.messages)) return;
     if (payload.conversation) {
       selectedConversation = payload.conversation;
       const existing = conversationShadow.get(payload.conversation.phone);
@@ -660,6 +672,7 @@ async function loadMessages() {
       );
       renderConversations();
     }
+    if (payload.messages.length === 0 && messages.length > 0) return;
     messages = payload.messages || [];
     orders = payload.orders || [];
     renderMessages();
@@ -692,12 +705,35 @@ function renderMessages() {
       <div class="bubble ${escapeHtml(bubbleClass)}">
         <div>${sender}${escapeHtml(message.body).replace(/\n/g, '<br>')}</div>
         ${message.metadata && message.metadata.dry_run ? '<div class="label-chip">dry run</div>' : ''}
-        ${message.metadata && message.metadata.attachment_url ? `<img class="bubble-media" src="${escapeHtml(message.metadata.attachment_url)}" alt="attachment">` : ''}
+        ${attachmentMarkup(message)}
         <div class="bubble-time">${escapeHtml(fmtTime(message.created_at))}</div>
       </div>
     </div>`;
   }).join('');
   list.scrollTop = list.scrollHeight;
+}
+
+function attachmentMarkup(message) {
+  const metadata = message.metadata || {};
+  const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+  const firstAttachment = attachments[0] || {};
+  const url = metadata.attachment_url || firstAttachment.url || '';
+  const type = (metadata.media_type || firstAttachment.type || message.message_type || '').toLowerCase();
+  const title = metadata.attachment_title || firstAttachment.title || (type ? type.replaceAll('_', ' ') : 'Attachment');
+  if (!url && !type) return '';
+  if (url && type === 'image') {
+    return `<img class="bubble-media" src="${escapeHtml(url)}" alt="${escapeHtml(title)}">`;
+  }
+  if (url && type === 'video') {
+    return `<video class="bubble-video" controls playsinline src="${escapeHtml(url)}"></video>`;
+  }
+  const label = title ? title.replace(/\b\w/g, char => char.toUpperCase()) : 'Attachment';
+  const subtitle = url || 'Meta did not include a playable preview URL for this attachment.';
+  const href = url ? `href="${escapeHtml(url)}" target="_blank" rel="noopener"` : '';
+  return `<a class="bubble-attachment" ${href}>
+    <div class="bubble-attachment-title">${escapeHtml(label)}</div>
+    <div class="bubble-attachment-sub">${escapeHtml(subtitle)}</div>
+  </a>`;
 }
 
 function renderSidePanels() {

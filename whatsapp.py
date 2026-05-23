@@ -2037,19 +2037,36 @@ def meta_social_webhook():
             if profile.get("profile_pic"):
                 metadata["profile_pic"] = profile["profile_pic"]
             if attachments:
-                image = next((item for item in attachments if (item or {}).get("type") == "image"), None)
-                if image:
-                    body = body or "[Image]"
-                    metadata["attachment_url"] = ((image.get("payload") or {}).get("url") or "")
-                    metadata["media_type"] = "image"
-                elif not body:
-                    first_attachment = attachments[0] or {}
-                    attachment_type = str(first_attachment.get("type") or "attachment")
-                    body = f"[{attachment_type.title()}]"
-                    metadata["media_type"] = attachment_type
-                    metadata["unsupported_attachment"] = first_attachment
+                first_attachment = attachments[0] or {}
+                attachment_type = str(first_attachment.get("type") or "attachment").strip().lower() or "attachment"
+                payload_data = first_attachment.get("payload") or {}
+                attachment_url = str(payload_data.get("url") or payload_data.get("href") or "").strip()
+                friendly_type = {
+                    "image": "Image",
+                    "video": "Video",
+                    "audio": "Audio",
+                    "file": "File",
+                    "share": "Shared post",
+                    "story_mention": "Story mention",
+                    "ig_reel": "Instagram reel",
+                    "reel": "Reel",
+                }.get(attachment_type, attachment_type.replace("_", " ").title())
+                body = body or f"[{friendly_type}]"
+                metadata["attachment_url"] = attachment_url
+                metadata["media_type"] = attachment_type
+                metadata["attachment_title"] = friendly_type
+                metadata["attachment_payload"] = payload_data
+                metadata["unsupported_attachment"] = first_attachment
             if not body:
                 continue
+            stored_attachments = []
+            if metadata.get("attachment_url") or metadata.get("media_type"):
+                stored_attachments.append({
+                    "type": metadata.get("media_type") or "attachment",
+                    "url": metadata.get("attachment_url") or "",
+                    "title": metadata.get("attachment_title") or "",
+                    "payload": metadata.get("attachment_payload") or {},
+                })
             saved = save_whatsapp_message(
                 contact_key,
                 "outbound" if is_echo else "inbound",
@@ -2060,8 +2077,8 @@ def meta_social_webhook():
                 channel=channel,
                 display_handle=display_handle,
                 sender_type="human" if is_echo else "customer",
-                message_type="image" if metadata.get("media_type") == "image" else "text",
-                attachments=[{"type": "image", "url": metadata.get("attachment_url")}] if metadata.get("attachment_url") else [],
+                message_type=metadata.get("media_type") or "text",
+                attachments=stored_attachments,
             )
             if text and not is_echo and not (saved or {}).get("_duplicate"):
                 maybe_auto_reply(channel, contact_key, text, customer_name=customer_name, display_handle=display_handle)

@@ -525,6 +525,12 @@ AI_SMALL_TALK_PHRASES = (
     "aap ka kya haal", "apka kia haal", "apka kya haal",
 )
 
+AI_GREETING_PHRASES = (
+    "hi", "hello", "hey", "salam", "assalam", "assalamualaikum",
+    "asalam o aliqum", "assalam o alaikum", "asalam alaikum", "assalam alaikum",
+    "salam o alaikum", "salaam", "?", "??", "???",
+)
+
 AI_FOLLOWUP_PHRASES = (
     "material", "fabric", "which fabric", "filling", "filled with", "color",
     "colors", "size", "dimensions", "price", "cost", "rate", "delivery",
@@ -719,11 +725,30 @@ def _recent_image_context(messages: list[dict] | None) -> bool:
     return False
 
 
+def _recent_availability_request(messages: list[dict] | None) -> bool:
+    for msg in reversed(messages or []):
+        body = _normalized_customer_text((msg or {}).get("body") or "")
+        direction = str((msg or {}).get("direction") or "")
+        message_type = str((msg or {}).get("message_type") or "").lower()
+        metadata = _safe_json_dict((msg or {}).get("metadata"))
+        if message_type == "image" or metadata.get("media_type") == "image" or body == "image":
+            continue
+        if direction == "inbound" and any(phrase in body for phrase in AI_AVAILABILITY_PHRASES):
+            return True
+        if body and direction == "inbound":
+            return False
+    return False
+
+
 def _image_availability_reply() -> str:
     return (
         "Is photo mein product clear hai, lekin exact product/variant confirm karne ke liye "
         "please product ka name ya link bhi send kar dein. Team availability aur latest price confirm kar degi."
     )
+
+
+def _availability_without_product_reply() -> str:
+    return "Ji, availability confirm karne ke liye product ka name, link ya picture send kar dein. Main latest price aur stock check kar dunga."
 
 
 def _find_product_matches(query: str, messages: list[dict] | None = None, conversation: dict | None = None, limit: int = 4) -> list[dict]:
@@ -857,7 +882,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
     order_help = any(phrase in text for phrase in AI_ORDER_HELP_PHRASES)
-    if text.strip() in {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}:
+    if text.strip() in AI_GREETING_PHRASES:
         decision.update({
             "intent": "greeting",
             "confidence": 0.94,
@@ -884,11 +909,24 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "labels": ["ai"],
             "reply_text": "Sorry for the delay. I am here now. How can I help you with your TickBags order or product?",
         })
-    elif "[image]" in text:
+    elif "[image]" in text or text == "image":
+        if _recent_availability_request(messages):
+            decision.update({
+                "intent": "product_question",
+                "confidence": 0.80,
+                "should_auto_reply": False,
+                "needs_human": False,
+                "labels": ["product_interest", "image_received", "unclear_product"],
+                "reply_text": "",
+                "order_state": "collecting_details",
+                "missing_order_fields": ["product"],
+                "internal_note": "Image followed a recent availability question; skipped duplicate auto reply.",
+            })
+            return normalize_ai_decision(decision)
         decision.update({
             "intent": "product_question",
             "labels": ["unclear_product", "image_received"],
-            "reply_text": "Please share the product name or link too, so our team can confirm the exact details.",
+            "reply_text": _image_availability_reply(),
             "order_state": "collecting_details",
             "missing_order_fields": ["product"],
         })
@@ -939,6 +977,17 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "needs_human": False,
             "labels": ["product_interest", "image_received", "unclear_product"],
             "reply_text": _image_availability_reply(),
+            "order_state": "collecting_details",
+            "missing_order_fields": ["product"],
+        })
+    elif asking_availability:
+        decision.update({
+            "intent": "product_question",
+            "confidence": 0.82,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest"],
+            "reply_text": _availability_without_product_reply(),
             "order_state": "collecting_details",
             "missing_order_fields": ["product"],
         })
@@ -1016,7 +1065,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
 
 def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
     text = _normalized_customer_text(body)
-    simple_greetings = {"hi", "hello", "hey", "salam", "assalam", "assalamualaikum", "?", "??", "???"}
+    simple_greetings = set(AI_GREETING_PHRASES)
     product_context = _recent_product_context(messages, conversation)
     contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
     asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
@@ -1095,6 +1144,22 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             "needs_human": False,
             "labels": sorted(set((decision.get("labels") or []) + ["product_interest", "image_received", "unclear_product"])),
             "reply_text": _image_availability_reply(),
+            "order_state": "collecting_details",
+            "missing_order_fields": ["product"],
+            "escalation_reason": "",
+        })
+    elif asking_availability and (
+        not decision.get("reply_text")
+        or "share the product name" in str(decision.get("reply_text") or "").lower()
+        or decision.get("needs_human")
+    ):
+        decision.update({
+            "intent": "product_question",
+            "confidence": max(float(decision.get("confidence") or 0), 0.82),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["product_interest"])),
+            "reply_text": _availability_without_product_reply(),
             "order_state": "collecting_details",
             "missing_order_fields": ["product"],
             "escalation_reason": "",

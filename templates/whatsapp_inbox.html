@@ -366,7 +366,53 @@ let conversationsLoading = false;
 let messagesLoading = false;
 let ordersRequestId = 0;
 const conversationShadow = new Map();
+const messageCache = new Map();
+const orderCache = new Map();
+const messagePrefetches = new Set();
 const MISSING_CONVERSATION_GRACE_MS = 45000;
+const CHAT_CACHE_LIMIT = 80;
+const MESSAGE_PREFETCH_LIMIT = 12;
+
+function trimCache(cache) {
+  while (cache.size > CHAT_CACHE_LIMIT) {
+    cache.delete(cache.keys().next().value);
+  }
+}
+
+function rememberMessages(phone, nextMessages) {
+  if (!phone) return;
+  messageCache.set(phone, { items: Array.isArray(nextMessages) ? nextMessages : [], cachedAt: Date.now() });
+  trimCache(messageCache);
+}
+
+function rememberOrders(phone, nextOrders) {
+  if (!phone) return;
+  orderCache.set(phone, { items: Array.isArray(nextOrders) ? nextOrders : [], cachedAt: Date.now() });
+  trimCache(orderCache);
+}
+
+function prefetchMessageCache(items) {
+  for (const item of (items || []).slice(0, MESSAGE_PREFETCH_LIMIT)) {
+    if (!item.phone || item.phone === selectedPhone || messageCache.has(item.phone)) continue;
+    prefetchConversationMessages(item.phone);
+  }
+}
+
+async function prefetchConversationMessages(phone) {
+  if (!phone || messageCache.has(phone) || messagePrefetches.has(phone)) return;
+  messagePrefetches.add(phone);
+  try {
+    const response = await fetch(`/api/whatsapp/conversations/${encodeURIComponent(phone)}/messages`);
+    const payload = await response.json();
+    if (response.ok && payload.success !== false && Array.isArray(payload.messages)) {
+      rememberMessages(phone, payload.messages);
+    }
+  } catch (error) {
+    console.debug('Message prefetch skipped', error);
+  } finally {
+    messagePrefetches.delete(phone);
+  }
+}
 
 function conversationIdentity(item) {
   const channel = item?.channel || 'whatsapp';
@@ -485,6 +531,7 @@ async function loadConversations(forceRender = false) {
       conversationFingerprint = payload.fingerprint;
       renderConversations();
     }
+    prefetchMessageCache(nextConversations);
     const compactView = window.matchMedia('(max-width: 760px)').matches;
     if (selectedPhone && !conversations.some(item => item.phone === selectedPhone)) {
       if (conversations.length) {
@@ -610,11 +657,22 @@ function setConversationFilter(btn) {
 
 async function selectConversation(phone, options = {}) {
   const previousPhone = selectedPhone;
+  let usedCachedMessages = false;
+  let usedCachedOrders = false;
   selectedPhone = phone;
   if (previousPhone !== phone) {
-    messages = [];
-    orders = [];
-    document.getElementById('messageList').innerHTML = '<div class="empty">Loading messages...</div>';
+    const cachedMessages = messageCache.get(phone);
+    const cachedOrders = orderCache.get(phone);
+    messages = cachedMessages ? cachedMessages.items : [];
+    orders = cachedOrders ? cachedOrders.items : [];
+    if (cachedMessages) {
+      usedCachedMessages = true;
+    } else {
+      document.getElementById('messageList').innerHTML = '<div class="empty">Loading messages...</div>';
+    }
+    if (cachedOrders) {
+      usedCachedOrders = true;
+    }
   }
   const conversation = conversations.find(item => item.phone === phone) || { phone };
   selectedConversation = conversation;
@@ -649,10 +707,12 @@ async function selectConversation(phone, options = {}) {
   document.getElementById('mobileDraftBtn').disabled = !!conversation.is_internal;
   document.getElementById('aiModeSelect').disabled = !!conversation.is_internal;
   document.getElementById('aiModeSelect').value = conversation.ai_mode || 'human';
+  if (usedCachedMessages) renderMessages();
+  if (usedCachedOrders) renderOrders();
   renderSidePanels();
   loadMessages();
   loadOrders();
-  if (!options.skipReloadConversations) await loadConversations(false);
+  if (!options.skipReloadConversations) loadConversations(false);
 }
 
 async function loadMessages() {
@@ -674,8 +734,12 @@ async function loadMessages() {
       );
       renderConversations();
     }
-    if (payload.messages.length === 0 && messages.length > 0) return;
+    if (payload.messages.length === 0 && messages.length > 0) {
+      rememberMessages(requestedPhone, messages);
+      return;
+    }
     messages = payload.messages || [];
+    rememberMessages(requestedPhone, messages);
     renderMessages();
     renderSidePanels();
   } catch (error) {
@@ -689,22 +753,26 @@ async function loadOrders() {
   if (!selectedPhone) return;
   const requestId = ++ordersRequestId;
   const requestedPhone = selectedPhone;
-  orders = [];
-  document.getElementById('orderHistory').innerHTML = '<div class="empty" style="padding:12px;">Loading order history...</div>';
+  const cachedOrders = orderCache.get(requestedPhone);
+  if (!cachedOrders) {
+    orders = [];
+    document.getElementById('orderHistory').innerHTML = '<div class="empty" style="padding:12px;">Loading order history...</div>';
+  }
   try {
     const response = await fetch(`/api/whatsapp/conversations/${encodeURIComponent(requestedPhone)}/orders`);
     const payload = await response.json();
     if (requestId !== ordersRequestId || requestedPhone !== selectedPhone) return;
     if (!response.ok || payload.success === false || !Array.isArray(payload.orders)) {
-      orders = [];
+      orders = cachedOrders ? cachedOrders.items : [];
     } else {
       orders = payload.orders || [];
+      rememberOrders(requestedPhone, orders);
     }
     renderOrders();
   } catch (error) {
     console.error('Order history refresh failed', error);
     if (requestId === ordersRequestId) {
-      orders = [];
+      orders = cachedOrders ? cachedOrders.items : [];
       renderOrders();
     }
   }

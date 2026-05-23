@@ -3,20 +3,26 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
 import requests
-from flask import Blueprint, current_app, jsonify, redirect, render_template, request
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session
 from werkzeug.utils import secure_filename
 
 from db import (
     create_whatsapp_blast,
+    claim_tickbot_auto_reply_jobs,
+    enqueue_tickbot_auto_reply_job,
     ensure_tickbot_assistant_chat,
+    finish_tickbot_auto_reply_job,
     get_app_setting,
     get_last_db_error,
     get_conversation_by_any_key,
@@ -51,6 +57,9 @@ UPLOAD_DIR_NAME = "whatsapp_uploads"
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 SOCIAL_PROFILE_CACHE: dict[tuple[str, str], dict[str, str]] = {}
 PRODUCT_CACHE: dict[str, Any] = {"loaded_at": 0.0, "items": []}
+AUTO_REPLY_WORKER_STARTED = False
+AUTO_REPLY_WORKER_LOCK = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
 def _json_default(value):
@@ -75,14 +84,15 @@ def get_order_source() -> tuple[list[dict], list[dict]]:
 
 
 def get_product_source() -> list[dict]:
-    import time
     now = time.time()
     if PRODUCT_CACHE["items"] and now - float(PRODUCT_CACHE["loaded_at"] or 0) < 300:
         return list(PRODUCT_CACHE["items"] or [])
+    cached_payload = get_app_setting("tickbot_product_cache", "")
     items = []
     catalog_url = os.getenv("TICKBAGS_PRODUCTS_JSON_URL", "https://tickbags.com/products.json?limit=250")
     try:
         response = requests.get(catalog_url, timeout=12)
+        response.raise_for_status()
         data = response.json() if response.content else {}
         for product in data.get("products") or []:
             product_title = str(product.get("title") or "").strip()
@@ -113,8 +123,21 @@ def get_product_source() -> list[dict]:
                     "product_url": product_url,
                     "available": bool(variant.get("available", True)),
                 })
+        if items:
+            set_app_setting("tickbot_product_cache", json.dumps({"loaded_at": now, "items": items}, default=_json_default))
     except Exception as e:
-        print(f"Could not fetch public product catalog for TickBot: {e}")
+        logger.warning("Could not fetch public product catalog for TickBot: %s", e)
+        if cached_payload:
+            try:
+                cached = json.loads(cached_payload)
+                items = list(cached.get("items") or [])
+                PRODUCT_CACHE["loaded_at"] = float(cached.get("loaded_at") or now)
+                PRODUCT_CACHE["items"] = items
+                return list(items)
+            except Exception as cache_error:
+                logger.warning("Could not load stale TickBot product cache: %s", cache_error)
+        if PRODUCT_CACHE["items"]:
+            return list(PRODUCT_CACHE["items"] or [])
     PRODUCT_CACHE["loaded_at"] = now
     PRODUCT_CACHE["items"] = items
     return list(items)
@@ -175,6 +198,18 @@ def fetch_social_profile(sender_id: str, channel: str) -> dict[str, str]:
     cached = SOCIAL_PROFILE_CACHE.get(cache_key)
     if cached:
         return dict(cached)
+    setting_key = f"social_profile_cache:{channel}:{sender_id}"
+    cached_payload = get_app_setting(setting_key, "")
+    if cached_payload:
+        try:
+            cached_profile = json.loads(cached_payload)
+            cached_at = float(cached_profile.get("cached_at") or 0)
+            if cached_profile.get("profile") and time.time() - cached_at < 86400:
+                profile = dict(cached_profile.get("profile") or {})
+                SOCIAL_PROFILE_CACHE[cache_key] = profile
+                return dict(profile)
+        except Exception:
+            pass
 
     token = (os.getenv("META_PAGE_ACCESS_TOKEN") or os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN") or "").strip()
     api_version = os.getenv("META_GRAPH_API_VERSION", "v20.0")
@@ -201,6 +236,7 @@ def fetch_social_profile(sender_id: str, channel: str) -> dict[str, str]:
             "profile_pic": str(data.get("profile_pic") or "").strip(),
         }
         SOCIAL_PROFILE_CACHE[cache_key] = profile
+        set_app_setting(setting_key, json.dumps({"cached_at": time.time(), "profile": profile}, default=_json_default))
         return dict(profile)
     except Exception:
         return {}
@@ -1702,6 +1738,67 @@ def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: s
             )
 
 
+def process_tickbot_auto_reply_job(job: dict) -> None:
+    maybe_auto_reply(
+        job.get("channel") or "whatsapp",
+        job.get("contact_key") or "",
+        job.get("body") or "",
+        customer_name=job.get("customer_name") or "",
+        display_handle=job.get("display_handle") or "",
+        contact_phone=job.get("contact_phone") or "",
+    )
+
+
+def _auto_reply_worker_loop(app):
+    with app.app_context():
+        while True:
+            jobs = claim_tickbot_auto_reply_jobs(limit=3)
+            if not jobs:
+                time.sleep(1.5)
+                continue
+            for job in jobs:
+                try:
+                    process_tickbot_auto_reply_job(job)
+                    finish_tickbot_auto_reply_job(job["id"], True)
+                except Exception as e:
+                    logger.exception("TickBot auto-reply job failed: %s", e)
+                    finish_tickbot_auto_reply_job(job["id"], False, str(e))
+
+
+def ensure_auto_reply_worker_started():
+    global AUTO_REPLY_WORKER_STARTED
+    with AUTO_REPLY_WORKER_LOCK:
+        if AUTO_REPLY_WORKER_STARTED:
+            return
+        app = current_app._get_current_object()
+        thread = threading.Thread(target=_auto_reply_worker_loop, args=(app,), name="tickbot-auto-reply-worker", daemon=True)
+        thread.start()
+        AUTO_REPLY_WORKER_STARTED = True
+
+
+def enqueue_auto_reply(
+    channel: str,
+    contact_key: str,
+    body: str,
+    *,
+    customer_name: str = "",
+    display_handle: str = "",
+    contact_phone: str = "",
+    provider_message_id: str = "",
+) -> dict | None:
+    job = enqueue_tickbot_auto_reply_job({
+        "channel": channel,
+        "contact_key": contact_key,
+        "body": body,
+        "customer_name": customer_name,
+        "display_handle": display_handle,
+        "contact_phone": contact_phone,
+        "provider_message_id": provider_message_id,
+    })
+    ensure_auto_reply_worker_started()
+    return job
+
+
 def send_order_confirmation(order: dict[str, Any]) -> bool:
     customer = order.get("customer_details") or {}
     phone = normalize_whatsapp_phone(customer.get("phone") or "")
@@ -2151,6 +2248,7 @@ def whatsapp_webhook():
                 body = ((message.get("text") or {}).get("body") or "").strip()
                 metadata = {"webhook": True}
                 attachments = []
+                should_queue_reply = message_type in {"text", "image"}
                 if message_type == "image":
                     image_payload = message.get("image") or {}
                     body = body or "[Image]"
@@ -2168,7 +2266,19 @@ def whatsapp_webhook():
                             "source": "whatsapp_media",
                         })
                 elif message_type != "text":
-                    continue
+                    friendly_type = {
+                        "audio": "Voice note",
+                        "voice": "Voice note",
+                        "document": "Document",
+                        "sticker": "Sticker",
+                        "video": "Video",
+                        "reaction": "Reaction",
+                        "location": "Location",
+                        "contacts": "Contact card",
+                    }.get(str(message_type or "").lower(), str(message_type or "Unsupported message").replace("_", " ").title())
+                    body = body or f"[{friendly_type}]"
+                    metadata["media_type"] = str(message_type or "unsupported").lower()
+                    metadata["unsupported_message"] = message
                 customer_name = contacts.get(clean_digits(phone), "")
                 saved = save_whatsapp_message(
                     phone,
@@ -2180,11 +2290,19 @@ def whatsapp_webhook():
                     channel="whatsapp",
                     display_handle=phone,
                     contact_phone=phone,
-                    message_type="image" if message_type == "image" else "text",
+                    message_type="image" if message_type == "image" else str(message_type or "text").lower(),
                     attachments=attachments,
                 )
-                if message_type in {"text", "image"} and not (saved or {}).get("_duplicate"):
-                    maybe_auto_reply("whatsapp", phone, body, customer_name=customer_name, display_handle=phone, contact_phone=phone)
+                if should_queue_reply and not (saved or {}).get("_duplicate"):
+                    enqueue_auto_reply(
+                        "whatsapp",
+                        phone,
+                        body,
+                        customer_name=customer_name,
+                        display_handle=phone,
+                        contact_phone=phone,
+                        provider_message_id=message.get("id") or "",
+                    )
 
     return jsonify({"success": True})
 
@@ -2290,12 +2408,27 @@ def meta_social_webhook():
                 attachments=stored_attachments,
             )
             if not is_echo and not (saved or {}).get("_duplicate") and (text or metadata.get("media_type") == "image"):
-                maybe_auto_reply(channel, contact_key, body, customer_name=customer_name, display_handle=display_handle)
+                enqueue_auto_reply(
+                    channel,
+                    contact_key,
+                    body,
+                    customer_name=customer_name,
+                    display_handle=display_handle,
+                    provider_message_id=message.get("mid") or message.get("id") or "",
+                )
     return jsonify({"success": True})
 
 
 @whatsapp_bp.route("/api/whatsapp/mock-inbound", methods=["POST"])
 def api_mock_inbound():
+    required_key = (os.getenv("TICKBOT_MOCK_INBOUND_KEY") or os.getenv("INTERNAL_API_KEY") or "").strip()
+    logged_in_staff = bool(session.get("employee_portal_authenticated") or session.get("admin_portal_authenticated"))
+    if required_key:
+        supplied_key = (request.headers.get("X-TickBot-Key") or request.args.get("key") or "").strip()
+        if not logged_in_staff and not hmac.compare_digest(supplied_key, required_key):
+            return jsonify({"success": False, "error": "Unauthorized."}), 401
+    elif not logged_in_staff and not current_app.debug and os.getenv("ALLOW_UNAUTHENTICATED_MOCK_INBOUND", "0") != "1":
+        return jsonify({"success": False, "error": "Mock inbound is disabled without TICKBOT_MOCK_INBOUND_KEY."}), 403
     data = request.get_json(silent=True) or {}
     channel = str(data.get("channel") or "whatsapp").strip().lower() or "whatsapp"
     phone = normalize_inbox_contact_key(channel, data.get("phone"))
@@ -2315,5 +2448,13 @@ def api_mock_inbound():
     )
     if not saved:
         return jsonify({"success": False, "error": get_last_db_error() or "Could not save the test message."}), 500
-    maybe_auto_reply(channel, phone, body, customer_name=data.get("customer_name") or "Test Customer", display_handle=display_handle, contact_phone=data.get("contact_phone") or (phone if channel == "whatsapp" else ""))
+    enqueue_auto_reply(
+        channel,
+        phone,
+        body,
+        customer_name=data.get("customer_name") or "Test Customer",
+        display_handle=display_handle,
+        contact_phone=data.get("contact_phone") or (phone if channel == "whatsapp" else ""),
+        provider_message_id=data.get("provider_message_id") or "",
+    )
     return jsonify({"success": True})

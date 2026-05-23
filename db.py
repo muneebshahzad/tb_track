@@ -42,6 +42,37 @@ def _ensure_product_costs_table(cur):
     """)
 
 
+def _ensure_tickbot_auto_reply_jobs_table(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tickbot_auto_reply_jobs (
+            id BIGSERIAL PRIMARY KEY,
+            channel TEXT NOT NULL,
+            contact_key TEXT NOT NULL,
+            body TEXT NOT NULL DEFAULT '',
+            customer_name TEXT NOT NULL DEFAULT '',
+            display_handle TEXT NOT NULL DEFAULT '',
+            contact_phone TEXT NOT NULL DEFAULT '',
+            provider_message_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT NOT NULL DEFAULT '',
+            available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            locked_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tickbot_auto_reply_jobs_provider
+        ON tickbot_auto_reply_jobs (provider_message_id)
+        WHERE provider_message_id <> ''
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_tickbot_auto_reply_jobs_pending
+        ON tickbot_auto_reply_jobs (status, available_at, id)
+    """)
+
+
 def _ensure_whatsapp_tables(cur):
     cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
     cur.execute("""
@@ -291,6 +322,7 @@ def _ensure_whatsapp_tables(cur):
             updated_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
+    _ensure_tickbot_auto_reply_jobs_table(cur)
 
 
 def get_conn():
@@ -589,7 +621,7 @@ def ensure_tickbot_assistant_chat() -> dict | None:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
+                _ensure_tickbot_auto_reply_jobs_table(cur)
                 cur.execute("""
                     INSERT INTO whatsapp_conversations (
                         phone, channel, customer_name, display_handle, status, last_message,
@@ -639,7 +671,7 @@ def get_conversation_by_any_key(key: str) -> dict | None:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
+                _ensure_tickbot_auto_reply_jobs_table(cur)
                 cur.execute("""
                     SELECT *
                     FROM whatsapp_conversations
@@ -956,7 +988,7 @@ def update_whatsapp_conversation_status(phone: str, status: str) -> bool:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                _ensure_whatsapp_tables(cur)
+                _ensure_tickbot_auto_reply_jobs_table(cur)
                 cur.execute("""
                     UPDATE whatsapp_conversations
                     SET status = %s, unread_count = CASE WHEN %s <> 'new' THEN 0 ELSE unread_count END, updated_at = NOW()
@@ -1323,3 +1355,102 @@ def list_whatsapp_blasts() -> list[dict]:
         _set_last_db_error(str(e))
         print(f"DB list_whatsapp_blasts error: {e}")
         return []
+
+
+def enqueue_tickbot_auto_reply_job(payload: dict) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_tickbot_auto_reply_jobs_table(cur)
+                values = (
+                    str(payload.get("channel") or "whatsapp"),
+                    str(payload.get("contact_key") or ""),
+                    str(payload.get("body") or ""),
+                    str(payload.get("customer_name") or ""),
+                    str(payload.get("display_handle") or ""),
+                    str(payload.get("contact_phone") or ""),
+                    str(payload.get("provider_message_id") or ""),
+                )
+                cur.execute("""
+                    INSERT INTO tickbot_auto_reply_jobs (
+                        channel, contact_key, body, customer_name, display_handle, contact_phone, provider_message_id
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (provider_message_id) WHERE provider_message_id <> ''
+                    DO UPDATE SET updated_at = tickbot_auto_reply_jobs.updated_at
+                    RETURNING id, channel, contact_key, body, customer_name, display_handle,
+                              contact_phone, provider_message_id, status, attempts, created_at
+                """, values)
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB enqueue_tickbot_auto_reply_job error: {e}")
+        return None
+
+
+def claim_tickbot_auto_reply_jobs(limit: int = 3) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_tickbot_auto_reply_jobs_table(cur)
+                cur.execute("""
+                    WITH picked AS (
+                        SELECT id
+                        FROM tickbot_auto_reply_jobs
+                        WHERE status = 'pending'
+                          AND available_at <= NOW()
+                          AND attempts < 3
+                        ORDER BY id
+                        FOR UPDATE SKIP LOCKED
+                        LIMIT %s
+                    )
+                    UPDATE tickbot_auto_reply_jobs j
+                    SET status = 'processing',
+                        attempts = attempts + 1,
+                        locked_at = NOW(),
+                        updated_at = NOW()
+                    FROM picked
+                    WHERE j.id = picked.id
+                    RETURNING j.id, j.channel, j.contact_key, j.body, j.customer_name,
+                              j.display_handle, j.contact_phone, j.provider_message_id, j.attempts
+                """, (limit,))
+                rows = [dict(row) for row in cur.fetchall()]
+            conn.commit()
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB claim_tickbot_auto_reply_jobs error: {e}")
+        return []
+
+
+def finish_tickbot_auto_reply_job(job_id: int, success: bool, error: str = "") -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_tickbot_auto_reply_jobs_table(cur)
+                if success:
+                    cur.execute("""
+                        UPDATE tickbot_auto_reply_jobs
+                        SET status = 'done', last_error = '', updated_at = NOW()
+                        WHERE id = %s
+                    """, (job_id,))
+                else:
+                    cur.execute("""
+                        UPDATE tickbot_auto_reply_jobs
+                        SET status = CASE WHEN attempts >= 3 THEN 'failed' ELSE 'pending' END,
+                            last_error = %s,
+                            available_at = NOW() + (INTERVAL '30 seconds' * GREATEST(attempts, 1)),
+                            updated_at = NOW()
+                        WHERE id = %s
+                    """, (str(error or "")[:1000], job_id))
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB finish_tickbot_auto_reply_job error: {e}")
+        return False

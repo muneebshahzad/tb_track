@@ -20,6 +20,7 @@ SHOPIFY_INSTALLED_AT_KEY = "shopify_installed_at"
 
 _token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
 _last_token_error: str = ""
+PROTECTED_ORDER_DETAILS_BATCH_SIZE = 100
 
 
 def _clean(value: Any) -> str:
@@ -262,50 +263,48 @@ def _build_customer_details(order_node: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def fetch_protected_order_details(order_ids: list[int | str]) -> tuple[dict[str, dict[str, str]], list[str]]:
-    if not is_graphql_configured() or not order_ids:
-        return {}, []
-
-    query = """
-    query ProtectedOrderDetails($ids: [ID!]!) {
-      nodes(ids: $ids) {
-        ... on Order {
-          id
-          legacyResourceId
+PROTECTED_ORDER_DETAILS_QUERY = """
+query ProtectedOrderDetails($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Order {
+      id
+      legacyResourceId
+      phone
+      shippingAddress {
+        name
+        address1
+        address2
+        city
+        phone
+      }
+      billingAddress {
+        name
+        address1
+        address2
+        city
+        phone
+      }
+      customer {
+        firstName
+        lastName
+        defaultPhoneNumber {
+          phoneNumber
+        }
+        defaultAddress {
+          name
+          address1
+          address2
+          city
           phone
-          shippingAddress {
-            name
-            address1
-            address2
-            city
-            phone
-          }
-          billingAddress {
-            name
-            address1
-            address2
-            city
-            phone
-          }
-          customer {
-            firstName
-            lastName
-            defaultPhoneNumber {
-              phoneNumber
-            }
-            defaultAddress {
-              name
-              address1
-              address2
-              city
-              phone
-            }
-          }
         }
       }
     }
-    """
+  }
+}
+"""
 
+
+def _fetch_protected_order_details_batch(order_ids: list[int | str]) -> tuple[dict[str, dict[str, str]], list[str]]:
     variables = {"ids": [_order_gid(order_id) for order_id in order_ids]}
     headers = {
         "Content-Type": "application/json",
@@ -314,7 +313,7 @@ def fetch_protected_order_details(order_ids: list[int | str]) -> tuple[dict[str,
 
     response = requests.post(
         get_graphql_endpoint(),
-        json={"query": query, "variables": variables},
+        json={"query": PROTECTED_ORDER_DETAILS_QUERY, "variables": variables},
         headers=headers,
         timeout=30,
     )
@@ -330,3 +329,30 @@ def fetch_protected_order_details(order_ids: list[int | str]) -> tuple[dict[str,
         details[str(node["legacyResourceId"])] = _build_customer_details(node)
 
     return details, errors
+
+
+def fetch_protected_order_details(order_ids: list[int | str]) -> tuple[dict[str, dict[str, str]], list[str]]:
+    if not is_graphql_configured() or not order_ids:
+        return {}, []
+
+    unique_ids = []
+    seen = set()
+    for order_id in order_ids:
+        key = str(order_id)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique_ids.append(order_id)
+
+    all_details: dict[str, dict[str, str]] = {}
+    all_errors: list[str] = []
+    for index in range(0, len(unique_ids), PROTECTED_ORDER_DETAILS_BATCH_SIZE):
+        batch = unique_ids[index:index + PROTECTED_ORDER_DETAILS_BATCH_SIZE]
+        try:
+            details, errors = _fetch_protected_order_details_batch(batch)
+            all_details.update(details)
+            all_errors.extend(errors)
+        except Exception as e:
+            all_errors.append(f"Protected order detail batch failed for {len(batch)} orders: {e}")
+
+    return all_details, all_errors

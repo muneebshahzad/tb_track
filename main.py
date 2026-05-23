@@ -322,25 +322,45 @@ def merge_customer_details(base: dict[str, str], override: dict[str, str]) -> di
 def extract_shopify_customer_details(order) -> dict[str, str]:
     def safe_attr(obj, attr):
         try:
+            if isinstance(obj, dict):
+                value = obj.get(attr)
+                return value or ""
             value = getattr(obj, attr)
             return value or ""
-        except AttributeError:
+        except (AttributeError, TypeError):
             return ""
 
     shipping = getattr(order, 'shipping_address', None)
     billing = getattr(order, 'billing_address', None)
+    customer = getattr(order, 'customer', None)
+    default_address = safe_attr(customer, 'default_address')
 
     shipping_name = safe_attr(shipping, 'name')
     billing_name = safe_attr(billing, 'name')
-    first_name = safe_attr(shipping, 'first_name') or safe_attr(billing, 'first_name')
-    last_name = safe_attr(shipping, 'last_name') or safe_attr(billing, 'last_name')
+    default_name = safe_attr(default_address, 'name')
+    first_name = (
+        safe_attr(shipping, 'first_name')
+        or safe_attr(billing, 'first_name')
+        or safe_attr(customer, 'first_name')
+    )
+    last_name = (
+        safe_attr(shipping, 'last_name')
+        or safe_attr(billing, 'last_name')
+        or safe_attr(customer, 'last_name')
+    )
     composed_name = " ".join(part for part in [first_name, last_name] if part).strip()
 
     return {
-        "name": shipping_name or billing_name or composed_name,
-        "address": safe_attr(shipping, 'address1') or safe_attr(billing, 'address1'),
-        "city": safe_attr(shipping, 'city') or safe_attr(billing, 'city'),
-        "phone": safe_attr(shipping, 'phone') or safe_attr(billing, 'phone'),
+        "name": shipping_name or billing_name or default_name or composed_name,
+        "address": safe_attr(shipping, 'address1') or safe_attr(billing, 'address1') or safe_attr(default_address, 'address1'),
+        "city": safe_attr(shipping, 'city') or safe_attr(billing, 'city') or safe_attr(default_address, 'city'),
+        "phone": (
+            safe_attr(order, 'phone')
+            or safe_attr(shipping, 'phone')
+            or safe_attr(billing, 'phone')
+            or safe_attr(default_address, 'phone')
+            or safe_attr(customer, 'phone')
+        ),
     }
 
 

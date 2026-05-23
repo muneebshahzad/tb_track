@@ -399,6 +399,7 @@ def serialize_shopify_order(order: dict) -> dict:
                 "title": item.get("product_title"),
                 "quantity": item.get("quantity"),
                 "tracking_number": item.get("tracking_number"),
+                "tracking_url": item.get("tracking_url") or item.get("tracking_link") or "",
                 "status": item.get("status"),
             }
             for item in order.get("line_items", [])
@@ -418,6 +419,7 @@ def serialize_daraz_order(order: dict) -> dict:
                 "title": item.get("name") or item.get("item_title"),
                 "quantity": item.get("quantity"),
                 "tracking_number": item.get("tracking_number"),
+                "tracking_url": item.get("tracking_url") or item.get("tracking_link") or "",
                 "status": item.get("status"),
             }
             for item in order.get("items_list", [])
@@ -495,20 +497,32 @@ def order_summary(order: dict | None) -> str:
     if not order:
         return ""
     tracking = ""
+    tracking_url = ""
     item_status = ""
     for item in order.get("items", []) or []:
         if not item_status and item.get("status"):
             item_status = str(item.get("status"))
         if item.get("tracking_number"):
             tracking = str(item.get("tracking_number"))
+            tracking_url = str(item.get("tracking_url") or "").strip()
             break
     status = order.get("status") or item_status or "being processed"
-    summary = f"Order {order.get('order_id')} is {status}."
-    if tracking:
-        summary += f" Tracking number: {tracking}."
+    status_key = str(status or "").strip().lower().replace("_", "-")
+    if tracking and not tracking_url and tracking.upper() != "N/A":
+        tracking_url = f"https://dashboard.tickbags.com/track/{quote(tracking)}"
+    if status_key in {"un-booked", "unbooked", "manufacturing", "packed", "pending"} or not tracking or tracking.upper() == "N/A":
+        return "Your order is currently being manufactured and will be forwarded for delivery as soon as possible."
+    if status_key in {"booked", "consignment booked", "drop off at express center"}:
+        reply = "Your order has been handed over to Leopard's Courier, they shall deliver it as soon as possible."
+    elif status_key in {"out for delivery", "assigned to courier", "assigned to courier in", "assigned to courier for delivery"}:
+        reply = "Your order is currently assigned to courier for delivery."
     else:
-        summary += " Tracking number is not available yet."
-    return summary
+        reply = f"Your order is currently {status}."
+    if tracking_url:
+        reply += f"\nYou can track your order here: {tracking_url}"
+    elif tracking:
+        reply += f"\nTracking number: {tracking}"
+    return reply
 
 
 def render_template_body(body: str, phone: str) -> str:

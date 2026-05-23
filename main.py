@@ -279,12 +279,15 @@ def process_line_item(line_item, fulfillments, tracking_cache, billing):
                     continue
 
                 tracking_number = fulfillment.tracking_number
+                tracking_urls = getattr(fulfillment, 'tracking_urls', None) or []
+                tracking_url = getattr(fulfillment, 'tracking_url', None) or (tracking_urls[0] if tracking_urls else '')
                 packet = tracking_cache.get(tracking_number)
                 parsed = parse_leopards_status(packet, tracking_number)
 
                 # Fall back to Shopify billing address when Leopards has no data
                 tracking_info.append({
                     'tracking_number': tracking_number,
+                    'tracking_url': tracking_url,
                     'status':   parsed['status'],
                     'quantity': item.quantity,
                     'name':     billing.get('name',    'N/A'),
@@ -295,6 +298,7 @@ def process_line_item(line_item, fulfillments, tracking_cache, billing):
 
     return tracking_info if tracking_info else [{
         'tracking_number': 'N/A',
+        'tracking_url': '',
         'status':   'Un-Booked',
         'name':     billing.get('name',    'N/A'),
         'address':  billing.get('address', 'N/A'),
@@ -458,6 +462,7 @@ async def process_order(order, tracking_cache):
                 'unit_price':         unit_price,
                 'line_total':         unit_price * float(info['quantity'] or 0),
                 'tracking_number':    info['tracking_number'],
+                'tracking_url':       info.get('tracking_url', ''),
                 'status':             info['status'],
                 'name':               info.get('name', 'N/A'),
                 'address':            info.get('address', 'N/A'),

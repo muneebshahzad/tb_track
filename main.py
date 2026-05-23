@@ -137,7 +137,6 @@ daraz_orders = []
 order_details_lock = threading.RLock()
 app.order_details_provider = lambda: order_details
 app.daraz_orders_provider = lambda: daraz_orders
-app.active_products_provider = lambda: get_active_shopify_products(limit=250)
 
 RATE_LIMIT = 2
 LAST_REQUEST_TIME = 0
@@ -685,8 +684,11 @@ def admin_portal_service_worker():
 def refresh_data():
     global order_details
     try:
-        order_details = asyncio.run(getShopifyOrders(force_status='any'))
-        return jsonify({'message': 'Data refreshed successfully'})
+        refreshed_orders = asyncio.run(getShopifyOrders(force_status='any'))
+        if refreshed_orders:
+            order_details = refreshed_orders
+            return jsonify({'message': 'Data refreshed successfully', 'count': len(order_details)})
+        return jsonify({'message': 'Refresh returned no Shopify orders; keeping existing data.', 'count': len(order_details)}), 502
     except Exception as e:
         print(f"Error refreshing data: {e}")
         return jsonify({'message': 'Failed to refresh data'}), 500
@@ -969,11 +971,6 @@ def get_active_shopify_products(limit=120):
                 'price': float(getattr(variant, 'price', 0) or 0),
                 'image': variant_image,
                 'sku': getattr(variant, 'sku', '') or '',
-                'handle': getattr(product, 'handle', '') or '',
-                'product_url': (
-                    getattr(product, 'online_store_url', '') or
-                    (f"https://tickbags.com/products/{getattr(product, 'handle', '')}" if getattr(product, 'handle', '') else '')
-                ),
             })
     return results
 
@@ -3256,8 +3253,12 @@ def background_refresh():
     if not order_details:
         print("BACKGROUND REFRESH: order_details empty — doing full Shopify fetch.")
         try:
-            order_details = asyncio.run(getShopifyOrders(force_status='any'))
-            print(f"BACKGROUND REFRESH: Shopify fetch complete ({len(order_details)} orders).")
+            refreshed_orders = asyncio.run(getShopifyOrders(force_status='any'))
+            if refreshed_orders:
+                order_details = refreshed_orders
+                print(f"BACKGROUND REFRESH: Shopify fetch complete ({len(order_details)} orders).")
+            else:
+                print("BACKGROUND REFRESH: Shopify fetch returned 0 orders; leaving current order cache unchanged.")
         except Exception as e:
             print(f"BACKGROUND REFRESH ERROR (Shopify full fetch): {e}")
 

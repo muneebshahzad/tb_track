@@ -79,12 +79,42 @@ def get_product_source() -> list[dict]:
     now = time.time()
     if PRODUCT_CACHE["items"] and now - float(PRODUCT_CACHE["loaded_at"] or 0) < 300:
         return list(PRODUCT_CACHE["items"] or [])
+    items = []
+    catalog_url = os.getenv("TICKBAGS_PRODUCTS_JSON_URL", "https://tickbags.com/products.json?limit=250")
     try:
-        provider = getattr(current_app, "active_products_provider", None)
-        items = list(provider() or []) if provider else []
+        response = requests.get(catalog_url, timeout=12)
+        data = response.json() if response.content else {}
+        for product in data.get("products") or []:
+            product_title = str(product.get("title") or "").strip()
+            handle = str(product.get("handle") or "").strip()
+            product_url = f"https://tickbags.com/products/{handle}" if handle else ""
+            images = product.get("images") or []
+            base_image = str((images[0] or {}).get("src") or "") if images else ""
+            image_by_id = {str(image.get("id")): image.get("src") for image in images if image.get("id")}
+            for variant in product.get("variants") or []:
+                variant_title = str(variant.get("title") or "").strip()
+                display_title = product_title if variant_title in {"", "Default Title"} else f"{product_title} - {variant_title}"
+                featured = variant.get("featured_image") or {}
+                image = str(featured.get("src") or image_by_id.get(str(featured.get("id"))) or base_image or "")
+                try:
+                    price = float(variant.get("price") or 0)
+                except Exception:
+                    price = 0
+                items.append({
+                    "product_id": product.get("id"),
+                    "variant_id": variant.get("id"),
+                    "title": display_title,
+                    "product_title": product_title,
+                    "variant_title": variant_title,
+                    "price": price,
+                    "image": image,
+                    "sku": variant.get("sku") or "",
+                    "handle": handle,
+                    "product_url": product_url,
+                    "available": bool(variant.get("available", True)),
+                })
     except Exception as e:
-        print(f"Could not fetch active products for TickBot: {e}")
-        items = []
+        print(f"Could not fetch public product catalog for TickBot: {e}")
     PRODUCT_CACHE["loaded_at"] = now
     PRODUCT_CACHE["items"] = items
     return list(items)

@@ -538,6 +538,11 @@ AI_ORDER_HELP_PHRASES = (
     "how to order", "place order", "order process",
 )
 
+AI_AVAILABILITY_PHRASES = (
+    "available", "availability", "in stock", "stock", "mil jayega", "mil jaega",
+    "mil jaye ga", "hai kya", "hy kya", "ye hai", "is this available",
+)
+
 
 def _safe_json_dict(value: Any) -> dict:
     if isinstance(value, dict):
@@ -702,6 +707,25 @@ def _recent_product_context(messages: list[dict] | None, conversation: dict | No
     return ""
 
 
+def _recent_image_context(messages: list[dict] | None) -> bool:
+    for msg in reversed(messages or []):
+        body = str((msg or {}).get("body") or "").strip().lower()
+        message_type = str((msg or {}).get("message_type") or "").lower()
+        metadata = _safe_json_dict((msg or {}).get("metadata"))
+        if body == "[image]" or message_type == "image" or metadata.get("media_type") == "image":
+            return True
+        if body and body != "[image]" and str((msg or {}).get("direction") or "") == "inbound":
+            return False
+    return False
+
+
+def _image_availability_reply() -> str:
+    return (
+        "Is photo mein product clear hai, lekin exact product/variant confirm karne ke liye "
+        "please product ka name ya link bhi send kar dein. Team availability aur latest price confirm kar degi."
+    )
+
+
 def _find_product_matches(query: str, messages: list[dict] | None = None, conversation: dict | None = None, limit: int = 4) -> list[dict]:
     lookup_query = _product_match_text(query)
     context = _recent_product_context(messages, conversation)
@@ -828,6 +852,8 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
     product_context = _recent_product_context(messages, conversation)
     contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
     asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
+    asking_availability = any(phrase in text for phrase in AI_AVAILABILITY_PHRASES)
+    has_recent_image = _recent_image_context(messages)
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
     order_help = any(phrase in text for phrase in AI_ORDER_HELP_PHRASES)
@@ -904,6 +930,17 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "order_state": "collecting_details",
             "order_candidate": {"product": str(product_matches[0].get("product_title") or product_matches[0].get("title") or "")},
             "product_attachment_url": str(product_matches[0].get("image") or ""),
+        })
+    elif asking_availability and has_recent_image:
+        decision.update({
+            "intent": "product_question",
+            "confidence": 0.84,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest", "image_received", "unclear_product"],
+            "reply_text": _image_availability_reply(),
+            "order_state": "collecting_details",
+            "missing_order_fields": ["product"],
         })
     elif order_help:
         decision.update({
@@ -983,6 +1020,8 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
     product_context = _recent_product_context(messages, conversation)
     contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
     asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
+    asking_availability = any(phrase in text for phrase in AI_AVAILABILITY_PHRASES)
+    has_recent_image = _recent_image_context(messages)
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
     order_help = any(phrase in text for phrase in AI_ORDER_HELP_PHRASES)
@@ -1042,6 +1081,22 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             "order_state": decision.get("order_state") if decision.get("order_state") != "no_order" else "collecting_details",
             "order_candidate": {"product": str(product_matches[0].get("product_title") or product_matches[0].get("title") or "")},
             "product_attachment_url": str(product_matches[0].get("image") or ""),
+            "escalation_reason": "",
+        })
+    elif asking_availability and has_recent_image and (
+        not decision.get("reply_text")
+        or "share the product name" in str(decision.get("reply_text") or "").lower()
+        or decision.get("needs_human")
+    ):
+        decision.update({
+            "intent": "product_question",
+            "confidence": max(float(decision.get("confidence") or 0), 0.84),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["product_interest", "image_received", "unclear_product"])),
+            "reply_text": _image_availability_reply(),
+            "order_state": "collecting_details",
+            "missing_order_fields": ["product"],
             "escalation_reason": "",
         })
     elif order_help and (
@@ -1974,7 +2029,7 @@ def whatsapp_webhook():
                     message_type="image" if message_type == "image" else "text",
                     attachments=attachments,
                 )
-                if message_type == "text" and not (saved or {}).get("_duplicate"):
+                if message_type in {"text", "image"} and not (saved or {}).get("_duplicate"):
                     maybe_auto_reply("whatsapp", phone, body, customer_name=customer_name, display_handle=phone, contact_phone=phone)
 
     return jsonify({"success": True})
@@ -2080,8 +2135,8 @@ def meta_social_webhook():
                 message_type=metadata.get("media_type") or "text",
                 attachments=stored_attachments,
             )
-            if text and not is_echo and not (saved or {}).get("_duplicate"):
-                maybe_auto_reply(channel, contact_key, text, customer_name=customer_name, display_handle=display_handle)
+            if not is_echo and not (saved or {}).get("_duplicate") and (text or metadata.get("media_type") == "image"):
+                maybe_auto_reply(channel, contact_key, body, customer_name=customer_name, display_handle=display_handle)
     return jsonify({"success": True})
 
 

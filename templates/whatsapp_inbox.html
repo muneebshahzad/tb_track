@@ -813,19 +813,17 @@ function attachmentMarkup(message) {
   const url = metadata.attachment_url || firstAttachment.url || '';
   const type = (metadata.media_type || firstAttachment.type || message.message_type || '').toLowerCase();
   const title = metadata.attachment_title || firstAttachment.title || (type ? type.replaceAll('_', ' ') : 'Attachment');
-  if (!url && !type) return '';
-  if (url && type === 'image') {
+  if (!url || !type || type === 'text') return '';
+  if (type === 'image') {
     return `<img class="bubble-media" src="${escapeHtml(url)}" alt="${escapeHtml(title)}">`;
   }
-  if (url && type === 'video') {
+  if (['video', 'ig_reel', 'reel'].includes(type)) {
     return `<video class="bubble-video" controls playsinline src="${escapeHtml(url)}"></video>`;
   }
   const label = title ? title.replace(/\b\w/g, char => char.toUpperCase()) : 'Attachment';
-  const subtitle = url || 'Meta did not include a playable preview URL for this attachment.';
-  const href = url ? `href="${escapeHtml(url)}" target="_blank" rel="noopener"` : '';
-  return `<a class="bubble-attachment" ${href}>
+  return `<a class="bubble-attachment" href="${escapeHtml(url)}" target="_blank" rel="noopener">
     <div class="bubble-attachment-title">${escapeHtml(label)}</div>
-    <div class="bubble-attachment-sub">${escapeHtml(subtitle)}</div>
+    <div class="bubble-attachment-sub">${escapeHtml(url)}</div>
   </a>`;
 }
 

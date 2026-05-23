@@ -364,6 +364,7 @@ let appliedConversationRequestId = 0;
 let messagesRequestId = 0;
 let conversationsLoading = false;
 let messagesLoading = false;
+let ordersRequestId = 0;
 const conversationShadow = new Map();
 const MISSING_CONVERSATION_GRACE_MS = 45000;
 
@@ -649,7 +650,8 @@ async function selectConversation(phone, options = {}) {
   document.getElementById('aiModeSelect').disabled = !!conversation.is_internal;
   document.getElementById('aiModeSelect').value = conversation.ai_mode || 'human';
   renderSidePanels();
-  await loadMessages();
+  loadMessages();
+  loadOrders();
   if (!options.skipReloadConversations) await loadConversations(false);
 }
 
@@ -674,14 +676,37 @@ async function loadMessages() {
     }
     if (payload.messages.length === 0 && messages.length > 0) return;
     messages = payload.messages || [];
-    orders = payload.orders || [];
     renderMessages();
-    renderOrders();
     renderSidePanels();
   } catch (error) {
     console.error('Message refresh failed', error);
   } finally {
     messagesLoading = false;
+  }
+}
+
+async function loadOrders() {
+  if (!selectedPhone) return;
+  const requestId = ++ordersRequestId;
+  const requestedPhone = selectedPhone;
+  orders = [];
+  document.getElementById('orderHistory').innerHTML = '<div class="empty" style="padding:12px;">Loading order history...</div>';
+  try {
+    const response = await fetch(`/api/whatsapp/conversations/${encodeURIComponent(requestedPhone)}/orders`);
+    const payload = await response.json();
+    if (requestId !== ordersRequestId || requestedPhone !== selectedPhone) return;
+    if (!response.ok || payload.success === false || !Array.isArray(payload.orders)) {
+      orders = [];
+    } else {
+      orders = payload.orders || [];
+    }
+    renderOrders();
+  } catch (error) {
+    console.error('Order history refresh failed', error);
+    if (requestId === ordersRequestId) {
+      orders = [];
+      renderOrders();
+    }
   }
 }
 

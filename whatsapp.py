@@ -1692,8 +1692,17 @@ def api_messages(phone):
         "phone": conversation.get("phone") if conversation else normalize_whatsapp_phone(phone),
         "conversation": conversation,
         "messages": list_inbox_messages(phone),
-        "orders": customer_orders_for_conversation(conversation),
     })
+
+
+@whatsapp_bp.route("/api/whatsapp/conversations/<path:phone>/orders")
+def api_conversation_orders(phone):
+    conversation = get_conversation_by_any_key(phone)
+    return jsonify_data({
+        "success": bool(conversation),
+        "phone": conversation.get("phone") if conversation else normalize_whatsapp_phone(phone),
+        "orders": customer_orders_for_conversation(conversation),
+    }, 200 if conversation else 404)
 
 
 @whatsapp_bp.route("/api/whatsapp/conversations/<path:phone>/status", methods=["POST"])

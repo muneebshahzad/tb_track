@@ -160,14 +160,6 @@ def save_offline_token(shop: str, payload: dict[str, Any]) -> None:
 def get_graphql_token() -> str:
     global _last_token_error
 
-    static_token = _pick(
-        os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"),
-        os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN"),
-    )
-    if static_token:
-        _last_token_error = ""
-        return static_token
-
     now = time.time()
     if _token_cache["token"] and now < float(_token_cache["expires_at"] or 0):
         _last_token_error = ""
@@ -179,6 +171,14 @@ def get_graphql_token() -> str:
         _token_cache["expires_at"] = now + 3600
         _last_token_error = ""
         return stored_token
+
+    static_token = _pick(
+        os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"),
+        os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN"),
+    )
+    if static_token:
+        _last_token_error = ""
+        return static_token
 
     _last_token_error = ""
     return ""
@@ -204,12 +204,12 @@ def get_protected_data_config_status() -> dict[str, Any]:
     stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
     token = get_graphql_token()
     auth_mode = "unconfigured"
-    if _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN")):
+    if stored_token:
+        auth_mode = "oauth_offline_token"
+    elif _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN")):
         auth_mode = "static_token"
     elif _clean(os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN")):
         auth_mode = "admin_access_token"
-    elif stored_token:
-        auth_mode = "oauth_offline_token"
     elif get_client_id() and get_client_secret():
         auth_mode = "oauth_ready"
 

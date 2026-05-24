@@ -204,7 +204,9 @@ def setup_shopify():
 
     # TickBags' core Shopify reads still rely on the legacy private-app style token.
     if legacy_password:
-        shopify.ShopifyResource.set_site(shop_url)
+        api_version = get_graphql_api_version()
+        admin_api_base = f"{shop_url.rstrip('/')}/admin/api/{api_version}"
+        shopify.ShopifyResource.set_site(admin_api_base)
         if api_key:
             shopify.ShopifyResource.set_user(api_key)
         shopify.ShopifyResource.set_password(legacy_password)

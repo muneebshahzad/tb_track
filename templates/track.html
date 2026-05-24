@@ -373,10 +373,10 @@
           <!-- Desktop: customer info -->
           <div class="desktop-info">
             <div class="info-block">
-              {% if name %}
+              {% if name or city %}
               <div class="info-row">
                 <span class="info-lbl">Customer</span>
-                <span class="info-val" style="font-weight:600">{{ name }}{% if city %}, <span style="font-weight:400;color:#8a8b96">{{ city }}</span>{% endif %}</span>
+                <span class="info-val" style="font-weight:600">{{ name or 'No customer name' }}{% if city %}, <span style="font-weight:400;color:#8a8b96">{{ city }}</span>{% endif %}</span>
               </div>
               {% endif %}
               {% if phone %}
@@ -441,10 +441,10 @@
         <!-- Mobile: expandable detail -->
         <div class="mobile-detail" id="md-{{ order.id }}">
           <div class="info-block">
-            {% if name %}
+            {% if name or city %}
             <div class="info-row">
               <span class="info-lbl">Customer</span>
-              <span class="info-val" style="font-weight:600">{{ name }}{% if city %}, <span style="font-weight:400;color:#8a8b96">{{ city }}</span>{% endif %}</span>
+              <span class="info-val" style="font-weight:600">{{ name or 'No customer name' }}{% if city %}, <span style="font-weight:400;color:#8a8b96">{{ city }}</span>{% endif %}</span>
             </div>
             {% endif %}
             {% if phone %}

@@ -403,6 +403,93 @@ def enrich_orders_with_protected_customer_data(orders: list[dict[str, object]]) 
     return orders
 
 
+def _missing_customer_details(details: dict[str, str]) -> bool:
+    details = details or {}
+    return not all([
+        (details.get("name") or "").strip(),
+        (details.get("address") or "").strip(),
+        (details.get("phone") or "").strip(),
+    ])
+
+
+def _details_from_shopify_rest_order(payload: dict[str, object]) -> dict[str, str]:
+    def pick(*values):
+        for value in values:
+            text = str(value or "").strip()
+            if text and text.upper() != "N/A":
+                return text
+        return ""
+
+    shipping = payload.get("shipping_address") or {}
+    billing = payload.get("billing_address") or {}
+    customer = payload.get("customer") or {}
+    default_address = customer.get("default_address") or {}
+
+    name = pick(
+        billing.get("name"),
+        shipping.get("name"),
+        " ".join(part for part in [customer.get("first_name"), customer.get("last_name")] if part),
+        default_address.get("name"),
+    )
+    address = pick(
+        billing.get("address1"),
+        shipping.get("address1"),
+        default_address.get("address1"),
+    )
+    city = pick(billing.get("city"), shipping.get("city"), default_address.get("city"))
+    phone = pick(
+        payload.get("phone"),
+        billing.get("phone"),
+        shipping.get("phone"),
+        customer.get("phone"),
+        default_address.get("phone"),
+    )
+    return {"name": name, "address": address, "city": city, "phone": phone}
+
+
+def enrich_missing_customer_data_from_rest(orders: list[dict[str, object]]) -> list[dict[str, object]]:
+    missing_orders = [
+        order for order in orders
+        if order.get("id") and _missing_customer_details(order.get("customer_details") or {})
+    ]
+    if not missing_orders:
+        return orders
+
+    try:
+        base_url = get_shopify_rest_base_url()
+        headers = shopify_rest_headers()
+    except Exception as e:
+        print(f"Shopify REST customer enrichment unavailable: {e}")
+        return orders
+
+    for order in missing_orders:
+        try:
+            response = requests.get(
+                f"{base_url}/orders/{order['id']}.json",
+                params={"fields": "id,name,phone,customer,shipping_address,billing_address"},
+                headers=headers,
+                timeout=20,
+            )
+            response.raise_for_status()
+            details = _details_from_shopify_rest_order((response.json() or {}).get("order") or {})
+        except Exception as e:
+            print(f"Shopify REST customer enrichment failed for {order.get('order_id')}: {e}")
+            continue
+
+        if not any(details.values()):
+            continue
+
+        merged_details = merge_customer_details(order.get("customer_details") or {}, details)
+        order["customer_details"] = merged_details
+        for item in order.get("line_items", []):
+            item["name"] = details.get("name") or item.get("name", "")
+            item["address"] = details.get("address") or item.get("address", "")
+            item["city"] = details.get("city") or item.get("city", "")
+            item["phone"] = details.get("phone") or item.get("phone", "")
+
+    return orders
+
+
 async def process_order(order, tracking_cache):
     global LAST_REQUEST_TIME
 
@@ -634,6 +721,7 @@ async def getShopifyOrders(force_status=None):
             result.append(r)
 
     result = enrich_orders_with_protected_customer_data(result)
+    result = enrich_missing_customer_data_from_rest(result)
 
     print(f"Processed {len(result)} orders in {time.time() - total_start:.2f}s")
     return result
@@ -1518,7 +1606,7 @@ def get_shopify_rest_base_url():
 
 
 def shopify_rest_headers():
-    token = (os.getenv('PASSWORD') or '').strip()
+    token = get_graphql_token() or (os.getenv('PASSWORD') or '').strip()
     if not token:
         raise RuntimeError('Shopify admin access token is missing.')
     return {

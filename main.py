@@ -187,9 +187,10 @@ def format_date(date_str):
 
 def setup_shopify():
     shop_url = get_shop_domain() or (os.getenv("SHOP_URL") or "").strip()
-    token = (os.getenv("PASSWORD") or "").strip() or get_graphql_token()
+    legacy_password = (os.getenv("PASSWORD") or "").strip()
+    oauth_token = get_graphql_token()
     api_key = (os.getenv("API_KEY") or "").strip()
-    if not shop_url or not token:
+    if not shop_url or not (legacy_password or oauth_token):
         print("SHOP_URL or Shopify token missing.")
         return
 
@@ -198,19 +199,23 @@ def setup_shopify():
     except Exception:
         pass
 
+    if not shop_url.startswith("https://"):
+        shop_url = f"https://{shop_url.lstrip('/')}"
+
+    # TickBags' core Shopify reads still rely on the legacy private-app style token.
+    if legacy_password:
+        shopify.ShopifyResource.set_site(shop_url)
+        if api_key:
+            shopify.ShopifyResource.set_user(api_key)
+        shopify.ShopifyResource.set_password(legacy_password)
+        return
+
     try:
-        session_obj = shopify.Session(shop_url, get_graphql_api_version(), token)
+        session_obj = shopify.Session(shop_url, get_graphql_api_version(), oauth_token)
         shopify.ShopifyResource.activate_session(session_obj)
         return
     except Exception as error:
-        print(f"Falling back to legacy setup: {error}")
-
-    if not shop_url.startswith("https://"):
-        shop_url = f"https://{shop_url.lstrip('/')}"
-    shopify.ShopifyResource.set_site(shop_url)
-    if api_key:
-        shopify.ShopifyResource.set_user(api_key)
-    shopify.ShopifyResource.set_password(token)
+        print(f"Could not activate Shopify session: {error}")
 
 
 def _sleep_for_shopify_rate_limit(error, default_seconds: float = 2.0) -> float:

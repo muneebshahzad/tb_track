@@ -141,6 +141,7 @@ app.daraz_orders_provider = lambda: daraz_orders
 RATE_LIMIT = 2
 LAST_REQUEST_TIME = 0
 product_image_cache = {}  # (product_id, variant_id) -> (image_src, variant_name)
+shopify_admin_call_lock = threading.Lock()
 
 
 # ── Email ─────────────────────────────────────────────────────────────────────
@@ -181,6 +182,36 @@ def send_email():
 def format_date(date_str):
     date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
     return date_obj.isoformat()
+
+
+def _sleep_for_shopify_rate_limit(error, default_seconds: float = 2.0) -> float:
+    retry_after = None
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None) if response is not None else None
+    if headers:
+        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+    try:
+        return float(retry_after or default_seconds)
+    except (TypeError, ValueError):
+        return float(default_seconds)
+
+
+def shopify_admin_find_with_retry(label, finder, *args, **kwargs):
+    attempts = 0
+    while attempts < 4:
+        with shopify_admin_call_lock:
+            try:
+                return finder(*args, **kwargs)
+            except Exception as error:
+                attempts += 1
+                message = str(error)
+                if "429" in message or "Too Many Requests" in message or "Exceeded 2 calls per second" in message:
+                    wait_seconds = _sleep_for_shopify_rate_limit(error, 2 + attempts)
+                    print(f"Shopify rate limit while fetching {label}; sleeping {wait_seconds:.1f}s before retry.")
+                    time.sleep(wait_seconds)
+                    continue
+                raise
+    raise RuntimeError(f"Shopify rate limit persisted while fetching {label}")
 
 
 # ── Leopards tracking ─────────────────────────────────────────────────────────
@@ -453,33 +484,74 @@ def enrich_missing_customer_data_from_rest(orders: list[dict[str, object]]) -> l
         print(f"Shopify REST customer enrichment unavailable: {e}")
         return orders
 
+    order_lookup = {str(order["id"]): order for order in missing_orders if order.get("id")}
+    missing_ids = list(order_lookup.keys())
     enriched_count = 0
-    for order in missing_orders:
-        try:
-            response = requests.get(
-                f"{base_url}/orders/{order['id']}.json",
-                params={"fields": "id,name,phone,customer,shipping_address,billing_address"},
-                headers=headers,
-                timeout=20,
-            )
-            response.raise_for_status()
-            details = _details_from_shopify_rest_order((response.json() or {}).get("order") or {})
-        except Exception as e:
-            print(f"Shopify REST customer enrichment failed for {order.get('order_id')}: {e}")
-            continue
+    batch_size = 20
 
-        if not any(details.values()):
-            continue
+    for index in range(0, len(missing_ids), batch_size):
+        batch_ids = missing_ids[index:index + batch_size]
+        params = {
+            "ids": ",".join(batch_ids),
+            "fields": "id,name,phone,customer,shipping_address,billing_address",
+            "limit": len(batch_ids),
+            "status": "any",
+        }
+        attempt = 0
+        payload_orders: list[dict[str, object]] = []
 
-        merged_details = merge_customer_details(order.get("customer_details") or {}, details)
-        if merged_details != (order.get("customer_details") or {}):
-            enriched_count += 1
-        order["customer_details"] = merged_details
-        for item in order.get("line_items", []):
-            item["name"] = details.get("name") or item.get("name", "")
-            item["address"] = details.get("address") or item.get("address", "")
-            item["city"] = details.get("city") or item.get("city", "")
-            item["phone"] = details.get("phone") or item.get("phone", "")
+        while attempt < 4:
+            try:
+                response = requests.get(
+                    f"{base_url}/orders.json",
+                    params=params,
+                    headers=headers,
+                    timeout=30,
+                )
+                if response.status_code == 429:
+                    retry_after = response.headers.get("Retry-After")
+                    wait_seconds = float(retry_after or 2 + attempt)
+                    print(
+                        f"Shopify REST customer enrichment rate-limited for batch "
+                        f"{index // batch_size + 1}; waiting {wait_seconds:.1f}s before retry."
+                    )
+                    time.sleep(wait_seconds)
+                    attempt += 1
+                    continue
+
+                response.raise_for_status()
+                payload_orders = (response.json() or {}).get("orders") or []
+                break
+            except Exception as e:
+                attempt += 1
+                if attempt >= 4:
+                    print(
+                        f"Shopify REST customer enrichment failed for batch "
+                        f"{index // batch_size + 1} ({','.join(batch_ids)}): {e}"
+                    )
+                    payload_orders = []
+                    break
+                time.sleep(1.5 * attempt)
+
+        for payload_order in payload_orders:
+            order_id = str(payload_order.get("id") or "").strip()
+            if not order_id or order_id not in order_lookup:
+                continue
+
+            order = order_lookup[order_id]
+            details = _details_from_shopify_rest_order(payload_order)
+            if not any(details.values()):
+                continue
+
+            merged_details = merge_customer_details(order.get("customer_details") or {}, details)
+            if merged_details != (order.get("customer_details") or {}):
+                enriched_count += 1
+            order["customer_details"] = merged_details
+            for item in order.get("line_items", []):
+                item["name"] = details.get("name") or item.get("name", "")
+                item["address"] = details.get("address") or item.get("address", "")
+                item["city"] = details.get("city") or item.get("city", "")
+                item["phone"] = details.get("phone") or item.get("phone", "")
 
     print(f"Shopify REST customer enrichment filled {enriched_count} / {len(missing_orders)} missing orders.")
     return orders
@@ -538,14 +610,23 @@ async def process_order(order, tracking_cache):
                 image_src, variant_name = product_image_cache[cache_key]
             else:
                 try:
-                    await asyncio.sleep(0.6)  # stay under 2 calls/sec
-                    product = shopify.Product.find(line_item.product_id)
+                    await asyncio.sleep(0.3)
+                    product = shopify_admin_find_with_retry(
+                        f"product {line_item.product_id}",
+                        shopify.Product.find,
+                        line_item.product_id,
+                    )
                     if product and product.variants:
                         for variant in product.variants:
                             if variant.id == line_item.variant_id:
                                 if variant.image_id is not None:
-                                    await asyncio.sleep(0.6)
-                                    images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
+                                    await asyncio.sleep(0.3)
+                                    images = shopify_admin_find_with_retry(
+                                        f"product image {variant.image_id} for product {line_item.product_id}",
+                                        shopify.Image.find,
+                                        image_id=variant.image_id,
+                                        product_id=line_item.product_id,
+                                    )
                                     variant_name = line_item.variant_title
                                     for image in images:
                                         if image.id == variant.image_id:
@@ -1054,7 +1135,12 @@ def format_employee_order_note(
 
 def get_active_shopify_products(limit=120):
     try:
-        products = shopify.Product.find(limit=limit, published_status='published')
+        products = shopify_admin_find_with_retry(
+            f"published products list (limit={limit})",
+            shopify.Product.find,
+            limit=limit,
+            published_status='published',
+        )
     except Exception as e:
         print(f"Could not fetch Shopify products: {e}")
         return []
@@ -1074,7 +1160,13 @@ def get_active_shopify_products(limit=120):
 
             if variant_image_id and not product_images and not fetched_images:
                 try:
-                    product_images = list(shopify.Image.find(product_id=getattr(product, 'id', None)) or [])
+                    product_images = list(
+                        shopify_admin_find_with_retry(
+                            f"product images for product {getattr(product, 'id', None)}",
+                            shopify.Image.find,
+                            product_id=getattr(product, 'id', None),
+                        ) or []
+                    )
                 except Exception as e:
                     print(f"Could not fetch images for Shopify product {getattr(product, 'id', None)}: {e}")
                     product_images = []

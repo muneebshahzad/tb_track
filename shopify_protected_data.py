@@ -17,6 +17,9 @@ SHOPIFY_TOKEN_SETTING_KEY = "shopify_offline_access_token"
 SHOPIFY_SCOPE_SETTING_KEY = "shopify_offline_access_scopes"
 SHOPIFY_INSTALLED_SHOP_KEY = "shopify_installed_shop_domain"
 SHOPIFY_INSTALLED_AT_KEY = "shopify_installed_at"
+SHOPIFY_REFRESH_TOKEN_SETTING_KEY = "shopify_offline_refresh_token"
+SHOPIFY_TOKEN_EXPIRES_AT_KEY = "shopify_offline_access_token_expires_at"
+SHOPIFY_REFRESH_EXPIRES_AT_KEY = "shopify_offline_refresh_token_expires_at"
 
 _token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
 _last_token_error: str = ""
@@ -69,7 +72,9 @@ def get_app_base_url() -> str:
 
 
 def get_oauth_scopes() -> list[str]:
-    scopes = _clean(os.getenv("SHOPIFY_GRAPHQL_SCOPES")) or "read_orders,read_customers"
+    scopes = _clean(os.getenv("SHOPIFY_GRAPHQL_SCOPES")) or (
+        "read_orders,read_customers,read_products,write_draft_orders,write_orders"
+    )
     return [scope.strip() for scope in scopes.split(",") if scope.strip()]
 
 
@@ -79,8 +84,6 @@ def get_install_url(state: str) -> str:
         "scope": ",".join(get_oauth_scopes()),
         "redirect_uri": f"{get_app_base_url()}/shopify/callback",
         "state": state,
-        "grant_options[]": "per-user",
-        "access_mode": "offline",
     }
     return f"https://{get_shop_domain()}/admin/oauth/authorize?{urlencode(params)}"
 
@@ -126,6 +129,22 @@ def exchange_oauth_code_for_token(shop: str, code: str) -> dict[str, Any]:
             "client_id": get_client_id(),
             "client_secret": get_client_secret(),
             "code": code,
+            "expiring": 1,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _refresh_offline_token(shop: str, refresh_token: str) -> dict[str, Any]:
+    response = requests.post(
+        f"https://{shop}/admin/oauth/access_token",
+        json={
+            "client_id": get_client_id(),
+            "client_secret": get_client_secret(),
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
         },
         timeout=30,
     )
@@ -136,41 +155,62 @@ def exchange_oauth_code_for_token(shop: str, code: str) -> dict[str, Any]:
 def save_offline_token(shop: str, payload: dict[str, Any]) -> None:
     token = _clean(payload.get("access_token"))
     scopes = payload.get("scope") or payload.get("associated_user_scope") or ""
+    refresh_token = _clean(payload.get("refresh_token"))
+    expires_in = payload.get("expires_in")
+    refresh_expires_in = payload.get("refresh_token_expires_in")
     if not token:
         raise ValueError("Shopify did not return an access token")
 
-    writes_ok = all([
-        set_app_setting(SHOPIFY_TOKEN_SETTING_KEY, token),
-        set_app_setting(SHOPIFY_SCOPE_SETTING_KEY, _clean(scopes)),
-        set_app_setting(SHOPIFY_INSTALLED_SHOP_KEY, shop),
-        set_app_setting(SHOPIFY_INSTALLED_AT_KEY, str(int(time.time()))),
-    ])
+    token_expires_at = ""
+    refresh_expires_at = ""
+    now = time.time()
+    try:
+        if expires_in is not None:
+            token_expires_at = str(int(now + float(expires_in)))
+    except (TypeError, ValueError):
+        token_expires_at = ""
+    try:
+        if refresh_expires_in is not None:
+            refresh_expires_at = str(int(now + float(refresh_expires_in)))
+    except (TypeError, ValueError):
+        refresh_expires_at = ""
+
+    writes_ok = all(
+        [
+            set_app_setting(SHOPIFY_TOKEN_SETTING_KEY, token),
+            set_app_setting(SHOPIFY_SCOPE_SETTING_KEY, _clean(scopes)),
+            set_app_setting(SHOPIFY_INSTALLED_SHOP_KEY, shop),
+            set_app_setting(SHOPIFY_INSTALLED_AT_KEY, str(int(time.time()))),
+            set_app_setting(SHOPIFY_REFRESH_TOKEN_SETTING_KEY, refresh_token),
+            set_app_setting(SHOPIFY_TOKEN_EXPIRES_AT_KEY, token_expires_at),
+            set_app_setting(SHOPIFY_REFRESH_EXPIRES_AT_KEY, refresh_expires_at),
+        ]
+    )
     if not writes_ok:
-        raise RuntimeError(f"Could not persist Shopify OAuth token to database: {get_last_db_error() or 'unknown database error'}")
+        raise RuntimeError(
+            f"Could not persist Shopify OAuth token to database: {get_last_db_error() or 'unknown database error'}"
+        )
 
     saved_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
     saved_shop = _clean(get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY))
     if saved_token != token or saved_shop != shop:
-        raise RuntimeError(f"Shopify OAuth token did not persist correctly: {get_last_db_error() or 'verification failed'}")
+        raise RuntimeError(
+            f"Shopify OAuth token did not persist correctly: {get_last_db_error() or 'verification failed'}"
+        )
 
     _token_cache["token"] = token
-    _token_cache["expires_at"] = time.time() + 86400 * 365
+    _token_cache["expires_at"] = float(token_expires_at or (time.time() + 86400 * 365))
+
+
+def _token_is_expired(expires_at_raw: str) -> bool:
+    try:
+        return bool(expires_at_raw) and time.time() >= float(expires_at_raw)
+    except (TypeError, ValueError):
+        return False
 
 
 def get_graphql_token() -> str:
     global _last_token_error
-
-    now = time.time()
-    if _token_cache["token"] and now < float(_token_cache["expires_at"] or 0):
-        _last_token_error = ""
-        return str(_token_cache["token"])
-
-    stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
-    if stored_token:
-        _token_cache["token"] = stored_token
-        _token_cache["expires_at"] = now + 3600
-        _last_token_error = ""
-        return stored_token
 
     static_token = _pick(
         os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"),
@@ -179,6 +219,40 @@ def get_graphql_token() -> str:
     if static_token:
         _last_token_error = ""
         return static_token
+
+    now = time.time()
+    if _token_cache["token"] and now < float(_token_cache["expires_at"] or 0):
+        _last_token_error = ""
+        return str(_token_cache["token"])
+
+    stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
+    stored_shop = _clean(get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY)) or get_shop_domain()
+    refresh_token = _clean(get_app_setting(SHOPIFY_REFRESH_TOKEN_SETTING_KEY))
+    token_expires_at = _clean(get_app_setting(SHOPIFY_TOKEN_EXPIRES_AT_KEY))
+    refresh_expires_at = _clean(get_app_setting(SHOPIFY_REFRESH_EXPIRES_AT_KEY))
+
+    if stored_token and not _token_is_expired(token_expires_at):
+        _token_cache["token"] = stored_token
+        _token_cache["expires_at"] = float(token_expires_at or (now + 3600))
+        _last_token_error = ""
+        return stored_token
+
+    if refresh_token and stored_shop and not _token_is_expired(refresh_expires_at):
+        try:
+            payload = _refresh_offline_token(stored_shop, refresh_token)
+            save_offline_token(stored_shop, payload)
+            refreshed_token = _clean(payload.get("access_token"))
+            _last_token_error = ""
+            return refreshed_token
+        except Exception as error:
+            _last_token_error = str(error)
+            return ""
+
+    if stored_token and not refresh_token:
+        _token_cache["token"] = stored_token
+        _token_cache["expires_at"] = now + 3600
+        _last_token_error = ""
+        return stored_token
 
     _last_token_error = ""
     return ""
@@ -225,6 +299,8 @@ def get_protected_data_config_status() -> dict[str, Any]:
         "has_access_token": bool(token),
         "token_source_ready": bool(static_token or stored_token or _clean(os.getenv("PASSWORD")) or (get_client_id() and get_client_secret())),
         "oauth_scopes": get_app_setting(SHOPIFY_SCOPE_SETTING_KEY),
+        "requested_oauth_scopes": ",".join(get_oauth_scopes()),
+        "has_refresh_token": bool(_clean(get_app_setting(SHOPIFY_REFRESH_TOKEN_SETTING_KEY))),
         "installed_shop": get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY),
         "token_error": _last_token_error if not token else "",
         "install_url": f"{get_app_base_url()}/shopify/install",

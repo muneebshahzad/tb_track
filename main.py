@@ -31,6 +31,7 @@ from shopify_protected_data import (
     create_oauth_state,
     exchange_oauth_code_for_token,
     fetch_protected_order_details,
+    get_graphql_api_version,
     get_graphql_endpoint,
     get_graphql_token,
     get_install_url,
@@ -182,6 +183,34 @@ def send_email():
 def format_date(date_str):
     date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
     return date_obj.isoformat()
+
+
+def setup_shopify():
+    shop_url = get_shop_domain() or (os.getenv("SHOP_URL") or "").strip()
+    token = get_graphql_token() or (os.getenv("PASSWORD") or "").strip()
+    api_key = (os.getenv("API_KEY") or "").strip()
+    if not shop_url or not token:
+        print("SHOP_URL or Shopify token missing.")
+        return
+
+    try:
+        shopify.ShopifyResource.clear_session()
+    except Exception:
+        pass
+
+    try:
+        session_obj = shopify.Session(shop_url, get_graphql_api_version(), token)
+        shopify.ShopifyResource.activate_session(session_obj)
+        return
+    except Exception as error:
+        print(f"Falling back to legacy setup: {error}")
+
+    if not shop_url.startswith("https://"):
+        shop_url = f"https://{shop_url.lstrip('/')}"
+    shopify.ShopifyResource.set_site(shop_url)
+    if api_key:
+        shopify.ShopifyResource.set_user(api_key)
+    shopify.ShopifyResource.set_password(token)
 
 
 def _sleep_for_shopify_rate_limit(error, default_seconds: float = 2.0) -> float:
@@ -1663,7 +1692,7 @@ def apply_shopify_order_tag(order_id, tag, include_date=False):
 
 def get_shopify_rest_base_url():
     raw_shop_url = (os.getenv('SHOP_URL') or '').strip()
-    parsed = urlparse(raw_shop_url)
+    parsed = urlparse(raw_shop_url if "://" in raw_shop_url else f"https://{raw_shop_url}")
     netloc = parsed.netloc or parsed.path
     if not netloc:
         raise RuntimeError('SHOP_URL is not configured.')
@@ -1672,7 +1701,7 @@ def get_shopify_rest_base_url():
 
 
 def shopify_rest_headers():
-    token = (os.getenv('PASSWORD') or '').strip()
+    token = get_graphql_token() or (os.getenv('PASSWORD') or '').strip()
     if not token:
         raise RuntimeError('Shopify admin access token is missing.')
     return {
@@ -3454,12 +3483,7 @@ def return_orders():
 
 # ── Shopify setup ─────────────────────────────────────────────────────────────
 
-shop_url = os.getenv('SHOP_URL')
-api_key  = os.getenv('API_KEY')
-password = os.getenv('PASSWORD')
-shopify.ShopifyResource.set_site(shop_url)
-shopify.ShopifyResource.set_user(api_key)
-shopify.ShopifyResource.set_password(password)
+setup_shopify()
 
 
 # ── Background refresh ────────────────────────────────────────────────────────

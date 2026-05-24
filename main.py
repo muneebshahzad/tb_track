@@ -717,8 +717,15 @@ async def getShopifyOrders(force_status=None):
         else:
             result.append(r)
 
-    result = enrich_orders_with_protected_customer_data(result)
-    result = enrich_missing_customer_data_from_rest(result)
+    try:
+        result = enrich_orders_with_protected_customer_data(result)
+    except Exception as e:
+        print(f"Continuing without protected customer enrichment: {e}")
+
+    try:
+        result = enrich_missing_customer_data_from_rest(result)
+    except Exception as e:
+        print(f"Continuing without Shopify REST customer enrichment: {e}")
 
     print(f"Processed {len(result)} orders in {time.time() - total_start:.2f}s")
     return result
@@ -3414,9 +3421,6 @@ def setup_shopify():
     shopify.ShopifyResource.set_password(token)
 
 
-setup_shopify()
-
-
 # ── Background refresh ────────────────────────────────────────────────────────
 
 def background_refresh():
@@ -3505,9 +3509,14 @@ def load_initial_data():
     print("Initial data loaded.")
 
 
-# Initialize DB at module level (fast — just creates table if not exists)
+# Initialize DB before Shopify setup so stored OAuth tokens are available.
 with app.app_context():
     init_db()
+setup_shopify()
+try:
+    load_initial_data()
+except Exception as e:
+    print(f"Initial Shopify load failed during startup: {e}")
 
 # Start background scheduler at module level so Gunicorn picks it up
 scheduler = BackgroundScheduler(daemon=True)

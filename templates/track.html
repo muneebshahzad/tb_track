@@ -329,7 +329,7 @@
 
       <div class="card" id="order-card-{{ order.id }}"
            data-status="{{ s }}"
-           data-search="{{ order.order_id }} {{ name }} {{ city }} {% for i in order.line_items %}{{ i.product_title }} {{ i.tracking_number }} {% endfor %}">
+           data-search="{{ order.order_id }} {{ s }} {{ order.financial_status or 'Pending' }} {{ name }} {{ city }} {{ phone }} {{ addr }} {% for tag in order.tags %}{{ tag }} {% endfor %}{% for i in order.line_items %}{{ i.product_title }} {{ i.tracking_number }} {% endfor %}">
 
         <!-- Header: checkbox | order# | date | status | amount -->
         <div class="card-head">

@@ -31,6 +31,7 @@ from shopify_protected_data import (
     create_oauth_state,
     exchange_oauth_code_for_token,
     fetch_protected_order_details,
+    get_graphql_api_version,
     get_graphql_endpoint,
     get_graphql_token,
     get_install_url,
@@ -334,34 +335,38 @@ def extract_shopify_customer_details(order) -> dict[str, str]:
         except (AttributeError, KeyError, TypeError):
             return ""
 
-    shipping = getattr(order, 'shipping_address', None)
     billing = getattr(order, 'billing_address', None)
+    shipping = getattr(order, 'shipping_address', None)
     customer = getattr(order, 'customer', None)
     default_address = safe_attr(customer, 'default_address')
 
-    shipping_name = safe_attr(shipping, 'name')
     billing_name = safe_attr(billing, 'name')
+    shipping_name = safe_attr(shipping, 'name')
     default_name = safe_attr(default_address, 'name')
     first_name = (
-        safe_attr(shipping, 'first_name')
-        or safe_attr(billing, 'first_name')
+        safe_attr(billing, 'first_name')
+        or safe_attr(shipping, 'first_name')
         or safe_attr(customer, 'first_name')
     )
     last_name = (
-        safe_attr(shipping, 'last_name')
-        or safe_attr(billing, 'last_name')
+        safe_attr(billing, 'last_name')
+        or safe_attr(shipping, 'last_name')
         or safe_attr(customer, 'last_name')
     )
     composed_name = " ".join(part for part in [first_name, last_name] if part).strip()
 
     return {
-        "name": shipping_name or billing_name or default_name or composed_name,
-        "address": safe_attr(shipping, 'address1') or safe_attr(billing, 'address1') or safe_attr(default_address, 'address1'),
-        "city": safe_attr(shipping, 'city') or safe_attr(billing, 'city') or safe_attr(default_address, 'city'),
+        "name": billing_name or shipping_name or default_name or composed_name,
+        "address": (
+            safe_attr(billing, 'address1')
+            or safe_attr(shipping, 'address1')
+            or safe_attr(default_address, 'address1')
+        ),
+        "city": safe_attr(billing, 'city') or safe_attr(shipping, 'city') or safe_attr(default_address, 'city'),
         "phone": (
             safe_attr(order, 'phone')
-            or safe_attr(shipping, 'phone')
             or safe_attr(billing, 'phone')
+            or safe_attr(shipping, 'phone')
             or safe_attr(default_address, 'phone')
             or safe_attr(customer, 'phone')
         ),
@@ -580,6 +585,7 @@ def fetch_all_shopify_orders(start_date, fetch_status):
 
 
 async def getShopifyOrders(force_status=None):
+    setup_shopify()
     start_date = get_shopify_order_fetch_start_date()
     fetch_status = (force_status or get_shopify_order_fetch_status() or 'any').strip().lower() or 'any'
     result = []
@@ -3294,12 +3300,36 @@ def return_orders():
 
 # ── Shopify setup ─────────────────────────────────────────────────────────────
 
-shop_url = os.getenv('SHOP_URL')
-api_key  = os.getenv('API_KEY')
-password = os.getenv('PASSWORD')
-shopify.ShopifyResource.set_site(shop_url)
-shopify.ShopifyResource.set_user(api_key)
-shopify.ShopifyResource.set_password(password)
+def setup_shopify():
+    shop_url = get_shop_domain() or (os.getenv('SHOP_URL') or '').strip()
+    token = get_graphql_token() or (os.getenv('PASSWORD') or '').strip()
+    api_key = (os.getenv('API_KEY') or '').strip()
+
+    if not shop_url or not token:
+        print("SHOP_URL or PASSWORD missing; Shopify client not configured.")
+        return
+
+    try:
+        shopify.ShopifyResource.clear_session()
+    except Exception:
+        pass
+
+    try:
+        session_obj = shopify.Session(shop_url, get_graphql_api_version(), token)
+        shopify.ShopifyResource.activate_session(session_obj)
+        return
+    except Exception as e:
+        print(f"Could not activate Shopify session; falling back to legacy setup: {e}")
+
+    if not shop_url.startswith("https://"):
+        shop_url = f"https://{shop_url.lstrip('/')}"
+    shopify.ShopifyResource.set_site(shop_url)
+    if api_key:
+        shopify.ShopifyResource.set_user(api_key)
+    shopify.ShopifyResource.set_password(token)
+
+
+setup_shopify()
 
 
 # ── Background refresh ────────────────────────────────────────────────────────

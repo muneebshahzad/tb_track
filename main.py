@@ -135,6 +135,7 @@ def inject_now():
 order_details = []
 daraz_orders = []
 order_details_lock = threading.RLock()
+initial_order_fetch_lock = threading.Lock()
 app.order_details_provider = lambda: order_details
 app.daraz_orders_provider = lambda: daraz_orders
 
@@ -637,12 +638,39 @@ async def getShopifyOrders(force_status=None):
 @app.route("/")
 def tracking():
     global order_details, daraz_orders
+    ensure_initial_order_data()
     return render_template(
         "track.html",
         order_details=order_details,
         darazOrders=daraz_orders,
         employee_approvals=build_employee_approval_items(),
     )
+
+
+def ensure_initial_order_data():
+    """Populate the first request with the same enriched order data as refresh."""
+    global order_details, daraz_orders
+    if order_details:
+        return
+
+    if not initial_order_fetch_lock.acquire(blocking=False):
+        return
+
+    try:
+        if order_details:
+            return
+        print("Initial request: order_details empty, fetching Shopify orders now.")
+        refreshed_orders = asyncio.run(getShopifyOrders())
+        if refreshed_orders:
+            with order_details_lock:
+                order_details = refreshed_orders
+        if not daraz_orders:
+            statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
+            daraz_orders = get_daraz_orders(statuses)
+    except Exception as e:
+        print(f"Initial request data fetch failed: {e}")
+    finally:
+        initial_order_fetch_lock.release()
 
 
 def build_admin_mobile_sections():

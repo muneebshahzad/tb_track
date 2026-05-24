@@ -31,7 +31,6 @@ from shopify_protected_data import (
     create_oauth_state,
     exchange_oauth_code_for_token,
     fetch_protected_order_details,
-    get_graphql_api_version,
     get_graphql_endpoint,
     get_graphql_token,
     get_install_url,
@@ -136,7 +135,6 @@ def inject_now():
 order_details = []
 daraz_orders = []
 order_details_lock = threading.RLock()
-initial_order_fetch_lock = threading.Lock()
 app.order_details_provider = lambda: order_details
 app.daraz_orders_provider = lambda: daraz_orders
 
@@ -327,46 +325,39 @@ def extract_shopify_customer_details(order) -> dict[str, str]:
             if isinstance(obj, dict):
                 value = obj.get(attr)
                 return value or ""
-            attributes = getattr(obj, "attributes", None)
-            if isinstance(attributes, dict) and attr in attributes:
-                return attributes.get(attr) or ""
             value = getattr(obj, attr)
             return value or ""
-        except (AttributeError, KeyError, TypeError):
+        except (AttributeError, TypeError):
             return ""
 
-    billing = getattr(order, 'billing_address', None)
     shipping = getattr(order, 'shipping_address', None)
+    billing = getattr(order, 'billing_address', None)
     customer = getattr(order, 'customer', None)
     default_address = safe_attr(customer, 'default_address')
 
-    billing_name = safe_attr(billing, 'name')
     shipping_name = safe_attr(shipping, 'name')
+    billing_name = safe_attr(billing, 'name')
     default_name = safe_attr(default_address, 'name')
     first_name = (
-        safe_attr(billing, 'first_name')
-        or safe_attr(shipping, 'first_name')
+        safe_attr(shipping, 'first_name')
+        or safe_attr(billing, 'first_name')
         or safe_attr(customer, 'first_name')
     )
     last_name = (
-        safe_attr(billing, 'last_name')
-        or safe_attr(shipping, 'last_name')
+        safe_attr(shipping, 'last_name')
+        or safe_attr(billing, 'last_name')
         or safe_attr(customer, 'last_name')
     )
     composed_name = " ".join(part for part in [first_name, last_name] if part).strip()
 
     return {
-        "name": billing_name or shipping_name or default_name or composed_name,
-        "address": (
-            safe_attr(billing, 'address1')
-            or safe_attr(shipping, 'address1')
-            or safe_attr(default_address, 'address1')
-        ),
-        "city": safe_attr(billing, 'city') or safe_attr(shipping, 'city') or safe_attr(default_address, 'city'),
+        "name": shipping_name or billing_name or default_name or composed_name,
+        "address": safe_attr(shipping, 'address1') or safe_attr(billing, 'address1') or safe_attr(default_address, 'address1'),
+        "city": safe_attr(shipping, 'city') or safe_attr(billing, 'city') or safe_attr(default_address, 'city'),
         "phone": (
             safe_attr(order, 'phone')
-            or safe_attr(billing, 'phone')
             or safe_attr(shipping, 'phone')
+            or safe_attr(billing, 'phone')
             or safe_attr(default_address, 'phone')
             or safe_attr(customer, 'phone')
         ),
@@ -399,93 +390,6 @@ def enrich_orders_with_protected_customer_data(orders: list[dict[str, object]]) 
             item["address"] = protected.get("address") or item.get("address", "N/A")
             item["city"] = protected.get("city") or item.get("city", "N/A")
             item["phone"] = protected.get("phone") or item.get("phone", "N/A")
-
-    return orders
-
-
-def _missing_customer_details(details: dict[str, str]) -> bool:
-    details = details or {}
-    return not all([
-        (details.get("name") or "").strip(),
-        (details.get("address") or "").strip(),
-        (details.get("phone") or "").strip(),
-    ])
-
-
-def _details_from_shopify_rest_order(payload: dict[str, object]) -> dict[str, str]:
-    def pick(*values):
-        for value in values:
-            text = str(value or "").strip()
-            if text and text.upper() != "N/A":
-                return text
-        return ""
-
-    shipping = payload.get("shipping_address") or {}
-    billing = payload.get("billing_address") or {}
-    customer = payload.get("customer") or {}
-    default_address = customer.get("default_address") or {}
-
-    name = pick(
-        billing.get("name"),
-        shipping.get("name"),
-        " ".join(part for part in [customer.get("first_name"), customer.get("last_name")] if part),
-        default_address.get("name"),
-    )
-    address = pick(
-        billing.get("address1"),
-        shipping.get("address1"),
-        default_address.get("address1"),
-    )
-    city = pick(billing.get("city"), shipping.get("city"), default_address.get("city"))
-    phone = pick(
-        payload.get("phone"),
-        billing.get("phone"),
-        shipping.get("phone"),
-        customer.get("phone"),
-        default_address.get("phone"),
-    )
-    return {"name": name, "address": address, "city": city, "phone": phone}
-
-
-def enrich_missing_customer_data_from_rest(orders: list[dict[str, object]]) -> list[dict[str, object]]:
-    missing_orders = [
-        order for order in orders
-        if order.get("id") and _missing_customer_details(order.get("customer_details") or {})
-    ]
-    if not missing_orders:
-        return orders
-
-    try:
-        base_url = get_shopify_rest_base_url()
-        headers = shopify_rest_headers()
-    except Exception as e:
-        print(f"Shopify REST customer enrichment unavailable: {e}")
-        return orders
-
-    for order in missing_orders:
-        try:
-            response = requests.get(
-                f"{base_url}/orders/{order['id']}.json",
-                params={"fields": "id,name,phone,customer,shipping_address,billing_address"},
-                headers=headers,
-                timeout=20,
-            )
-            response.raise_for_status()
-            details = _details_from_shopify_rest_order((response.json() or {}).get("order") or {})
-        except Exception as e:
-            print(f"Shopify REST customer enrichment failed for {order.get('order_id')}: {e}")
-            continue
-
-        if not any(details.values()):
-            continue
-
-        merged_details = merge_customer_details(order.get("customer_details") or {}, details)
-        order["customer_details"] = merged_details
-        for item in order.get("line_items", []):
-            item["name"] = details.get("name") or item.get("name", "")
-            item["address"] = details.get("address") or item.get("address", "")
-            item["city"] = details.get("city") or item.get("city", "")
-            item["phone"] = details.get("phone") or item.get("phone", "")
 
     return orders
 
@@ -631,7 +535,10 @@ def get_shopify_order_fetch_start_date():
 
 
 def get_shopify_order_fetch_status():
-    requested = (os.getenv('SHOPIFY_ORDER_FETCH_STATUS') or 'any').strip().lower() or 'any'
+    requested = (os.getenv('SHOPIFY_ORDER_FETCH_STATUS') or 'open').strip().lower() or 'open'
+    if requested == 'any' and os.getenv('SHOPIFY_ALLOW_ALL_ORDER_FETCH', '').strip() != '1':
+        print("SHOPIFY_ORDER_FETCH_STATUS=any ignored; using open. Set SHOPIFY_ALLOW_ALL_ORDER_FETCH=1 to fetch all orders.")
+        return 'open'
     return requested
 
 
@@ -669,7 +576,6 @@ def fetch_all_shopify_orders(start_date, fetch_status):
 
 
 async def getShopifyOrders(force_status=None):
-    setup_shopify()
     start_date = get_shopify_order_fetch_start_date()
     fetch_status = (force_status or get_shopify_order_fetch_status() or 'any').strip().lower() or 'any'
     result = []
@@ -717,15 +623,7 @@ async def getShopifyOrders(force_status=None):
         else:
             result.append(r)
 
-    try:
-        result = enrich_orders_with_protected_customer_data(result)
-    except Exception as e:
-        print(f"Continuing without protected customer enrichment: {e}")
-
-    try:
-        result = enrich_missing_customer_data_from_rest(result)
-    except Exception as e:
-        print(f"Continuing without Shopify REST customer enrichment: {e}")
+    result = enrich_orders_with_protected_customer_data(result)
 
     print(f"Processed {len(result)} orders in {time.time() - total_start:.2f}s")
     return result
@@ -736,39 +634,12 @@ async def getShopifyOrders(force_status=None):
 @app.route("/")
 def tracking():
     global order_details, daraz_orders
-    ensure_initial_order_data()
     return render_template(
         "track.html",
         order_details=order_details,
         darazOrders=daraz_orders,
         employee_approvals=build_employee_approval_items(),
     )
-
-
-def ensure_initial_order_data():
-    """Populate the first request with the same enriched order data as refresh."""
-    global order_details, daraz_orders
-    if order_details:
-        return
-
-    if not initial_order_fetch_lock.acquire(blocking=False):
-        return
-
-    try:
-        if order_details:
-            return
-        print("Initial request: order_details empty, fetching Shopify orders now.")
-        refreshed_orders = asyncio.run(getShopifyOrders(force_status='any'))
-        if refreshed_orders:
-            with order_details_lock:
-                order_details = refreshed_orders
-        if not daraz_orders:
-            statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
-            daraz_orders = get_daraz_orders(statuses)
-    except Exception as e:
-        print(f"Initial request data fetch failed: {e}")
-    finally:
-        initial_order_fetch_lock.release()
 
 
 def build_admin_mobile_sections():
@@ -842,7 +713,7 @@ def admin_portal_service_worker():
 def refresh_data():
     global order_details
     try:
-        refreshed_orders = asyncio.run(getShopifyOrders(force_status='any'))
+        refreshed_orders = asyncio.run(getShopifyOrders())
         if refreshed_orders:
             order_details = refreshed_orders
             return jsonify({'message': 'Data refreshed successfully', 'count': len(order_details)})
@@ -1610,7 +1481,7 @@ def get_shopify_rest_base_url():
 
 
 def shopify_rest_headers():
-    token = (os.getenv('PASSWORD') or '').strip() or get_graphql_token()
+    token = (os.getenv('PASSWORD') or '').strip()
     if not token:
         raise RuntimeError('Shopify admin access token is missing.')
     return {
@@ -3392,33 +3263,12 @@ def return_orders():
 
 # ── Shopify setup ─────────────────────────────────────────────────────────────
 
-def setup_shopify():
-    shop_url = get_shop_domain() or (os.getenv('SHOP_URL') or '').strip()
-    token = (os.getenv('PASSWORD') or '').strip() or get_graphql_token()
-    api_key = (os.getenv('API_KEY') or '').strip()
-
-    if not shop_url or not token:
-        print("SHOP_URL or PASSWORD missing; Shopify client not configured.")
-        return
-
-    try:
-        shopify.ShopifyResource.clear_session()
-    except Exception:
-        pass
-
-    try:
-        session_obj = shopify.Session(shop_url, get_graphql_api_version(), token)
-        shopify.ShopifyResource.activate_session(session_obj)
-        return
-    except Exception as e:
-        print(f"Could not activate Shopify session; falling back to legacy setup: {e}")
-
-    if not shop_url.startswith("https://"):
-        shop_url = f"https://{shop_url.lstrip('/')}"
-    shopify.ShopifyResource.set_site(shop_url)
-    if api_key:
-        shopify.ShopifyResource.set_user(api_key)
-    shopify.ShopifyResource.set_password(token)
+shop_url = os.getenv('SHOP_URL')
+api_key  = os.getenv('API_KEY')
+password = os.getenv('PASSWORD')
+shopify.ShopifyResource.set_site(shop_url)
+shopify.ShopifyResource.set_user(api_key)
+shopify.ShopifyResource.set_password(password)
 
 
 # ── Background refresh ────────────────────────────────────────────────────────
@@ -3432,7 +3282,7 @@ def background_refresh():
     if not order_details:
         print("BACKGROUND REFRESH: order_details empty — doing full Shopify fetch.")
         try:
-            refreshed_orders = asyncio.run(getShopifyOrders(force_status='any'))
+            refreshed_orders = asyncio.run(getShopifyOrders())
             if refreshed_orders:
                 order_details = refreshed_orders
                 print(f"BACKGROUND REFRESH: Shopify fetch complete ({len(order_details)} orders).")
@@ -3505,18 +3355,13 @@ def load_initial_data():
     print("Loading initial data...")
     statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
     daraz_orders = get_daraz_orders(statuses)
-    order_details = asyncio.run(getShopifyOrders(force_status='any'))
+    order_details = asyncio.run(getShopifyOrders())
     print("Initial data loaded.")
 
 
-# Initialize DB before Shopify setup so stored OAuth tokens are available.
+# Initialize DB at module level (fast — just creates table if not exists)
 with app.app_context():
     init_db()
-setup_shopify()
-try:
-    load_initial_data()
-except Exception as e:
-    print(f"Initial Shopify load failed during startup: {e}")
 
 # Start background scheduler at module level so Gunicorn picks it up
 scheduler = BackgroundScheduler(daemon=True)

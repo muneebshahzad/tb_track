@@ -163,7 +163,6 @@ def get_graphql_token() -> str:
     static_token = _pick(
         os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"),
         os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN"),
-        os.getenv("PASSWORD"),
     )
     if static_token:
         _last_token_error = ""
@@ -201,7 +200,6 @@ def get_protected_data_config_status() -> dict[str, Any]:
     static_token = _pick(
         os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"),
         os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN"),
-        os.getenv("PASSWORD"),
     )
     stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
     token = get_graphql_token()
@@ -210,8 +208,6 @@ def get_protected_data_config_status() -> dict[str, Any]:
         auth_mode = "static_token"
     elif _clean(os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN")):
         auth_mode = "admin_access_token"
-    elif _clean(os.getenv("PASSWORD")):
-        auth_mode = "legacy_admin_token"
     elif stored_token:
         auth_mode = "oauth_offline_token"
     elif get_client_id() and get_client_secret():
@@ -227,7 +223,7 @@ def get_protected_data_config_status() -> dict[str, Any]:
         "has_client_secret": bool(get_client_secret()),
         "has_stored_oauth_token": bool(stored_token),
         "has_access_token": bool(token),
-        "token_source_ready": bool(static_token or stored_token or (get_client_id() and get_client_secret())),
+        "token_source_ready": bool(static_token or stored_token or _clean(os.getenv("PASSWORD")) or (get_client_id() and get_client_secret())),
         "oauth_scopes": get_app_setting(SHOPIFY_SCOPE_SETTING_KEY),
         "installed_shop": get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY),
         "token_error": _last_token_error if not token else "",

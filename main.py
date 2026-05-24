@@ -187,7 +187,7 @@ def format_date(date_str):
 
 def setup_shopify():
     shop_url = get_shop_domain() or (os.getenv("SHOP_URL") or "").strip()
-    token = get_graphql_token() or (os.getenv("PASSWORD") or "").strip()
+    token = (os.getenv("PASSWORD") or "").strip() or get_graphql_token()
     api_key = (os.getenv("API_KEY") or "").strip()
     if not shop_url or not token:
         print("SHOP_URL or Shopify token missing.")
@@ -1701,7 +1701,7 @@ def get_shopify_rest_base_url():
 
 
 def shopify_rest_headers():
-    token = get_graphql_token() or (os.getenv('PASSWORD') or '').strip()
+    token = (os.getenv('PASSWORD') or '').strip() or get_graphql_token()
     if not token:
         raise RuntimeError('Shopify admin access token is missing.')
     return {

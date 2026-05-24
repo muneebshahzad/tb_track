@@ -160,7 +160,11 @@ def save_offline_token(shop: str, payload: dict[str, Any]) -> None:
 def get_graphql_token() -> str:
     global _last_token_error
 
-    static_token = _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"))
+    static_token = _pick(
+        os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"),
+        os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN"),
+        os.getenv("PASSWORD"),
+    )
     if static_token:
         _last_token_error = ""
         return static_token
@@ -194,12 +198,20 @@ def get_graphql_endpoint() -> str:
 
 
 def get_protected_data_config_status() -> dict[str, Any]:
-    static_token = _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"))
+    static_token = _pick(
+        os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN"),
+        os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN"),
+        os.getenv("PASSWORD"),
+    )
     stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
     token = get_graphql_token()
     auth_mode = "unconfigured"
-    if static_token:
+    if _clean(os.getenv("SHOPIFY_GRAPHQL_ACCESS_TOKEN")):
         auth_mode = "static_token"
+    elif _clean(os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN")):
+        auth_mode = "admin_access_token"
+    elif _clean(os.getenv("PASSWORD")):
+        auth_mode = "legacy_admin_token"
     elif stored_token:
         auth_mode = "oauth_offline_token"
     elif get_client_id() and get_client_secret():

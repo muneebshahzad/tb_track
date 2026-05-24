@@ -325,9 +325,12 @@ def extract_shopify_customer_details(order) -> dict[str, str]:
             if isinstance(obj, dict):
                 value = obj.get(attr)
                 return value or ""
+            attributes = getattr(obj, "attributes", None)
+            if isinstance(attributes, dict) and attr in attributes:
+                return attributes.get(attr) or ""
             value = getattr(obj, attr)
             return value or ""
-        except (AttributeError, TypeError):
+        except (AttributeError, KeyError, TypeError):
             return ""
 
     shipping = getattr(order, 'shipping_address', None)

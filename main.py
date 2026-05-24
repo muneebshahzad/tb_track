@@ -631,10 +631,7 @@ def get_shopify_order_fetch_start_date():
 
 
 def get_shopify_order_fetch_status():
-    requested = (os.getenv('SHOPIFY_ORDER_FETCH_STATUS') or 'open').strip().lower() or 'open'
-    if requested == 'any' and os.getenv('SHOPIFY_ALLOW_ALL_ORDER_FETCH', '').strip() != '1':
-        print("SHOPIFY_ORDER_FETCH_STATUS=any ignored; using open. Set SHOPIFY_ALLOW_ALL_ORDER_FETCH=1 to fetch all orders.")
-        return 'open'
+    requested = (os.getenv('SHOPIFY_ORDER_FETCH_STATUS') or 'any').strip().lower() or 'any'
     return requested
 
 
@@ -754,7 +751,7 @@ def ensure_initial_order_data():
         if order_details:
             return
         print("Initial request: order_details empty, fetching Shopify orders now.")
-        refreshed_orders = asyncio.run(getShopifyOrders())
+        refreshed_orders = asyncio.run(getShopifyOrders(force_status='any'))
         if refreshed_orders:
             with order_details_lock:
                 order_details = refreshed_orders
@@ -838,7 +835,7 @@ def admin_portal_service_worker():
 def refresh_data():
     global order_details
     try:
-        refreshed_orders = asyncio.run(getShopifyOrders())
+        refreshed_orders = asyncio.run(getShopifyOrders(force_status='any'))
         if refreshed_orders:
             order_details = refreshed_orders
             return jsonify({'message': 'Data refreshed successfully', 'count': len(order_details)})
@@ -3431,7 +3428,7 @@ def background_refresh():
     if not order_details:
         print("BACKGROUND REFRESH: order_details empty — doing full Shopify fetch.")
         try:
-            refreshed_orders = asyncio.run(getShopifyOrders())
+            refreshed_orders = asyncio.run(getShopifyOrders(force_status='any'))
             if refreshed_orders:
                 order_details = refreshed_orders
                 print(f"BACKGROUND REFRESH: Shopify fetch complete ({len(order_details)} orders).")
@@ -3504,7 +3501,7 @@ def load_initial_data():
     print("Loading initial data...")
     statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
     daraz_orders = get_daraz_orders(statuses)
-    order_details = asyncio.run(getShopifyOrders())
+    order_details = asyncio.run(getShopifyOrders(force_status='any'))
     print("Initial data loaded.")
 
 

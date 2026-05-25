@@ -21,7 +21,7 @@ from flask import Flask
 import shopify
 import requests
 import json
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from token_manager import get_access_token, save_tokens
@@ -131,6 +131,7 @@ def inject_now():
         'now': dt.datetime.now(),
         'skip_base_password_prompt': is_admin_portal,
         'embedded_mode': request.args.get('embedded') == '1',
+        'daraz_oauth_url': get_daraz_authorize_url(),
     }
 
 order_details = []
@@ -138,6 +139,25 @@ daraz_orders = []
 order_details_lock = threading.RLock()
 app.order_details_provider = lambda: order_details
 app.daraz_orders_provider = lambda: daraz_orders
+
+
+def get_app_base_url() -> str:
+    explicit = (
+        os.getenv('APP_BASE_URL')
+        or os.getenv('PUBLIC_APP_BASE_URL')
+        or os.getenv('SHOPIFY_APP_BASE_URL')
+        or ''
+    ).strip()
+    return explicit.rstrip('/') if explicit else 'https://dashboard.tickbags.com'
+
+
+def get_daraz_callback_url() -> str:
+    return f"{get_app_base_url()}/daraz"
+
+
+def get_daraz_authorize_url() -> str:
+    callback = quote(get_daraz_callback_url(), safe='')
+    return f"https://api.daraz.pk/oauth/authorize?response_type=code&redirect_uri={callback}&client_id=501554"
 
 RATE_LIMIT = 2
 LAST_REQUEST_TIME = 0
@@ -845,11 +865,28 @@ async def getShopifyOrders(force_status=None):
     return result
 
 
+def refresh_daraz_cache_if_needed(force: bool = False) -> list[dict]:
+    global daraz_orders
+    if daraz_orders and not force:
+        return daraz_orders
+    try:
+        statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']
+        refreshed = get_daraz_orders(statuses)
+        if refreshed or force:
+            daraz_orders = refreshed
+        return daraz_orders
+    except Exception as e:
+        print(f"Could not refresh Daraz cache: {e}")
+        return daraz_orders
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def tracking():
     global order_details, daraz_orders
+    if not daraz_orders:
+        refresh_daraz_cache_if_needed()
     return render_template(
         "track.html",
         order_details=order_details,
@@ -927,13 +964,14 @@ def admin_portal_service_worker():
 
 @app.route('/refresh', methods=['POST'])
 def refresh_data():
-    global order_details
+    global order_details, daraz_orders
     try:
         refreshed_orders = asyncio.run(getShopifyOrders())
+        refresh_daraz_cache_if_needed(force=True)
         if refreshed_orders:
             order_details = refreshed_orders
-            return jsonify({'message': 'Data refreshed successfully', 'count': len(order_details)})
-        return jsonify({'message': 'Refresh returned no Shopify orders; keeping existing data.', 'count': len(order_details)}), 502
+            return jsonify({'message': 'Data refreshed successfully', 'count': len(order_details), 'daraz_count': len(daraz_orders)})
+        return jsonify({'message': 'Refresh returned no Shopify orders; keeping existing data.', 'count': len(order_details), 'daraz_count': len(daraz_orders)}), 502
     except Exception as e:
         print(f"Error refreshing data: {e}")
         return jsonify({'message': 'Failed to refresh data'}), 500

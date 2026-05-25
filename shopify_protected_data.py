@@ -20,6 +20,10 @@ SHOPIFY_INSTALLED_AT_KEY = "shopify_installed_at"
 SHOPIFY_REFRESH_TOKEN_SETTING_KEY = "shopify_offline_refresh_token"
 SHOPIFY_TOKEN_EXPIRES_AT_KEY = "shopify_offline_access_token_expires_at"
 SHOPIFY_REFRESH_EXPIRES_AT_KEY = "shopify_offline_refresh_token_expires_at"
+SHOPIFY_LAST_GOOD_TOKEN_SETTING_KEY = "shopify_offline_access_token_last_good"
+SHOPIFY_LAST_GOOD_SCOPE_SETTING_KEY = "shopify_offline_access_scopes_last_good"
+SHOPIFY_LAST_GOOD_REFRESH_TOKEN_SETTING_KEY = "shopify_offline_refresh_token_last_good"
+SHOPIFY_LAST_GOOD_INSTALLED_AT_KEY = "shopify_offline_last_good_installed_at"
 
 _token_cache: dict[str, Any] = {"token": "", "expires_at": 0.0}
 _last_token_error: str = ""
@@ -76,6 +80,22 @@ def get_oauth_scopes() -> list[str]:
         "read_orders,read_customers,read_products,write_draft_orders,write_orders"
     )
     return [scope.strip() for scope in scopes.split(",") if scope.strip()]
+
+
+def get_required_protected_scopes() -> set[str]:
+    # Customer/order enrichment only works when the protected-data app can read
+    # both customers and orders. Product read is useful context but not enough
+    # on its own, so we treat these two as the minimum safe grant.
+    return {"read_customers", "read_orders"}
+
+
+def _parse_scope_set(raw_scopes: Any) -> set[str]:
+    return {scope.strip() for scope in str(raw_scopes or "").split(",") if scope.strip()}
+
+
+def scopes_include_required(raw_scopes: Any) -> bool:
+    scopes = _parse_scope_set(raw_scopes)
+    return get_required_protected_scopes().issubset(scopes)
 
 
 def get_install_url(state: str) -> str:
@@ -154,12 +174,27 @@ def _refresh_offline_token(shop: str, refresh_token: str) -> dict[str, Any]:
 
 def save_offline_token(shop: str, payload: dict[str, Any]) -> None:
     token = _clean(payload.get("access_token"))
-    scopes = payload.get("scope") or payload.get("associated_user_scope") or ""
+    existing_scopes = _clean(get_app_setting(SHOPIFY_SCOPE_SETTING_KEY))
+    scopes = payload.get("scope") or payload.get("associated_user_scope") or existing_scopes
     refresh_token = _clean(payload.get("refresh_token"))
+    existing_refresh_token = _clean(get_app_setting(SHOPIFY_REFRESH_TOKEN_SETTING_KEY))
+    if not refresh_token:
+        refresh_token = existing_refresh_token
     expires_in = payload.get("expires_in")
     refresh_expires_in = payload.get("refresh_token_expires_in")
     if not token:
         raise ValueError("Shopify did not return an access token")
+    if not scopes_include_required(scopes):
+        existing_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
+        if existing_token and scopes_include_required(existing_scopes):
+            raise ValueError(
+                "Refusing to replace the stored Shopify protected-data token with a weaker grant. "
+                f"Granted scopes were: {scopes or '(missing)'}"
+            )
+        raise ValueError(
+            "Shopify protected-data token is missing required read scopes. "
+            f"Granted scopes were: {scopes or '(missing)'}; required: {', '.join(sorted(get_required_protected_scopes()))}"
+        )
 
     token_expires_at = ""
     refresh_expires_at = ""
@@ -184,6 +219,10 @@ def save_offline_token(shop: str, payload: dict[str, Any]) -> None:
             set_app_setting(SHOPIFY_REFRESH_TOKEN_SETTING_KEY, refresh_token),
             set_app_setting(SHOPIFY_TOKEN_EXPIRES_AT_KEY, token_expires_at),
             set_app_setting(SHOPIFY_REFRESH_EXPIRES_AT_KEY, refresh_expires_at),
+            set_app_setting(SHOPIFY_LAST_GOOD_TOKEN_SETTING_KEY, token),
+            set_app_setting(SHOPIFY_LAST_GOOD_SCOPE_SETTING_KEY, _clean(scopes)),
+            set_app_setting(SHOPIFY_LAST_GOOD_REFRESH_TOKEN_SETTING_KEY, refresh_token),
+            set_app_setting(SHOPIFY_LAST_GOOD_INSTALLED_AT_KEY, str(int(time.time()))),
         ]
     )
     if not writes_ok:
@@ -226,10 +265,27 @@ def get_graphql_token() -> str:
         return str(_token_cache["token"])
 
     stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
+    stored_scopes = _clean(get_app_setting(SHOPIFY_SCOPE_SETTING_KEY))
     stored_shop = _clean(get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY)) or get_shop_domain()
     refresh_token = _clean(get_app_setting(SHOPIFY_REFRESH_TOKEN_SETTING_KEY))
     token_expires_at = _clean(get_app_setting(SHOPIFY_TOKEN_EXPIRES_AT_KEY))
     refresh_expires_at = _clean(get_app_setting(SHOPIFY_REFRESH_EXPIRES_AT_KEY))
+    last_good_token = _clean(get_app_setting(SHOPIFY_LAST_GOOD_TOKEN_SETTING_KEY))
+    last_good_scopes = _clean(get_app_setting(SHOPIFY_LAST_GOOD_SCOPE_SETTING_KEY))
+    last_good_refresh_token = _clean(get_app_setting(SHOPIFY_LAST_GOOD_REFRESH_TOKEN_SETTING_KEY))
+
+    if stored_token and not scopes_include_required(stored_scopes):
+        if last_good_token and scopes_include_required(last_good_scopes):
+            _token_cache["token"] = last_good_token
+            _token_cache["expires_at"] = now + 3600
+            _last_token_error = (
+                "Current stored Shopify protected-data token is missing required read scopes; using last known good token."
+            )
+            return last_good_token
+        _last_token_error = (
+            f"Stored Shopify protected-data token is missing required read scopes: {stored_scopes or '(missing)'}"
+        )
+        return ""
 
     if stored_token and not _token_is_expired(token_expires_at):
         _token_cache["token"] = stored_token
@@ -237,9 +293,10 @@ def get_graphql_token() -> str:
         _last_token_error = ""
         return stored_token
 
-    if refresh_token and stored_shop and not _token_is_expired(refresh_expires_at):
+    refresh_token_to_use = refresh_token or last_good_refresh_token
+    if refresh_token_to_use and stored_shop and not _token_is_expired(refresh_expires_at):
         try:
-            payload = _refresh_offline_token(stored_shop, refresh_token)
+            payload = _refresh_offline_token(stored_shop, refresh_token_to_use)
             save_offline_token(stored_shop, payload)
             refreshed_token = _clean(payload.get("access_token"))
             _last_token_error = ""
@@ -276,6 +333,7 @@ def get_protected_data_config_status() -> dict[str, Any]:
         os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN"),
     )
     stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
+    last_good_token = _clean(get_app_setting(SHOPIFY_LAST_GOOD_TOKEN_SETTING_KEY))
     token = get_graphql_token()
     legacy_password = _clean(os.getenv("PASSWORD"))
     api_key = _clean(os.getenv("API_KEY"))
@@ -302,11 +360,15 @@ def get_protected_data_config_status() -> dict[str, Any]:
         "has_client_id": bool(get_client_id()),
         "has_client_secret": bool(get_client_secret()),
         "has_stored_oauth_token": bool(stored_token),
+        "has_last_good_oauth_token": bool(last_good_token),
         "has_access_token": bool(token),
         "token_source_ready": bool(static_token or stored_token or _clean(os.getenv("PASSWORD")) or (get_client_id() and get_client_secret())),
         "oauth_scopes": get_app_setting(SHOPIFY_SCOPE_SETTING_KEY),
+        "oauth_scopes_include_required_reads": scopes_include_required(get_app_setting(SHOPIFY_SCOPE_SETTING_KEY)),
+        "required_protected_scopes": sorted(get_required_protected_scopes()),
         "requested_oauth_scopes": ",".join(get_oauth_scopes()),
         "has_refresh_token": bool(_clean(get_app_setting(SHOPIFY_REFRESH_TOKEN_SETTING_KEY))),
+        "has_last_good_refresh_token": bool(_clean(get_app_setting(SHOPIFY_LAST_GOOD_REFRESH_TOKEN_SETTING_KEY))),
         "installed_shop": get_app_setting(SHOPIFY_INSTALLED_SHOP_KEY),
         "token_error": _last_token_error if not token else "",
         "install_url": f"{get_app_base_url()}/shopify/install",

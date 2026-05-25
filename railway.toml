@@ -1,4 +1,5 @@
 [build]
+# Keep the Railway build source explicit so deploys track repo updates predictably.
 builder = "DOCKERFILE"
 
 [deploy]

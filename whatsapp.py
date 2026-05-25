@@ -717,7 +717,8 @@ def _product_match_text(value: str) -> str:
         "price", "cost", "rate", "how", "much", "kitna", "kitnay", "kya", "kia",
         "hai", "he", "please", "plz", "pls", "tell", "about", "bata", "sakty",
         "hain", "main", "ke", "k", "ka", "ki", "product", "details", "detail",
-        "wrong", "answer",
+        "wrong", "answer", "track", "tracking", "order", "status", "number",
+        "check", "kahan", "kidhar", "mila", "mily", "deliver",
     }
     return " ".join(word for word in text.split() if word not in stop_words)
 
@@ -1005,6 +1006,8 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
     asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
     asking_availability = any(phrase in text for phrase in AI_AVAILABILITY_PHRASES)
     has_recent_image = _recent_image_context(messages)
+    order_reference = extract_order_reference(body)
+    referenced_order = find_order_by_reference(order_reference) if order_reference else None
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
     order_help = any(phrase in text for phrase in AI_ORDER_HELP_PHRASES)
@@ -1082,6 +1085,24 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "needs_human": False,
             "labels": ["ai"],
             "reply_text": "I am from TickBags support. Share the product you like or your order question and I will help.",
+        })
+    elif referenced_order:
+        decision.update({
+            "intent": "order_tracking",
+            "confidence": 0.95,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["order_tracking"],
+            "reply_text": order_summary(referenced_order),
+        })
+    elif order_reference:
+        decision.update({
+            "intent": "order_tracking",
+            "confidence": 0.88,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["order_tracking"],
+            "reply_text": "Please share the phone number used for the order as well, and I will check the status for you.",
         })
     elif product_reply:
         decision.update({

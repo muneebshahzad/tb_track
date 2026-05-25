@@ -53,6 +53,12 @@
   .mobile-back { display:none; border:0; background:transparent; color:#aebac1; font-size:22px; width:32px; height:32px; cursor:pointer; }
   .chat-name { font-size:15px; font-weight:800; color:#e9edef; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .chat-phone { font-family:'DM Mono', monospace; font-size:11px; color:#8696a0; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chat-mode-banner { display:flex; align-items:center; gap:8px; padding:8px 14px; border-bottom:1px solid #26353d; font-size:12px; font-weight:700; }
+  .chat-mode-banner.mode-human { background:#1a2731; color:#cdd8df; }
+  .chat-mode-banner.mode-suggest { background:#332b13; color:#f3d98b; }
+  .chat-mode-banner.mode-auto { background:#123127; color:#8ff0c3; }
+  .chat-mode-banner.mode-needs_human { background:#381b1d; color:#ffb3b7; }
+  .chat-mode-banner .mode-badge { border-radius:999px; padding:2px 8px; font-size:10px; font-weight:900; text-transform:uppercase; background:rgba(255,255,255,.12); }
   .chat-actions { display:flex; gap:8px; align-items:center; flex-wrap:nowrap; justify-content:flex-end; min-width:0; overflow-x:auto; scrollbar-width:none; }
   .chat-actions::-webkit-scrollbar { display:none; }
   .wa-select, .wa-input, .wa-textarea { border:1px solid #2a3942; background:#111b21; color:#e9edef; border-radius:8px; padding:8px 10px; font:inherit; font-size:12px; outline:none; }
@@ -74,6 +80,10 @@
   .bubble { max-width:min(520px,72%); border-radius:12px; padding:8px 10px; font-size:13px; line-height:1.42; box-shadow:0 1px 4px rgba(20,33,61,.06); }
   .bubble.inbound { background:#202c33; color:#e9edef; border:0; border-top-left-radius:4px; }
   .bubble.outbound { background:#005c4b; color:#e9edef; border:0; border-top-right-radius:4px; }
+  .bubble.outbound.ai-sent { border-left:3px solid #00a884; }
+  .bubble.outbound.human-sent { border-left:3px solid #4e73df; }
+  .bubble.outbound.system-sent,
+  .bubble.outbound.assistant-sent { border-left:3px solid #f3d98b; }
   .bubble.system, .bubble.assistant { background:#182229; color:#d1d7db; border:0; }
   .bubble-sender { display:block; margin-bottom:2px; color:#7bdcb5; font-size:11px; font-weight:800; }
   .date-sep { align-self:center; background:#182229; border-radius:8px; box-shadow:0 1px 2px rgba(0,0,0,.18); color:#8696a0; font-size:11px; font-weight:800; padding:5px 10px; }
@@ -224,6 +234,10 @@
           <button class="wa-btn" onclick="setAiMode('human')" id="stopAiBtn" disabled>Stop AI</button>
           <button class="wa-btn" onclick="markNeedsHuman()" id="needsHumanBtn" disabled>Needs Human</button>
         </div>
+      </div>
+      <div class="chat-mode-banner mode-human" id="chatModeBanner">
+        <span class="mode-badge">Human</span>
+        <span id="chatModeBannerText">Human mode. Team replies will be sent manually.</span>
       </div>
       <div class="mobile-ai-bar">
         <button class="wa-btn blue" onclick="setAiMode('auto')" id="mobileHandoverBtn" disabled>Hand over to AI</button>
@@ -470,6 +484,34 @@ function aiModeLabel(mode) {
   return ({ human:'Human', suggest:'Suggest', auto:'AI ON', needs_human:'Needs Human' }[mode || 'human'] || 'Human');
 }
 
+function senderTypeLabel(message) {
+  const type = String(message?.sender_type || '').toLowerCase();
+  if (type === 'ai') return 'TickBot';
+  if (type === 'human') return 'Team';
+  if (type === 'system') return 'System';
+  if (type === 'assistant') return 'TickBot Assistant';
+  return '';
+}
+
+function chatModeBannerText(item) {
+  const mode = String(item?.ai_mode || 'human');
+  const windowLabel = serviceWindowLabel(item);
+  if (mode === 'auto') return `TickBot is handling this chat automatically. ${windowLabel}.`;
+  if (mode === 'suggest') return `TickBot will draft replies for review. ${windowLabel}.`;
+  if (mode === 'needs_human') return `This chat is paused for human review. ${windowLabel}.`;
+  return `Human mode. Team replies will be sent manually. ${windowLabel}.`;
+}
+
+function updateChatModeBanner(item) {
+  const mount = document.getElementById('chatModeBanner');
+  const badge = mount.querySelector('.mode-badge');
+  const text = document.getElementById('chatModeBannerText');
+  const mode = String(item?.ai_mode || 'human');
+  mount.className = `chat-mode-banner mode-${mode}`;
+  badge.textContent = aiModeLabel(mode);
+  text.textContent = chatModeBannerText(item || {});
+}
+
 function serviceWindowLabel(item) {
   if (!item || item.channel !== 'whatsapp') return 'Reply window open';
   if (!item.service_window_expires_at) return 'Template required';
@@ -603,6 +645,7 @@ function clearConversationSelection() {
   document.getElementById('chatName').textContent = 'Select a conversation';
   document.getElementById('chatPhone').textContent = 'No phone selected';
   document.getElementById('chatAvatar').textContent = 'TB';
+  updateChatModeBanner({ ai_mode: 'human', channel: 'whatsapp' });
   document.getElementById('statusSelect').disabled = true;
   document.getElementById('replyText').disabled = true;
   document.getElementById('sendBtn').disabled = true;
@@ -688,6 +731,7 @@ async function selectConversation(phone, options = {}) {
   const identity = conversationIdentity(conversation);
   document.getElementById('chatName').textContent = identity.title;
   document.getElementById('chatPhone').textContent = chatSubtitle(conversation, identity);
+  updateChatModeBanner(conversation);
   const chatAvatar = document.getElementById('chatAvatar');
   chatAvatar.innerHTML = avatarMarkup(conversation);
   if (!conversation.avatar_url) {
@@ -728,6 +772,7 @@ async function loadMessages() {
     if (!response.ok || payload.success === false || !Array.isArray(payload.messages)) return;
     if (payload.conversation) {
       selectedConversation = payload.conversation;
+      updateChatModeBanner(payload.conversation);
       const existing = conversationShadow.get(payload.conversation.phone);
       conversationShadow.set(payload.conversation.phone, { item: payload.conversation, missingSince: existing ? existing.missingSince : null });
       conversations = stableConversationsFromSnapshot(
@@ -792,8 +837,12 @@ function renderMessages() {
     const dateKey = Number.isNaN(d.getTime()) ? '' : d.toDateString();
     const sep = dateKey && dateKey !== lastDate ? `<div class="date-sep">${escapeHtml(d.toLocaleDateString([], { month:'short', day:'numeric', year:'numeric' }))}</div>` : '';
     if (dateKey) lastDate = dateKey;
-    const bubbleClass = message.internal_only || ['system','assistant'].includes(message.sender_type) ? (message.sender_type || 'system') : message.direction;
-    const sender = selectedConversation?.is_internal && message.sender_type && !['customer','human'].includes(message.sender_type) ? `<span class="bubble-sender">${escapeHtml(message.sender_type)}</span>` : '';
+    const senderType = String(message.sender_type || '').toLowerCase();
+    const bubbleClass = message.internal_only || ['system','assistant'].includes(senderType)
+      ? (senderType || 'system')
+      : `${message.direction}${message.direction === 'outbound' && senderType ? ` ${senderType}-sent` : ''}`;
+    const senderLabel = message.direction === 'outbound' ? senderTypeLabel(message) : '';
+    const sender = senderLabel ? `<span class="bubble-sender">${escapeHtml(senderLabel)}</span>` : '';
     return `${sep}
     <div class="bubble-row ${escapeHtml(message.direction)}">
       <div class="bubble ${escapeHtml(bubbleClass)}">
@@ -831,6 +880,7 @@ function attachmentMarkup(message) {
 function renderSidePanels() {
   const item = selectedConversation;
   if (!item) return;
+  updateChatModeBanner(item);
   const identity = conversationIdentity(item);
   document.getElementById('customerPanel').innerHTML = `
     <div class="saved-sub">

@@ -93,8 +93,25 @@ def _parse_scope_set(raw_scopes: Any) -> set[str]:
     return {scope.strip() for scope in str(raw_scopes or "").split(",") if scope.strip()}
 
 
+def _expand_scope_capabilities(scopes: set[str]) -> set[str]:
+    expanded = set(scopes)
+    # In Shopify Admin API permissions, write access implies the corresponding
+    # read capability for the same resource family. Shopify may therefore return
+    # a granted scope set containing write_* without echoing the paired read_*.
+    implied_pairs = {
+        "write_customers": "read_customers",
+        "write_orders": "read_orders",
+        "write_products": "read_products",
+        "write_draft_orders": "read_draft_orders",
+    }
+    for granted_scope, implied_scope in implied_pairs.items():
+        if granted_scope in scopes:
+            expanded.add(implied_scope)
+    return expanded
+
+
 def scopes_include_required(raw_scopes: Any) -> bool:
-    scopes = _parse_scope_set(raw_scopes)
+    scopes = _expand_scope_capabilities(_parse_scope_set(raw_scopes))
     return get_required_protected_scopes().issubset(scopes)
 
 

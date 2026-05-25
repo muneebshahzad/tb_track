@@ -2,8 +2,10 @@ import json
 import os
 import lazop
 from datetime import datetime, timedelta
+from db import get_app_setting, set_app_setting
 
 TOKEN_FILE = "daraz_tokens.json"
+DARAZ_TOKEN_SETTING_KEY = "daraz_tokens"
 APP_KEY = "501554"
 APP_SECRET = "nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD"
 BASE_URL = "https://api.daraz.pk/rest"
@@ -14,14 +16,26 @@ def save_tokens(access_token, refresh_token, expires_in=604800):
         "refresh_token": refresh_token,
         "expires_at": (datetime.now() + timedelta(seconds=expires_in)).isoformat()
     }
+    set_app_setting(DARAZ_TOKEN_SETTING_KEY, json.dumps(data))
     with open(TOKEN_FILE, "w") as f:
         json.dump(data, f)
 
 def load_tokens():
+    raw = (get_app_setting(DARAZ_TOKEN_SETTING_KEY, "") or "").strip()
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
     if not os.path.exists(TOKEN_FILE):
         return None
     with open(TOKEN_FILE, "r") as f:
-        return json.load(f)
+        data = json.load(f)
+    try:
+        set_app_setting(DARAZ_TOKEN_SETTING_KEY, json.dumps(data))
+    except Exception:
+        pass
+    return data
 
 def is_expired(tokens):
     expires_at = datetime.fromisoformat(tokens["expires_at"])

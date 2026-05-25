@@ -28,6 +28,7 @@ from token_manager import get_access_token, save_tokens
 from campaigns import campaigns_bp, init_campaign_dirs
 from whatsapp import send_order_confirmation, whatsapp_bp
 from shopify_protected_data import (
+    clear_offline_token_state,
     create_oauth_state,
     exchange_oauth_code_for_token,
     fetch_protected_order_details,
@@ -982,6 +983,22 @@ def shopify_protected_data_status():
     return jsonify(get_protected_data_config_status())
 
 
+@app.route('/shopify/protected-data/reset', methods=['POST'])
+def shopify_protected_data_reset():
+    clear_last_good = str(request.args.get('clear_last_good') or '').strip().lower() in {'1', 'true', 'yes'}
+    try:
+        clear_offline_token_state(clear_last_good=clear_last_good)
+        session.pop(SHOPIFY_OAUTH_STATE_SESSION_KEY, None)
+        return jsonify({
+            "success": True,
+            "message": "Shopify protected-data token state cleared.",
+            "install_url": f"{request.host_url.rstrip('/')}/shopify/install",
+            "cleared_last_good": clear_last_good,
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/shopify/install')
 def shopify_install():
     state = create_oauth_state()
@@ -1017,6 +1034,15 @@ def shopify_callback():
 
     try:
         payload = exchange_oauth_code_for_token(shop, code)
+        print(
+            "Shopify OAuth callback grant received:",
+            {
+                "shop": shop,
+                "scopes": payload.get("scope") or payload.get("associated_user_scope") or "",
+                "has_refresh_token": bool(payload.get("refresh_token")),
+                "expires_in": payload.get("expires_in"),
+            },
+        )
         save_offline_token(shop, payload)
         session.pop(SHOPIFY_OAUTH_STATE_SESSION_KEY, None)
         return redirect('/shopify/protected-data/status?connected=1')

@@ -375,6 +375,34 @@ def get_protected_data_config_status() -> dict[str, Any]:
     }
 
 
+def clear_offline_token_state(clear_last_good: bool = False) -> None:
+    keys = [
+        SHOPIFY_TOKEN_SETTING_KEY,
+        SHOPIFY_SCOPE_SETTING_KEY,
+        SHOPIFY_INSTALLED_SHOP_KEY,
+        SHOPIFY_INSTALLED_AT_KEY,
+        SHOPIFY_REFRESH_TOKEN_SETTING_KEY,
+        SHOPIFY_TOKEN_EXPIRES_AT_KEY,
+        SHOPIFY_REFRESH_EXPIRES_AT_KEY,
+    ]
+    if clear_last_good:
+        keys.extend(
+            [
+                SHOPIFY_LAST_GOOD_TOKEN_SETTING_KEY,
+                SHOPIFY_LAST_GOOD_SCOPE_SETTING_KEY,
+                SHOPIFY_LAST_GOOD_REFRESH_TOKEN_SETTING_KEY,
+                SHOPIFY_LAST_GOOD_INSTALLED_AT_KEY,
+            ]
+        )
+    writes_ok = all(set_app_setting(key, "") for key in keys)
+    if not writes_ok:
+        raise RuntimeError(
+            f"Could not clear Shopify OAuth token state from database: {get_last_db_error() or 'unknown database error'}"
+        )
+    _token_cache["token"] = ""
+    _token_cache["expires_at"] = 0.0
+
+
 def _order_gid(order_id: int | str) -> str:
     return f"gid://shopify/Order/{int(order_id)}"
 

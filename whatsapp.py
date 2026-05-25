@@ -458,8 +458,14 @@ def find_order_by_reference(reference: str) -> dict | None:
         return None
     shopify_orders, daraz_orders = get_order_source()
     for order in shopify_orders:
-        if order_id_matches(order.get("order_id"), reference):
+        if (
+            order_id_matches(order.get("order_id"), reference)
+            or order_id_matches(order.get("id"), reference)
+        ):
             return serialize_shopify_order(order)
+        for item in order.get("line_items", []) or []:
+            if order_id_matches(item.get("tracking_number"), reference):
+                return serialize_shopify_order(order)
     for order in daraz_orders:
         if order_id_matches(order.get("order_id"), reference):
             return serialize_daraz_order(order)
@@ -1429,6 +1435,8 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
         })
     elif decision.get("needs_human") and not decision.get("reply_text"):
         decision["reply_text"] = settings.get("escalation_reply") or settings.get("human_handoff_reply") or "Let me have our team check this and reply with the correct details."
+    if str(decision.get("intent") or "") == "order_tracking":
+        decision.pop("product_attachment_url", None)
     return normalize_ai_decision(decision)
 
 
@@ -1538,6 +1546,8 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
             "labels": sorted(labels | {"price_question"}),
             "reply_text": settings.get("price_reply") or "Please share the product name, picture, or link and I will confirm the latest price.",
         })
+    if str(decision.get("intent") or "") == "order_tracking":
+        decision.pop("product_attachment_url", None)
 
     return normalize_ai_decision(decision)
 
@@ -1547,6 +1557,40 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
     conversation = conversation or get_conversation_by_any_key(contact_key) or {}
     messages = list_inbox_messages(contact_key, limit=30) if conversation else []
     orders = customer_orders_for_conversation(conversation)
+    order_reference = extract_order_reference(body)
+    referenced_order = find_order_by_reference(order_reference) if order_reference else None
+
+    if referenced_order:
+        return normalize_ai_decision({
+            "intent": "order_tracking",
+            "confidence": 0.98,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["order_tracking"],
+            "reply_text": order_summary(referenced_order),
+            "order_state": str((conversation or {}).get("order_state") or "no_order"),
+            "order_candidate": {},
+            "missing_order_fields": [],
+            "escalation_reason": "",
+            "knowledge_gap_question": "",
+            "internal_note": "",
+        })
+    if order_reference:
+        return normalize_ai_decision({
+            "intent": "order_tracking",
+            "confidence": 0.90,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["order_tracking"],
+            "reply_text": "Please share the phone number used for the order as well, and I will check the status for you.",
+            "order_state": str((conversation or {}).get("order_state") or "no_order"),
+            "order_candidate": {},
+            "missing_order_fields": [],
+            "escalation_reason": "",
+            "knowledge_gap_question": "",
+            "internal_note": "",
+        })
+
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return strengthen_safe_ai_decision(
@@ -1557,8 +1601,6 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
             conversation=conversation,
         )
     context = build_ai_context(conversation, messages, orders, settings)
-    order_reference = extract_order_reference(body)
-    referenced_order = find_order_by_reference(order_reference) if order_reference else None
     context["referenced_order"] = referenced_order or {}
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation, limit=5)
     context["matched_products"] = [

@@ -369,6 +369,7 @@ def init_db():
                 """)
                 _ensure_app_settings_table(cur)
                 _ensure_product_costs_table(cur)
+                _ensure_tickbot_auto_reply_jobs_table(cur)
                 _ensure_whatsapp_tables(cur)
             conn.commit()
         _set_last_db_error("")
@@ -621,7 +622,6 @@ def ensure_tickbot_assistant_chat() -> dict | None:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_tickbot_auto_reply_jobs_table(cur)
                 cur.execute("""
                     INSERT INTO whatsapp_conversations (
                         phone, channel, customer_name, display_handle, status, last_message,
@@ -671,7 +671,6 @@ def get_conversation_by_any_key(key: str) -> dict | None:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_tickbot_auto_reply_jobs_table(cur)
                 cur.execute("""
                     SELECT *
                     FROM whatsapp_conversations
@@ -732,7 +731,6 @@ def save_whatsapp_message(
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 if provider_message_id and provider_message_id != "dry-run":
                     try:
                         cur.execute("""
@@ -900,7 +898,6 @@ def list_whatsapp_conversations() -> list[dict]:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 try:
                     cur.execute("""
                         SELECT *
@@ -942,7 +939,6 @@ def list_whatsapp_messages(phone: str, limit: int = 80) -> list[dict]:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     UPDATE whatsapp_conversations
                     SET unread_count = 0, status = CASE WHEN status = 'new' THEN 'open' ELSE status END
@@ -988,7 +984,6 @@ def update_whatsapp_conversation_status(phone: str, status: str) -> bool:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                _ensure_tickbot_auto_reply_jobs_table(cur)
                 cur.execute("""
                     UPDATE whatsapp_conversations
                     SET status = %s, unread_count = CASE WHEN %s <> 'new' THEN 0 ELSE unread_count END, updated_at = NOW()
@@ -1017,7 +1012,6 @@ def update_conversation_ai_mode(key, ai_mode, reason=''):
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     UPDATE whatsapp_conversations
                     SET ai_mode = %s,
@@ -1071,7 +1065,6 @@ def update_conversation_labels(key, add=None, remove=None):
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     UPDATE whatsapp_conversations
                     SET labels = %s::jsonb, updated_at = NOW()
@@ -1098,7 +1091,6 @@ def update_order_candidate(key, order_state, order_candidate):
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     UPDATE whatsapp_conversations
                     SET order_state = %s, order_candidate = %s::jsonb, updated_at = NOW()
@@ -1135,7 +1127,6 @@ def mark_order_added(key, human_user=''):
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     UPDATE whatsapp_conversations
                     SET order_state = 'order_added',
@@ -1184,7 +1175,6 @@ def save_ai_decision(key, decision_json):
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     UPDATE whatsapp_conversations
                     SET ai_last_decision = %s::jsonb,
@@ -1209,7 +1199,6 @@ def list_whatsapp_rules() -> list[dict]:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     SELECT id, name, keywords, response, enabled, hold_for_review, created_at, updated_at
                     FROM whatsapp_rules
@@ -1228,7 +1217,6 @@ def upsert_whatsapp_rule(payload: dict) -> dict | None:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 rule_id = payload.get('id')
                 values = (
                     (payload.get('name') or 'Keyword rule').strip(),
@@ -1264,7 +1252,6 @@ def list_whatsapp_templates() -> list[dict]:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     SELECT id, name, body, category, approved, created_at, updated_at
                     FROM whatsapp_templates
@@ -1283,7 +1270,6 @@ def upsert_whatsapp_template(payload: dict) -> dict | None:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 template_id = payload.get('id')
                 values = (
                     (payload.get('name') or 'WhatsApp template').strip(),
@@ -1318,7 +1304,6 @@ def create_whatsapp_blast(template_id, template_name: str, segment: str, total: 
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     INSERT INTO whatsapp_blasts (
                         template_id, template_name, segment, total_recipients, sent_count, failed_count, status
@@ -1340,7 +1325,6 @@ def list_whatsapp_blasts() -> list[dict]:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_whatsapp_tables(cur)
                 cur.execute("""
                     SELECT id, template_id, template_name, segment, total_recipients,
                            sent_count, failed_count, status, created_at
@@ -1361,7 +1345,6 @@ def enqueue_tickbot_auto_reply_job(payload: dict) -> dict | None:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_tickbot_auto_reply_jobs_table(cur)
                 values = (
                     str(payload.get("channel") or "whatsapp"),
                     str(payload.get("contact_key") or ""),
@@ -1395,7 +1378,6 @@ def claim_tickbot_auto_reply_jobs(limit: int = 3) -> list[dict]:
     try:
         with get_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                _ensure_tickbot_auto_reply_jobs_table(cur)
                 cur.execute("""
                     WITH picked AS (
                         SELECT id
@@ -1431,7 +1413,6 @@ def finish_tickbot_auto_reply_job(job_id: int, success: bool, error: str = "") -
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                _ensure_tickbot_auto_reply_jobs_table(cur)
                 if success:
                     cur.execute("""
                         UPDATE tickbot_auto_reply_jobs

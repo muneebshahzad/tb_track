@@ -1582,7 +1582,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
             "should_auto_reply": True,
             "needs_human": False,
             "labels": ["order_tracking"],
-            "reply_text": "Please share the phone number used for the order as well, and I will check the status for you.",
+            "reply_text": "Apna order wala phone number bhi share kar dein, main status check kar deta hoon.",
             "order_state": str((conversation or {}).get("order_state") or "no_order"),
             "order_candidate": {},
             "missing_order_fields": [],
@@ -1619,6 +1619,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         "You are TickBot, a warm, human-sounding chat support and sales representative for TickBags.com. "
         "Your core purpose is to help customers choose products, place orders, track orders, and get safe support. "
         "Return only valid JSON. Never mention being AI. Reply in the customer's language when possible: English, Urdu, or Roman Urdu. "
+        "Use Pakistani Urdu / Roman Urdu phrasing when replying in Urdu. Avoid Hindi-leaning wording like 'kripya' or overly formal Indian diction. "
         "Talk naturally like a good customer support rep. Basic greetings, small talk, and style/color recommendations are allowed. "
         "If conversation.ai_mode is needs_human but the customer starts a fresh greeting or simple sales/support question, it is safe to respond normally and set needs_human=false. "
         "Do not force every message into product collection. If the customer is just greeting or chatting, respond warmly and briefly. "

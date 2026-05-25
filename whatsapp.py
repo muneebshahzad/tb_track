@@ -652,7 +652,10 @@ AI_ORDER_HELP_PHRASES = (
     "order kaise", "order kaise karoon", "order kaise karun", "order kaisy",
     "order kaisy karoon", "order kaisy karun", "order kese", "order kese karoon",
     "order kese karun", "order kesay", "order kesay karoon", "order kesay karun",
-    "how to order", "place order", "order process",
+    "how to order", "place order", "order process", "i want to place an order",
+    "want to order", "want to buy", "order dena", "order krna", "order karna",
+    "order lagana", "order laga do", "mujhe order", "mujhy order", "order chahiye",
+    "order kar dein", "order kar do", "order karo",
 )
 
 AI_AVAILABILITY_PHRASES = (
@@ -766,6 +769,67 @@ def service_window_open(conversation: dict | None) -> bool:
     if getattr(expires, "tzinfo", None):
         return expires > datetime.now(expires.tzinfo)
     return expires > datetime.now()
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _hours_since(value: Any) -> float | None:
+    timestamp = _parse_timestamp(value)
+    if not timestamp:
+        return None
+    if getattr(timestamp, "tzinfo", None):
+        now = datetime.now(timestamp.tzinfo)
+    else:
+        now = datetime.now()
+    return max(0.0, (now - timestamp).total_seconds() / 3600.0)
+
+
+def _latest_previous_inbound_time(contact_key: str) -> datetime | None:
+    messages = list_inbox_messages(contact_key, limit=12)
+    inbound_seen = 0
+    for msg in reversed(messages):
+        if str((msg or {}).get("direction") or "").lower() != "inbound":
+            continue
+        inbound_seen += 1
+        if inbound_seen == 1:
+            # This is usually the message that just triggered maybe_auto_reply.
+            continue
+        return _parse_timestamp((msg or {}).get("created_at"))
+    return None
+
+
+def _should_resume_needs_human(text: str) -> bool:
+    if text in set(AI_GREETING_PHRASES):
+        return True
+    if any(phrase in text for phrase in AI_SMALL_TALK_PHRASES):
+        return True
+    if any(phrase in text for phrase in AI_ORDER_HELP_PHRASES):
+        return True
+    return any(word in text for word in ("order", "buy", "price", "delivery", "payment", "track", "tracking"))
+
+
+def maybe_resume_needs_human(conversation: dict | None, contact_key: str, body: str) -> dict | None:
+    if not conversation or str(conversation.get("ai_mode") or "").lower() != "needs_human":
+        return conversation
+    text = _normalized_customer_text(body)
+    if not _should_resume_needs_human(text):
+        return conversation
+    previous_inbound = _latest_previous_inbound_time(contact_key)
+    cooldown_hours = _hours_since(previous_inbound)
+    if cooldown_hours is None or cooldown_hours < 1.0:
+        return conversation
+    update_conversation_ai_mode(contact_key, "auto", "Auto-resumed after fresh customer restart")
+    update_conversation_labels(contact_key, remove=["needs_human", "manual_lock"])
+    return get_conversation_by_any_key(contact_key) or conversation
 
 
 def build_ai_context(conversation: dict, messages: list[dict], orders: list[dict], settings: dict) -> dict:
@@ -1457,11 +1521,13 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
 
     product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
     if product_matches:
+        labels.discard("unclear_product")
         decision["product_attachment_url"] = str(product_matches[0].get("image") or "")
         order_candidate = decision.get("order_candidate") if isinstance(decision.get("order_candidate"), dict) else {}
         order_candidate.setdefault("product", str(product_matches[0].get("product_title") or product_matches[0].get("title") or ""))
         order_candidate.setdefault("product_link", _product_url(product_matches[0]))
         decision["order_candidate"] = order_candidate
+        decision["labels"] = sorted(labels | {"product_interest"})
 
     asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
     if asking_price and "pkr" in reply_lower and not product_matches:
@@ -1512,6 +1578,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         "Your core purpose is to help customers choose products, place orders, track orders, and get safe support. "
         "Return only valid JSON. Never mention being AI. Reply in the customer's language when possible: English, Urdu, or Roman Urdu. "
         "Talk naturally like a good customer support rep. Basic greetings, small talk, and style/color recommendations are allowed. "
+        "If conversation.ai_mode is needs_human but the customer starts a fresh greeting or simple sales/support question, it is safe to respond normally and set needs_human=false. "
         "Do not force every message into product collection. If the customer is just greeting or chatting, respond warmly and briefly. "
         "TickBags sells bean bags, ottomans, floor cushions, and home decor. For broad category questions like 'bean bags available?', it is safe to say yes and ask the customer for color/size or a product picture/link. "
         "When the customer asks for product details, price, stock, image, or link, use matched_products/product context only. "
@@ -1600,6 +1667,7 @@ def should_auto_send_ai_reply(conversation: dict, decision: dict, settings: dict
 def apply_ai_decision(conversation: dict, decision: dict) -> None:
     save_ai_decision(conversation["phone"], decision)
     labels = list(decision.get("labels") or [])
+    remove_labels = []
     if decision.get("needs_human"):
         mark_conversation_needs_human(conversation["phone"], decision.get("escalation_reason") or "Needs human review", labels=labels)
         save_internal_assistant_message(
@@ -1612,8 +1680,13 @@ def apply_ai_decision(conversation: dict, decision: dict) -> None:
         return
     if decision.get("order_state") in {"collecting_details", "pending_human_order_creation"}:
         update_order_candidate(conversation["phone"], decision.get("order_state"), decision.get("order_candidate") or {})
+    order_candidate = decision.get("order_candidate") if isinstance(decision.get("order_candidate"), dict) else {}
+    if order_candidate.get("product") or "product_interest" in labels or str(decision.get("intent") or "") in {"product_question", "order_intent", "price_question"}:
+        remove_labels.append("unclear_product")
     if labels:
-        update_conversation_labels(conversation["phone"], add=labels)
+        update_conversation_labels(conversation["phone"], add=labels, remove=remove_labels)
+    elif remove_labels:
+        update_conversation_labels(conversation["phone"], remove=remove_labels)
 
 
 def ai_reply_for_message(channel: str, contact_key: str, body: str, conversation: dict | None = None) -> str:
@@ -1820,8 +1893,14 @@ def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: s
     per_chat_ai_requested = per_chat_mode in {"suggest", "auto"}
     if not settings.get("auto_handle_enabled", True) and not per_chat_ai_requested:
         return
-    if conversation and (conversation.get("manual_lock") or conversation.get("ai_mode") == "needs_human"):
+    if conversation and conversation.get("manual_lock"):
         return
+    if conversation and conversation.get("ai_mode") == "needs_human":
+        conversation = maybe_resume_needs_human(conversation, contact_key, body)
+        if conversation and conversation.get("ai_mode") == "needs_human":
+            return
+        per_chat_mode = str((conversation or {}).get("ai_mode") or "human").lower()
+        per_chat_ai_requested = per_chat_mode in {"suggest", "auto"}
     reply, rule = find_keyword_reply(body)
     if per_chat_ai_requested or settings.get("ai_mode_enabled") or settings.get("global_ai_mode_enabled"):
         decision = analyze_inbound_message(channel, contact_key, body, conversation=conversation)

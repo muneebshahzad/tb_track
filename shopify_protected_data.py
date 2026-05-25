@@ -277,6 +277,8 @@ def get_protected_data_config_status() -> dict[str, Any]:
     )
     stored_token = _clean(get_app_setting(SHOPIFY_TOKEN_SETTING_KEY))
     token = get_graphql_token()
+    legacy_password = _clean(os.getenv("PASSWORD"))
+    api_key = _clean(os.getenv("API_KEY"))
     auth_mode = "unconfigured"
     if stored_token:
         auth_mode = "oauth_offline_token"
@@ -292,6 +294,10 @@ def get_protected_data_config_status() -> dict[str, Any]:
         "shop_domain": get_shop_domain(),
         "api_version": get_graphql_api_version(),
         "auth_mode": auth_mode,
+        "core_orders_auth_mode": "legacy_password" if legacy_password else ("oauth_token" if token else "unconfigured"),
+        "core_orders_using_legacy_password": bool(legacy_password),
+        "core_orders_has_api_key": bool(api_key),
+        "protected_customer_auth_mode": auth_mode,
         "has_static_access_token": bool(static_token),
         "has_client_id": bool(get_client_id()),
         "has_client_secret": bool(get_client_secret()),

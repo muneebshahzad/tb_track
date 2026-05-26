@@ -465,6 +465,25 @@ def _assistant_answer_success_note(reference: str, learned: bool, sent: bool, se
     return " ".join(parts)
 
 
+def _is_simple_safe_restart(text: str) -> bool:
+    normalized = _normalized_customer_text(text)
+    if not normalized:
+        return False
+    if normalized in set(AI_GREETING_PHRASES):
+        return True
+    if any(phrase in normalized for phrase in AI_SMALL_TALK_PHRASES):
+        return True
+    if any(phrase in normalized for phrase in AI_ORDER_HELP_PHRASES):
+        return True
+    if any(phrase in normalized for phrase in AI_AVAILABILITY_PHRASES):
+        return True
+    if any(phrase in normalized for phrase in AI_LOCATION_PHRASES):
+        return True
+    if any(phrase in normalized for phrase in AI_SUGGESTION_PHRASES):
+        return True
+    return normalized in {"?", "??", "???", "hi", "hello", "salam", "assalamualaikum"}
+
+
 def phone_matches(left: str, right: str) -> bool:
     left_digits = clean_digits(left)
     right_digits = clean_digits(right)
@@ -1846,8 +1865,11 @@ def apply_ai_decision(conversation: dict, decision: dict) -> None:
     labels = list(decision.get("labels") or [])
     remove_labels = []
     if decision.get("needs_human"):
-        mark_conversation_needs_human(conversation["phone"], decision.get("escalation_reason") or "Needs human review", labels=labels)
         customer_message = str(decision.get("_customer_message") or "").strip()
+        reason_text = str(decision.get("escalation_reason") or "").strip()
+        if _is_simple_safe_restart(customer_message) and reason_text.lower() == "ai decision unavailable.":
+            return
+        mark_conversation_needs_human(conversation["phone"], decision.get("escalation_reason") or "Needs human review", labels=labels)
         assistant_prompt = (
             f"{conversation.get('public_chat_id') or conversation.get('phone')} needs human help.\n"
             f"Customer asked: {customer_message or 'Review latest inbound message.'}\n"
@@ -2094,8 +2116,22 @@ def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: s
         per_chat_ai_requested = per_chat_mode in {"suggest", "auto"}
     reply, rule = find_keyword_reply(body)
     if per_chat_ai_requested or settings.get("ai_mode_enabled") or settings.get("global_ai_mode_enabled"):
+        recent_messages = list_inbox_messages(contact_key, limit=30) if conversation else []
         decision = analyze_inbound_message(channel, contact_key, body, conversation=conversation)
         decision["_customer_message"] = str(body or "").strip()
+        if (
+            decision.get("needs_human")
+            and str(decision.get("escalation_reason") or "").strip().lower() == "ai decision unavailable."
+            and _is_simple_safe_restart(body)
+        ):
+            decision = strengthen_safe_ai_decision(
+                body,
+                heuristic_ai_decision(channel, body, settings, messages=recent_messages, conversation=conversation),
+                settings,
+                messages=recent_messages,
+                conversation=conversation,
+            )
+            decision["_customer_message"] = str(body or "").strip()
         conversation = get_conversation_by_any_key(contact_key) or conversation
         if conversation:
             apply_ai_decision(conversation, decision)

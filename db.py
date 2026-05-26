@@ -1168,6 +1168,58 @@ def save_internal_assistant_message(body, metadata=None):
     )
 
 
+def save_tickbot_knowledge(title: str, content: str, source: str = "assistant", verified: bool = True):
+    title = str(title or "").strip()
+    content = str(content or "").strip()
+    source = str(source or "assistant").strip() or "assistant"
+    if not content:
+        return None
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    INSERT INTO tickbot_knowledge (title, content, source, verified, updated_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    RETURNING *
+                """, (title, content, source, bool(verified)))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB save_tickbot_knowledge error: {e}")
+        return None
+
+
+def list_tickbot_knowledge(limit: int = 200, verified_only: bool = True) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if verified_only:
+                    cur.execute("""
+                        SELECT *
+                        FROM tickbot_knowledge
+                        WHERE verified = TRUE
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT %s
+                    """, (max(1, int(limit or 200)),))
+                else:
+                    cur.execute("""
+                        SELECT *
+                        FROM tickbot_knowledge
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT %s
+                    """, (max(1, int(limit or 200)),))
+                rows = cur.fetchall() or []
+        _set_last_db_error("")
+        return [dict(row) for row in rows]
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_tickbot_knowledge error: {e}")
+        return []
+
+
 def save_ai_decision(key, decision_json):
     conversation = get_conversation_by_any_key(key)
     if not conversation:

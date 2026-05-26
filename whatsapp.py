@@ -27,6 +27,7 @@ from db import (
     get_last_db_error,
     get_conversation_by_any_key,
     get_whatsapp_conversation,
+    list_tickbot_knowledge,
     list_inbox_conversations,
     list_inbox_messages,
     list_whatsapp_blasts,
@@ -39,6 +40,7 @@ from db import (
     save_whatsapp_message,
     save_ai_decision,
     save_internal_assistant_message,
+    save_tickbot_knowledge,
     set_app_setting,
     mark_conversation_needs_human,
     mark_new_order,
@@ -363,6 +365,104 @@ def save_whatsapp_settings(settings: dict[str, Any]) -> bool:
         "openai_model": str(settings.get("openai_model", current.get("openai_model", "gpt-4.1-mini")) or "gpt-4.1-mini").strip(),
     })
     return set_app_setting("whatsapp_inbox_settings", json.dumps(current))
+
+
+KNOWLEDGE_STOP_WORDS = {
+    "the", "a", "an", "and", "or", "to", "for", "of", "is", "are", "in", "on", "at", "with",
+    "your", "you", "please", "can", "could", "would", "will", "this", "that", "from", "have",
+    "has", "had", "our", "their", "about", "what", "when", "where", "which", "tell", "share",
+    "mera", "meri", "mere", "ap", "aap", "ka", "ki", "ke", "hai", "hain", "kar", "karo", "karo",
+    "dein", "do", "main", "mujhe", "mujhy", "mujh", "ho", "hona", "tha", "thi", "tk", "tak",
+    "order", "tracking", "track", "status", "phone", "number", "product", "price",
+}
+
+
+def _knowledge_tokens(text: str) -> set[str]:
+    text = str(text or "").lower()
+    tokens = set(re.findall(r"[a-z0-9\u0600-\u06ff]{3,}", text))
+    return {token for token in tokens if token not in KNOWLEDGE_STOP_WORDS}
+
+
+def search_tickbot_knowledge(query: str, limit: int = 3) -> list[dict]:
+    query_tokens = _knowledge_tokens(query)
+    if not query_tokens:
+        return []
+    matches: list[dict] = []
+    for entry in list_tickbot_knowledge(limit=250):
+        haystack = " ".join([
+            str(entry.get("title") or ""),
+            str(entry.get("content") or ""),
+        ])
+        entry_tokens = _knowledge_tokens(haystack)
+        if not entry_tokens:
+            continue
+        overlap = len(query_tokens & entry_tokens)
+        if not overlap:
+            continue
+        score = overlap / max(len(query_tokens), 1)
+        if str(query or "").lower().strip() and str(query).lower().strip() in haystack.lower():
+            score += 0.5
+        if score >= 0.34 or overlap >= 2:
+            enriched = dict(entry)
+            enriched["_score"] = round(score, 4)
+            matches.append(enriched)
+    matches.sort(key=lambda item: (float(item.get("_score") or 0), str(item.get("updated_at") or "")), reverse=True)
+    return matches[: max(1, int(limit or 3))]
+
+
+def latest_unresolved_assistant_alert(reference: str = "") -> dict | None:
+    reference = str(reference or "").strip()
+    messages = list_inbox_messages("internal:tickbot-assistant", limit=120)
+    for msg in reversed(messages):
+        metadata = _safe_json_dict((msg or {}).get("metadata"))
+        if metadata.get("source") != "ai_escalation":
+            continue
+        conversation_ref = str(metadata.get("conversation") or "").strip()
+        public_ref = str(metadata.get("public_chat_id") or "").strip()
+        if reference and reference not in {conversation_ref, public_ref}:
+            continue
+        return {
+            "message": msg,
+            "metadata": metadata,
+            "conversation": get_conversation_by_any_key(public_ref or conversation_ref) if (public_ref or conversation_ref) else None,
+        }
+    return None
+
+
+def parse_assistant_teach_command(body: str) -> tuple[str, str] | None:
+    text = str(body or "").strip()
+    match = re.match(r"^\s*teach\s*:\s*(.+?)\s*=>\s*(.+)\s*$", text, flags=re.I | re.S)
+    if not match:
+        return None
+    question = match.group(1).strip()
+    answer = match.group(2).strip()
+    if not question or not answer:
+        return None
+    return question, answer
+
+
+def parse_assistant_answer_command(body: str) -> tuple[str, str] | None:
+    text = str(body or "").strip()
+    patterns = [
+        r"^\s*answer\s+([A-Za-z0-9:+\-_#]+)\s*:\s*(.+)\s*$",
+        r"^\s*reply\s+([A-Za-z0-9:+\-_#]+)\s*:\s*(.+)\s*$",
+        r"^\s*([A-Za-z]{2}-[A-Za-z]{2}-[0-9]{6}|internal:tickbot-assistant|[+0-9][A-Za-z0-9:+\-_#]*)\s*:\s*(.+)\s*$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, text, flags=re.I | re.S)
+        if match:
+            return match.group(1).strip(), match.group(2).strip()
+    return None
+
+
+def _assistant_answer_success_note(reference: str, learned: bool, sent: bool, send_error: str = "") -> str:
+    parts = [f"Saved answer for {reference}."]
+    parts.append("TickBot will reuse it for similar questions." if learned else "Could not save reusable knowledge.")
+    if sent:
+        parts.append("Customer reply sent.")
+    elif send_error:
+        parts.append(f"Customer reply not sent: {send_error}")
+    return " ".join(parts)
 
 
 def phone_matches(left: str, right: str) -> bool:
@@ -839,6 +939,13 @@ def maybe_resume_needs_human(conversation: dict | None, contact_key: str, body: 
 
 
 def build_ai_context(conversation: dict, messages: list[dict], orders: list[dict], settings: dict) -> dict:
+    latest_customer_message = ""
+    for msg in reversed(messages[-12:]):
+        if str(msg.get("direction") or "") == "inbound":
+            latest_customer_message = str(msg.get("body") or "").strip()
+            if latest_customer_message:
+                break
+    knowledge_matches = search_tickbot_knowledge(latest_customer_message, limit=3) if latest_customer_message else []
     return {
         "conversation": {
             "channel": conversation.get("channel"),
@@ -861,6 +968,14 @@ def build_ai_context(conversation: dict, messages: list[dict], orders: list[dict
         ],
         "recent_orders": orders[:5],
         "business_facts": settings.get("business_facts", ""),
+        "knowledge_matches": [
+            {
+                "title": item.get("title"),
+                "content": item.get("content"),
+                "score": item.get("_score"),
+            }
+            for item in knowledge_matches
+        ],
         "safe_defaults": {
             "delivery_time": settings.get("delivery_time_reply"),
             "payment_method": settings.get("payment_method_reply"),
@@ -1591,6 +1706,24 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
             "internal_note": "",
         })
 
+    knowledge_matches = search_tickbot_knowledge(body, limit=3)
+    top_knowledge = knowledge_matches[0] if knowledge_matches else None
+    if top_knowledge and float(top_knowledge.get("_score") or 0) >= 0.45:
+        return normalize_ai_decision({
+            "intent": "product_question" if any(word in _normalized_customer_text(body) for word in ("product", "price", "available", "delivery")) else "unknown",
+            "confidence": min(0.94, max(0.78, float(top_knowledge.get("_score") or 0))),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["ai"],
+            "reply_text": str(top_knowledge.get("content") or "").strip(),
+            "order_state": str((conversation or {}).get("order_state") or "no_order"),
+            "order_candidate": _safe_json_dict((conversation or {}).get("order_candidate")),
+            "missing_order_fields": [],
+            "escalation_reason": "",
+            "knowledge_gap_question": "",
+            "internal_note": f"Answered from TickBot knowledge: {top_knowledge.get('title') or 'assistant memory'}",
+        })
+
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return strengthen_safe_ai_decision(
@@ -1624,6 +1757,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         "If conversation.ai_mode is needs_human but the customer starts a fresh greeting or simple sales/support question, it is safe to respond normally and set needs_human=false. "
         "Do not force every message into product collection. If the customer is just greeting or chatting, respond warmly and briefly. "
         "TickBags sells bean bags, ottomans, floor cushions, and home decor. For broad category questions like 'bean bags available?', it is safe to say yes and ask the customer for color/size or a product picture/link. "
+        "If context.knowledge_matches contains a close reusable answer, prefer it instead of escalating. "
         "When the customer asks for product details, price, stock, image, or link, use matched_products/product context only. "
         "If matched_products is empty for exact price, exact stock, exact variant, or exact product details, ask for the product name, link, screenshot, or picture instead of inventing facts. "
         "Collect order details only when the customer shows buying intent: product, name, phone, complete address, quantity, and variant/color. "
@@ -1713,9 +1847,23 @@ def apply_ai_decision(conversation: dict, decision: dict) -> None:
     remove_labels = []
     if decision.get("needs_human"):
         mark_conversation_needs_human(conversation["phone"], decision.get("escalation_reason") or "Needs human review", labels=labels)
+        customer_message = str(decision.get("_customer_message") or "").strip()
+        assistant_prompt = (
+            f"{conversation.get('public_chat_id') or conversation.get('phone')} needs human help.\n"
+            f"Customer asked: {customer_message or 'Review latest inbound message.'}\n"
+            f"Reason: {decision.get('escalation_reason') or decision.get('knowledge_gap_question') or decision.get('internal_note') or 'Needs human review.'}\n"
+            f"Reply here with: Answer {conversation.get('public_chat_id') or conversation.get('phone')}: <your reply>\n"
+            f"To teach a general reusable answer, use: Teach: <question> => <answer>"
+        )
         save_internal_assistant_message(
-            f"{conversation.get('public_chat_id') or conversation.get('phone')} needs human help: {decision.get('escalation_reason') or decision.get('knowledge_gap_question') or decision.get('internal_note') or 'Review latest message.'}",
-            metadata={"source": "ai_escalation", "conversation": conversation.get("phone"), "decision": decision},
+            assistant_prompt,
+            metadata={
+                "source": "ai_escalation",
+                "conversation": conversation.get("phone"),
+                "public_chat_id": conversation.get("public_chat_id"),
+                "customer_message": customer_message,
+                "decision": decision,
+            },
         )
         return
     if decision.get("order_state") == "new_order":
@@ -1947,6 +2095,7 @@ def maybe_auto_reply(channel: str, contact_key: str, body: str, customer_name: s
     reply, rule = find_keyword_reply(body)
     if per_chat_ai_requested or settings.get("ai_mode_enabled") or settings.get("global_ai_mode_enabled"):
         decision = analyze_inbound_message(channel, contact_key, body, conversation=conversation)
+        decision["_customer_message"] = str(body or "").strip()
         conversation = get_conversation_by_any_key(contact_key) or conversation
         if conversation:
             apply_ai_decision(conversation, decision)
@@ -2304,6 +2453,84 @@ def api_assistant_message():
         sender_type="human",
         internal_only=True,
     )
+    teach_command = parse_assistant_teach_command(body)
+    if teach_command:
+        question, answer = teach_command
+        learned = save_tickbot_knowledge(question[:160], answer, source="assistant_chat", verified=True)
+        if learned:
+            save_internal_assistant_message(
+                f"Saved reusable TickBot knowledge for: {question}",
+                metadata={"source": "knowledge_saved", "question": question},
+            )
+        return jsonify_data({"success": bool(saved), "message": saved, "knowledge_saved": bool(learned)})
+
+    answer_command = parse_assistant_answer_command(body)
+    if answer_command:
+        reference, answer_text = answer_command
+        alert = latest_unresolved_assistant_alert(reference)
+        conversation = get_conversation_by_any_key(reference) or (alert or {}).get("conversation")
+        if not conversation:
+            save_internal_assistant_message(
+                f"Could not find a chat for `{reference}`. Try the public chat ID like TB-FB-000001.",
+                metadata={"source": "assistant_resolution_error", "reference": reference},
+            )
+            return jsonify({"success": False, "error": "Conversation not found."}), 404
+        metadata = (alert or {}).get("metadata") or {}
+        learned = save_tickbot_knowledge(
+            title=str(metadata.get("customer_message") or conversation.get("last_message") or reference)[:160],
+            content=answer_text,
+            source=f"assistant_resolution:{conversation.get('public_chat_id') or conversation.get('phone')}",
+            verified=True,
+        )
+        send_error = ""
+        sent = False
+        if str(conversation.get("channel") or "").lower() == "whatsapp" and not service_window_open(conversation):
+            send_error = "WhatsApp reply window is closed. Save a template or reply manually when the customer messages again."
+        else:
+            ok, provider_id, meta = send_channel_text_message(conversation.get("channel") or "whatsapp", conversation.get("phone") or reference, answer_text)
+            if ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
+                sent = True
+                save_whatsapp_message(
+                    conversation.get("phone") or reference,
+                    "outbound",
+                    answer_text,
+                    customer_name=conversation.get("customer_name") or "",
+                    provider_message_id=provider_id if ok else "dry-run",
+                    metadata={"source": "assistant_resolution", "reference": reference, "dry_run": not ok, "meta": meta},
+                    channel=conversation.get("channel") or "whatsapp",
+                    display_handle=conversation.get("display_handle") or "",
+                    contact_phone=conversation.get("contact_phone") or "",
+                    sender_type="human",
+                    ai_metadata={"assistant_resolution": True},
+                )
+            else:
+                send_error = provider_id or "Message send failed."
+        update_conversation_ai_mode(conversation.get("phone") or reference, "suggest", "Answered via TickBot Assistant")
+        update_conversation_labels(conversation.get("phone") or reference, remove=["needs_human", "manual_lock"])
+        save_internal_assistant_message(
+            _assistant_answer_success_note(conversation.get("public_chat_id") or conversation.get("phone") or reference, bool(learned), sent, send_error),
+            metadata={"source": "assistant_resolution_saved", "reference": reference, "conversation": conversation.get("phone")},
+        )
+        return jsonify_data({
+            "success": True,
+            "message": saved,
+            "knowledge_saved": bool(learned),
+            "customer_reply_sent": sent,
+            "send_error": send_error,
+            "conversation": conversation,
+        })
+
+    lowered = body.lower()
+    if "what did he ask" in lowered or "what did they ask" in lowered or "latest unresolved" in lowered:
+        alert = latest_unresolved_assistant_alert()
+        if alert:
+            metadata = alert.get("metadata") or {}
+            save_internal_assistant_message(
+                f"Latest unresolved: {metadata.get('public_chat_id') or metadata.get('conversation')}\nCustomer asked: {metadata.get('customer_message') or 'Review latest chat message.'}",
+                metadata={"source": "assistant_summary", "reference": metadata.get("public_chat_id") or metadata.get("conversation")},
+            )
+        return jsonify_data({"success": bool(saved), "message": saved})
+
     if any(word in body.lower() for word in ("fact:", "policy:", "teach:", "remember")):
         current = get_whatsapp_settings()
         current["business_facts"] = (current.get("business_facts", "") + "\n" + body).strip()

@@ -499,6 +499,9 @@ def order_id_matches(left: Any, right: Any) -> bool:
 
 
 def extract_order_reference(text: str) -> str:
+    match = re.search(r"\b([A-Z]{1,4}[0-9]{6,})\b", str(text or ""), flags=re.I)
+    if match:
+        return match.group(1).upper()
     match = re.search(r"(?:order\s*#?|#)\s*([0-9]{5,})", str(text or ""), flags=re.I)
     if match:
         return match.group(1)
@@ -1200,22 +1203,24 @@ def _contextual_followup_reply(body: str, product_context: str, settings: dict) 
 
 def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
     text = _normalized_customer_text(body)
+    latest_body = _latest_customer_text(body)
+    latest_text = _normalized_customer_text(latest_body)
     decision = dict(AI_DECISION_DEFAULT)
     decision.update({"needs_human": False, "labels": [], "confidence": 0.72, "should_auto_reply": False})
     delivery_reply = settings.get("delivery_time_reply") or "Our usual delivery time is 3 to 7 working days depending on your city and order type."
     price_reply = settings.get("price_reply") or "Please share the product name, picture, or link and I will confirm the latest price."
     payment_reply = settings.get("payment_method_reply") or "We mainly offer Cash on Delivery. Bank transfer can be arranged in special cases."
     product_context = _recent_product_context(messages, conversation)
-    contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
-    asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
-    asking_availability = any(phrase in text for phrase in AI_AVAILABILITY_PHRASES)
+    contextual_reply = _contextual_followup_reply(latest_body, product_context, settings) if any(phrase in latest_text for phrase in AI_FOLLOWUP_PHRASES) else ""
+    asking_price = any(word in latest_text for word in ("price", "cost", "rate", "kitna", "kitnay"))
+    asking_availability = any(phrase in latest_text for phrase in AI_AVAILABILITY_PHRASES)
     has_recent_image = _recent_image_context(messages)
-    order_reference = extract_order_reference(body)
+    order_reference = extract_order_reference(latest_body)
     referenced_order = find_order_by_reference(order_reference) if order_reference else None
-    product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
-    product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
-    order_help = any(phrase in text for phrase in AI_ORDER_HELP_PHRASES)
-    if text.strip() in AI_GREETING_PHRASES:
+    product_matches = _find_product_matches(latest_body, messages=messages, conversation=conversation)
+    product_reply = _product_details_reply(product_matches, latest_body, asking_price=asking_price)
+    order_help = _is_buying_intent(latest_body)
+    if latest_text.strip() in AI_GREETING_PHRASES:
         decision.update({
             "intent": "greeting",
             "confidence": 0.94,
@@ -1224,7 +1229,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "labels": ["ai"],
             "reply_text": "Hi! How can I help you with TickBags today?",
         })
-    elif any(phrase in text for phrase in AI_SMALL_TALK_PHRASES):
+    elif any(phrase in latest_text for phrase in AI_SMALL_TALK_PHRASES):
         decision.update({
             "intent": "greeting",
             "confidence": 0.92,
@@ -1233,7 +1238,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "labels": ["ai"],
             "reply_text": "I am good, thank you. How can I help you with TickBags today?",
         })
-    elif any(phrase in text for phrase in ("why don't you", "why dont you", "no reply", "reply?", "respond", "where are you")):
+    elif any(phrase in latest_text for phrase in ("why don't you", "why dont you", "no reply", "reply?", "respond", "where are you")):
         decision.update({
             "intent": "greeting",
             "confidence": 0.88,
@@ -1242,7 +1247,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "labels": ["ai"],
             "reply_text": "Sorry for the delay. I am here now. How can I help you with your TickBags order or product?",
         })
-    elif "[image]" in text or text == "image":
+    elif "[image]" in latest_text or latest_text == "image":
         if _recent_availability_request(messages):
             decision.update({
                 "intent": "product_question",
@@ -1263,7 +1268,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "order_state": "collecting_details",
             "missing_order_fields": ["product"],
         })
-    elif any(word in text for word in AI_RISK_PHRASES):
+    elif any(word in latest_text for word in AI_RISK_PHRASES):
         decision.update({
             "intent": "damaged_item" if "damage" in text or "damaged" in text else "refund_exchange",
             "needs_human": True,
@@ -1272,7 +1277,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "reply_text": settings.get("escalation_reply") or settings.get("human_handoff_reply") or "",
             "escalation_reason": "Complaint/refund/damaged item requires a human.",
         })
-    elif any(word in text for word in AI_OUT_OF_SCOPE_PHRASES):
+    elif any(word in latest_text for word in AI_OUT_OF_SCOPE_PHRASES):
         decision.update({
             "intent": "out_of_scope",
             "needs_human": True,
@@ -1281,7 +1286,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "reply_text": settings.get("escalation_reply") or settings.get("human_handoff_reply") or "",
             "escalation_reason": "Message appears outside TickBags sales/support scope.",
         })
-    elif any(phrase in text for phrase in ("who are you", "what are you", "ap kon", "aap kon", "who is this")):
+    elif any(phrase in latest_text for phrase in ("who are you", "what are you", "ap kon", "aap kon", "who is this")):
         decision.update({
             "intent": "greeting",
             "confidence": 0.90,
@@ -1307,6 +1312,15 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "needs_human": False,
             "labels": ["order_tracking"],
             "reply_text": "Please share the phone number used for the order as well, and I will check the status for you.",
+        })
+    elif _is_tracking_request(latest_body):
+        decision.update({
+            "intent": "order_tracking",
+            "confidence": 0.86,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["order_tracking"],
+            "reply_text": "Please share your order number or the phone number used for the order, and I will check the status for you.",
         })
     elif product_reply:
         decision.update({
@@ -1363,13 +1377,13 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "reply_text": contextual_reply,
             "order_state": "collecting_details",
         })
-    elif any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay")):
+    elif any(word in latest_text for word in ("price", "cost", "rate", "kitna", "kitnay")):
         decision.update({"intent": "price_question", "confidence": 0.86, "labels": ["price_question"], "reply_text": price_reply, "should_auto_reply": True})
-    elif any(word in text for word in ("delivery", "deliver", "kitne din", "days")):
+    elif any(word in latest_text for word in ("delivery", "deliver", "kitne din", "days")):
         decision.update({"intent": "delivery_question", "confidence": 0.88, "labels": ["delivery_question"], "reply_text": delivery_reply, "should_auto_reply": True})
-    elif any(word in text for word in ("payment", "cod", "cash", "bank", "advance")):
+    elif any(word in latest_text for word in ("payment", "cod", "cash", "bank", "advance")):
         decision.update({"intent": "payment_question", "confidence": 0.86, "labels": ["payment_question"], "reply_text": payment_reply, "should_auto_reply": True})
-    elif any(phrase in text for phrase in AI_LOCATION_PHRASES):
+    elif any(phrase in latest_text for phrase in AI_LOCATION_PHRASES):
         decision.update({
             "intent": "delivery_question",
             "confidence": 0.82,
@@ -1378,7 +1392,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "labels": ["delivery_question"],
             "reply_text": "We are based in Pakistan. Please share your city and the product you want, and I will guide you with the next step.",
         })
-    elif any(phrase in text for phrase in AI_SUGGESTION_PHRASES):
+    elif any(phrase in latest_text for phrase in AI_SUGGESTION_PHRASES):
         decision.update({
             "intent": "product_question",
             "confidence": 0.82,
@@ -1388,10 +1402,10 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "reply_text": "Ji bilkul. TickBags mein bean bags, ottomans, floor cushions, aur home decor options available hain. Aap kis product ke baare mein details chahte hain, ya product ka screenshot/link share kar dein.",
             "order_state": "collecting_details",
         })
-    elif any(word in text for word in ("order", "buy", "want this", "address", "phone", "name")):
+    elif any(word in latest_text for word in ("order", "buy", "want this", "address", "phone", "name")):
         candidate = {}
-        if "address" in text or "lahore" in text or "karachi" in text:
-            candidate["address"] = body
+        if "address" in latest_text or "lahore" in latest_text or "karachi" in latest_text:
+            candidate["address"] = latest_body
         decision.update({
             "intent": "order_intent",
             "labels": ["product_interest", "collecting_details"],
@@ -1416,15 +1430,17 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
 
 def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
     text = _normalized_customer_text(body)
+    latest_body = _latest_customer_text(body)
+    latest_text = _normalized_customer_text(latest_body)
     simple_greetings = set(AI_GREETING_PHRASES)
     product_context = _recent_product_context(messages, conversation)
-    contextual_reply = _contextual_followup_reply(body, product_context, settings) if any(phrase in text for phrase in AI_FOLLOWUP_PHRASES) else ""
-    asking_price = any(word in text for word in ("price", "cost", "rate", "kitna", "kitnay"))
-    asking_availability = any(phrase in text for phrase in AI_AVAILABILITY_PHRASES)
+    contextual_reply = _contextual_followup_reply(latest_body, product_context, settings) if any(phrase in latest_text for phrase in AI_FOLLOWUP_PHRASES) else ""
+    asking_price = any(word in latest_text for word in ("price", "cost", "rate", "kitna", "kitnay"))
+    asking_availability = any(phrase in latest_text for phrase in AI_AVAILABILITY_PHRASES)
     has_recent_image = _recent_image_context(messages)
-    product_matches = _find_product_matches(body, messages=messages, conversation=conversation)
-    product_reply = _product_details_reply(product_matches, body, asking_price=asking_price)
-    order_help = any(phrase in text for phrase in AI_ORDER_HELP_PHRASES)
+    product_matches = _find_product_matches(latest_body, messages=messages, conversation=conversation)
+    product_reply = _product_details_reply(product_matches, latest_body, asking_price=asking_price)
+    order_help = _is_buying_intent(latest_body)
     default_unavailable = (
         str(decision.get("escalation_reason") or "").strip().lower() == "ai decision unavailable."
         and not decision.get("reply_text")
@@ -1432,18 +1448,18 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
     soft_unknown_escalation = (
         decision.get("needs_human")
         and str(decision.get("intent") or "").lower() in {"unknown", "product_question", "greeting"}
-        and not any(word in text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES)
+        and not any(word in latest_text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES)
         and not any(label in {"refund", "complaint", "damaged_item", "payment_issue", "outside_policy"} for label in decision.get("labels") or [])
     )
     safe_sales_question = any(
-        phrase in text
+        phrase in latest_text
         for phrase in AI_LOCATION_PHRASES + AI_SUGGESTION_PHRASES + (
             "delivery", "deliver", "kitne din", "price", "cost", "rate", "payment", "cod", "cash",
         )
     )
-    if (default_unavailable or soft_unknown_escalation or (decision.get("needs_human") and safe_sales_question)) and not any(word in text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES):
+    if (default_unavailable or soft_unknown_escalation or (decision.get("needs_human") and safe_sales_question)) and not any(word in latest_text for word in AI_RISK_PHRASES + AI_OUT_OF_SCOPE_PHRASES):
         decision = heuristic_ai_decision("", body, settings, messages=messages, conversation=conversation)
-    if text in simple_greetings:
+    if latest_text in simple_greetings:
         decision.update({
             "intent": "greeting",
             "confidence": max(float(decision.get("confidence") or 0), 0.94),
@@ -1453,7 +1469,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             "reply_text": decision.get("reply_text") or "Hi! How can I help you with TickBags today?",
             "escalation_reason": "",
         })
-    elif any(phrase in text for phrase in AI_SMALL_TALK_PHRASES):
+    elif any(phrase in latest_text for phrase in AI_SMALL_TALK_PHRASES):
         decision.update({
             "intent": "greeting",
             "confidence": max(float(decision.get("confidence") or 0), 0.92),
@@ -1577,12 +1593,14 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
 def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: list[dict] | None = None, conversation: dict | None = None) -> dict:
     """Keep GPT in charge of wording while enforcing business safety rules."""
     text = _normalized_customer_text(body)
+    latest_text = _latest_customer_text(body)
     decision = normalize_ai_decision(decision)
     labels = set(decision.get("labels") or [])
     risk_hit = any(word in text for word in AI_RISK_PHRASES)
     outside_scope = any(word in text for word in AI_OUT_OF_SCOPE_PHRASES)
     broad_category_availability = _is_broad_category_availability(text)
-    tracking_request = any(word in text for word in ("track", "tracking", "order status", "status")) or bool(extract_order_reference(body))
+    tracking_request = _is_tracking_request(latest_text)
+    buying_intent = _is_buying_intent(latest_text)
     if risk_hit or outside_scope:
         labels.add("needs_human")
         if risk_hit:
@@ -1598,7 +1616,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
         })
         return normalize_ai_decision(decision)
 
-    order_reference = extract_order_reference(body)
+    order_reference = extract_order_reference(latest_text)
     referenced_order = find_order_by_reference(order_reference) if order_reference else None
     if referenced_order:
         decision.update({
@@ -1608,6 +1626,20 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
             "confidence": max(float(decision.get("confidence") or 0), 0.92),
             "labels": sorted(labels | {"order_tracking"}),
             "reply_text": order_summary(referenced_order),
+            "escalation_reason": "",
+        })
+        return normalize_ai_decision(decision)
+
+    if buying_intent and not tracking_request:
+        decision.update({
+            "intent": "order_intent",
+            "needs_human": False,
+            "should_auto_reply": True,
+            "confidence": max(float(decision.get("confidence") or 0), 0.88),
+            "labels": sorted(labels | {"product_interest", "collecting_details"}),
+            "reply_text": _order_help_reply(_recent_product_context(messages, conversation)),
+            "order_state": "collecting_details",
+            "missing_order_fields": ["product", "name", "phone", "address", "quantity", "variant"],
             "escalation_reason": "",
         })
         return normalize_ai_decision(decision)
@@ -1691,7 +1723,8 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
     conversation = conversation or get_conversation_by_any_key(contact_key) or {}
     messages = list_inbox_messages(contact_key, limit=30) if conversation else []
     orders = customer_orders_for_conversation(conversation)
-    order_reference = extract_order_reference(body)
+    latest_body = _latest_customer_text(body)
+    order_reference = extract_order_reference(latest_body)
     referenced_order = find_order_by_reference(order_reference) if order_reference else None
 
     if referenced_order:
@@ -1709,7 +1742,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
             "knowledge_gap_question": "",
             "internal_note": "",
         })
-    if order_reference:
+    if order_reference and _is_tracking_request(latest_body):
         return normalize_ai_decision({
             "intent": "order_tracking",
             "confidence": 0.90,
@@ -2356,6 +2389,37 @@ def _extension_contextual_message(customer_message: str, history: list[dict]) ->
         f"{transcript}\n\n"
         f"Latest customer message: {customer_message}\n"
         "Reply only to the latest customer message, using the previous messages as context."
+    )
+
+
+def _latest_customer_text(text: str) -> str:
+    text = str(text or "")
+    match = re.search(r"Latest customer message:\s*(.+?)(?:\n|$)", text, flags=re.I | re.S)
+    return match.group(1).strip() if match else text.strip()
+
+
+def _is_tracking_request(text: str) -> bool:
+    normalized = _normalized_customer_text(text)
+    if extract_order_reference(text):
+        return True
+    tracking_phrases = (
+        "track my order", "track order", "tracking", "order tracking",
+        "order status", "status of my order", "where is my order",
+        "parcel status", "shipment status", "tracking number",
+        "cn number", "consignment", "leopard", "leopards",
+    )
+    return any(phrase in normalized for phrase in tracking_phrases)
+
+
+def _is_buying_intent(text: str) -> bool:
+    normalized = _normalized_customer_text(text)
+    return any(phrase in normalized for phrase in AI_ORDER_HELP_PHRASES) or any(
+        phrase in normalized
+        for phrase in (
+            "i want to place", "i want to order", "want to place",
+            "place an order", "place order", "buy this", "want to buy",
+            "order this", "order kar", "order kr", "order dena",
+        )
     )
 
 

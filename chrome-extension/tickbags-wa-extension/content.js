@@ -277,6 +277,8 @@ async function triggerAIReply(customerMessage, msgKey) {
 
     const sent = sendWhatsAppMessage(reply);
     if (sent) {
+      markVisibleIncomingMessagesHandled();
+      setTimeout(markVisibleIncomingMessagesHandled, 1200);
       await recordSuggestionSent(currentChatId);
       showNotification("TickBags AI reply sent.", "success");
     }

@@ -644,9 +644,9 @@ def order_summary(order: dict | None) -> str:
     else:
         reply = f"Your order is currently {status}."
     if tracking_url:
-        reply += f"\nYou can track your order here: {tracking_url}"
+        reply += f"\n\nYou can track your order here: {tracking_url}"
     elif tracking:
-        reply += f"\nTracking number: {tracking}"
+        reply += f"\n\nTracking number: {tracking}"
     return reply
 
 

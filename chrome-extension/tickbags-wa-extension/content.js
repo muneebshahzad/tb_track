@@ -7,6 +7,7 @@ let currentChatId = null;
 let chatConversationHistory = {};
 let lastProcessedMsgKey = null;
 let processingKey = null;
+const processedMessageKeys = new Set();
 let floatingPanel = null;
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
@@ -80,56 +81,76 @@ function checkForNewMessages() {
   if (disabledChats.has(currentChatId)) return;
   if (!backendUrl) return;
 
-  // Strategy: find all message rows, look at the last one
-  // Incoming messages are in a div that does NOT contain tick/check SVG icons
-  
-  // WhatsApp message rows — try multiple container selectors
-  const rows = document.querySelectorAll(
-    '[data-testid="msg-container"], ' +
-    '.message-in, .message-out, ' +
-    '[class*="message-in"], [class*="message-out"]'
-  );
-
-  if (!rows.length) {
-    // Fallback: find all focusable list items with text
+  const messages = getVisibleIncomingMessages();
+  if (!messages.length) {
     return checkViaFocusableItems();
   }
 
-  // Look at last few rows for the most recent incoming
-  const recentRows = Array.from(rows).slice(-5);
-  
-  for (let i = recentRows.length - 1; i >= 0; i--) {
-    const row = recentRows[i];
-    
-    // Skip if it's outgoing (has tick marks)
-    const hasOutgoingTick = row.querySelector(
-      '[data-testid="msg-dblcheck"], [data-testid="msg-check"], ' +
-      '[data-icon="msg-dblcheck"], [data-icon="msg-check"], ' +
-      '[aria-label="Read"], [aria-label="Delivered"], [aria-label="Sent"]'
-    );
-    
-    // Also check parent for message-out class
-    const isMessageOut = row.classList.contains('message-out') ||
-                         row.className?.includes('message-out') ||
-                         row.closest('[class*="message-out"]');
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (hasMessageBeenHandled(message.key)) continue;
+    markMessageProcessing(message.key);
+    triggerAIReply(message.text, message.key);
+    return;
+  }
+}
 
-    if (hasOutgoingTick || isMessageOut) continue;
+function getVisibleIncomingMessages() {
+  const candidates = [
+    ...document.querySelectorAll('#main [role="row"]'),
+    ...document.querySelectorAll('#main [data-testid="msg-container"]'),
+    ...document.querySelectorAll('#main .message-in, #main [class*="message-in"]')
+  ];
+  const seen = new Set();
+  const messages = [];
 
-    // Must be incoming — extract text
+  for (const node of candidates) {
+    const row = normalizeMessageRow(node);
+    if (!row || seen.has(row)) continue;
+    seen.add(row);
+    if (!isIncomingMessageRow(row)) continue;
     const text = extractMessageText(row);
     if (!text) continue;
+    messages.push({ key: buildMessageKey(row, text), text });
+  }
+  return messages;
+}
 
-    // Create a key: chatId + text + approximate time bucket (30s)
-    const timeBucket = Math.floor(Date.now() / 30000);
-    const msgKey = `${currentChatId}|${text.substring(0, 50)}|${timeBucket}`;
+function normalizeMessageRow(node) {
+  if (!node) return null;
+  return node.closest('[role="row"]') || node.closest('[data-testid="msg-container"]') || node;
+}
 
-    if (msgKey === lastProcessedMsgKey || msgKey === processingKey) return;
-    
-    // We have a new incoming message!
-    processingKey = msgKey;
-    lastProcessedMsgKey = msgKey;
-    triggerAIReply(text, msgKey);
-    return; // Only process one at a time
+function isIncomingMessageRow(row) {
+  const className = String(row.className || "");
+  if (className.includes("message-out") || row.querySelector('[class*="message-out"]')) return false;
+  if (className.includes("message-in") || row.querySelector('[class*="message-in"]')) return true;
+  const hasOutgoingTick = row.querySelector(
+    '[data-testid="msg-dblcheck"], [data-testid="msg-check"], ' +
+    '[data-icon="msg-dblcheck"], [data-icon="msg-check"], ' +
+    '[aria-label="Read"], [aria-label="Delivered"], [aria-label="Sent"]'
+  );
+  return !hasOutgoingTick;
+}
+
+function buildMessageKey(row, text) {
+  const meta = row.querySelector('[data-pre-plain-text]')?.getAttribute("data-pre-plain-text") ||
+               row.querySelector('[data-testid="msg-meta"]')?.textContent ||
+               "";
+  const rowId = row.getAttribute("data-id") || row.id || "";
+  return `${currentChatId}|${rowId}|${meta}|${text}`.slice(0, 700);
+}
+
+function hasMessageBeenHandled(key) {
+  return !key || processedMessageKeys.has(key) || key === lastProcessedMsgKey || key === processingKey;
+}
+
+function markMessageProcessing(key) {
+  processingKey = key;
+  lastProcessedMsgKey = key;
+  processedMessageKeys.add(key);
+  while (processedMessageKeys.size > 80) {
+    processedMessageKeys.delete(processedMessageKeys.values().next().value);
   }
 }
 
@@ -151,12 +172,10 @@ function checkViaFocusableItems() {
   const text = last.querySelector('span.selectable-text')?.innerText || last.innerText;
   if (!text?.trim()) return;
 
-  const timeBucket = Math.floor(Date.now() / 30000);
-  const msgKey = `${currentChatId}|${text.trim().substring(0, 50)}|${timeBucket}`;
-  if (msgKey === lastProcessedMsgKey || msgKey === processingKey) return;
+  const msgKey = buildMessageKey(container, text.trim());
+  if (hasMessageBeenHandled(msgKey)) return;
 
-  processingKey = msgKey;
-  lastProcessedMsgKey = msgKey;
+  markMessageProcessing(msgKey);
   triggerAIReply(text.trim(), msgKey);
 }
 

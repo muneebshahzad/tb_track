@@ -1066,6 +1066,12 @@ def _recent_image_context(messages: list[dict] | None) -> bool:
     return False
 
 
+def _context_has_recent_image(text: str, messages: list[dict] | None = None) -> bool:
+    if "[image]" in str(text or "").lower():
+        return True
+    return _recent_image_context(messages)
+
+
 def _recent_availability_request(messages: list[dict] | None) -> bool:
     for msg in reversed(messages or []):
         body = _normalized_customer_text((msg or {}).get("body") or "")
@@ -1335,7 +1341,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
     contextual_reply = _contextual_followup_reply(latest_body, product_context, settings) if any(phrase in latest_text for phrase in AI_FOLLOWUP_PHRASES) else ""
     asking_price = any(word in latest_text for word in ("price", "cost", "rate", "kitna", "kitnay"))
     asking_availability = any(phrase in latest_text for phrase in AI_AVAILABILITY_PHRASES)
-    has_recent_image = _recent_image_context(messages)
+    has_recent_image = _context_has_recent_image(body, messages)
     order_reference = extract_order_reference(latest_body)
     referenced_order = find_order_by_reference(order_reference) if order_reference else None
     product_matches = _find_product_matches(latest_body, messages=messages, conversation=conversation)
@@ -1479,6 +1485,18 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "order_candidate": {"product": str(product_matches[0].get("product_title") or product_matches[0].get("title") or "")},
             "product_attachment_url": str(product_matches[0].get("image") or ""),
         })
+    elif order_help and has_recent_image:
+        decision.update({
+            "intent": "order_intent",
+            "confidence": 0.90,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest", "image_received", "collecting_details"],
+            "reply_text": _order_help_reply("selected product/image"),
+            "order_state": "collecting_details",
+            "order_candidate": {"product_image_reference": "recent WhatsApp image"},
+            "missing_order_fields": ["name", "phone", "address", "quantity", "variant"],
+        })
     elif asking_availability and has_recent_image:
         decision.update({
             "intent": "product_question",
@@ -1573,7 +1591,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
     contextual_reply = _contextual_followup_reply(latest_body, product_context, settings) if any(phrase in latest_text for phrase in AI_FOLLOWUP_PHRASES) else ""
     asking_price = any(word in latest_text for word in ("price", "cost", "rate", "kitna", "kitnay"))
     asking_availability = any(phrase in latest_text for phrase in AI_AVAILABILITY_PHRASES)
-    has_recent_image = _recent_image_context(messages)
+    has_recent_image = _context_has_recent_image(body, messages)
     product_matches = _find_product_matches(latest_body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, latest_body, asking_price=asking_price)
     color_options_reply, color_option_matches = _color_options_reply(latest_body, messages=messages, conversation=conversation) if _is_color_options_request(latest_body, messages, conversation) else ("", [])
@@ -1637,6 +1655,25 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
             decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
             decision["product_attachments"] = _product_image_attachments(color_option_matches)
+    elif order_help and has_recent_image and (
+        str(decision.get("intent") or "").lower() in {"product_question", "order_intent", "unknown"}
+        or not decision.get("reply_text")
+        or "send the product picture" in str(decision.get("reply_text") or "").lower()
+        or "share which color" in str(decision.get("reply_text") or "").lower()
+        or decision.get("needs_human")
+    ):
+        decision.update({
+            "intent": "order_intent",
+            "confidence": max(float(decision.get("confidence") or 0), 0.90),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["product_interest", "image_received", "collecting_details"])),
+            "reply_text": _order_help_reply("selected product/image"),
+            "order_state": "collecting_details",
+            "order_candidate": {"product_image_reference": "recent WhatsApp image"},
+            "missing_order_fields": ["name", "phone", "address", "quantity", "variant"],
+            "escalation_reason": "",
+        })
     elif product_reply and (
         asking_price
         or str(decision.get("intent") or "").lower() in {"product_question", "price_question"}
@@ -1760,6 +1797,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
     location_request = any(phrase in _normalized_customer_text(latest_text) for phrase in AI_LOCATION_PHRASES)
     tracking_request = _is_tracking_request(latest_text)
     buying_intent = _is_buying_intent(latest_text)
+    image_buying_intent = buying_intent and _context_has_recent_image(body, messages)
     color_options_reply, color_option_matches = _color_options_reply(latest_text, messages=messages, conversation=conversation) if _is_color_options_request(latest_text, messages, conversation) else ("", [])
     if risk_hit or outside_scope:
         labels.add("needs_human")
@@ -1803,15 +1841,17 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
         return normalize_ai_decision(decision)
 
     if buying_intent and not tracking_request:
+        reply_text = _order_help_reply("selected product/image") if image_buying_intent else _order_help_reply(_recent_product_context(messages, conversation))
         decision.update({
             "intent": "order_intent",
             "needs_human": False,
             "should_auto_reply": True,
             "confidence": max(float(decision.get("confidence") or 0), 0.88),
-            "labels": sorted(labels | {"product_interest", "collecting_details"}),
-            "reply_text": _order_help_reply(_recent_product_context(messages, conversation)),
+            "labels": sorted(labels | {"product_interest", "collecting_details"} | ({"image_received"} if image_buying_intent else set())),
+            "reply_text": reply_text,
             "order_state": "collecting_details",
-            "missing_order_fields": ["product", "name", "phone", "address", "quantity", "variant"],
+            "order_candidate": {"product_image_reference": "recent WhatsApp image"} if image_buying_intent else decision.get("order_candidate") or {},
+            "missing_order_fields": ["name", "phone", "address", "quantity", "variant"] if image_buying_intent else ["product", "name", "phone", "address", "quantity", "variant"],
             "escalation_reason": "",
         })
         return normalize_ai_decision(decision)
@@ -2584,6 +2624,9 @@ def _is_buying_intent(text: str) -> bool:
             "i want to place", "i want to order", "want to place",
             "place an order", "place order", "buy this", "want to buy",
             "order this", "order kar", "order kr", "order dena",
+            "this one", "need this", "i need this", "i need this one",
+            "want this", "i want this", "i want this one", "ye chahiye",
+            "ye wala", "ye wali", "ye order", "is one",
         )
     )
 

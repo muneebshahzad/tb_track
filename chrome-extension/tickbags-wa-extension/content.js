@@ -106,7 +106,7 @@ function checkForNewMessages() {
   const latestMessage = messages[messages.length - 1];
   if (hasMessageBeenHandled(latestMessage.key)) return;
   markMessageProcessing(latestMessage.key);
-  triggerAIReply(latestMessage.text, latestMessage.key);
+  triggerAIReply(latestMessage.hasImage ? `[image] ${latestMessage.text}`.trim() : latestMessage.text, latestMessage.key);
 }
 
 function getVisibleIncomingMessages() {
@@ -128,14 +128,24 @@ function getVisibleConversationMessages(limit = 16) {
     if (!row || seen.has(row)) continue;
     seen.add(row);
     const text = extractMessageText(row);
-    if (!text) continue;
+    const hasImage = rowHasImage(row);
+    if (!text && !hasImage) continue;
     messages.push({
-      key: buildMessageKey(row, text),
+      key: buildMessageKey(row, text || "[image]"),
       role: isOutgoingMessageRow(row) ? "assistant" : "user",
-      text
+      text: text || "[image]",
+      hasImage
     });
   }
   return messages.slice(-limit);
+}
+
+function rowHasImage(row) {
+  if (!row) return false;
+  return Boolean(
+    row.querySelector('img[src^="blob:"], img[src^="data:"], img[src*="mmg.whatsapp"], img[src*="cdn"]') ||
+    row.querySelector('[data-icon="media-filled"], [data-icon="image"], [aria-label*="image" i], [aria-label*="photo" i]')
+  );
 }
 
 function normalizeMessageRow(node) {
@@ -251,7 +261,7 @@ async function triggerAIReply(customerMessage, msgKey) {
   const visibleHistory = getVisibleConversationMessages(16);
   const history = visibleHistory.length ? visibleHistory.map(message => ({
     role: message.role,
-    content: message.text
+    content: message.hasImage ? `[image] ${message.text}`.trim() : message.text
   })) : chatConversationHistory[currentChatId];
 
   try {

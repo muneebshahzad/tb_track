@@ -18,6 +18,7 @@ async function init() {
   backendUrl = stored.tickbotBackendUrl || "https://dashboard.tickbags.com";
 
   injectFloatingPanel();
+  updatePanelState();
   startMessagePolling();
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -70,15 +71,14 @@ function startMessagePolling() {
 }
 
 function checkForNewMessages() {
-  if (!globalAIEnabled) return;
-
   const chatId = getCurrentChatId();
   if (chatId) currentChatId = chatId;
+
+  updatePanelState();
+  if (!globalAIEnabled) return;
   if (!currentChatId) return;
   if (disabledChats.has(currentChatId)) return;
   if (!backendUrl) return;
-
-  updatePanelState();
 
   // Strategy: find all message rows, look at the last one
   // Incoming messages are in a div that does NOT contain tick/check SVG icons

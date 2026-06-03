@@ -5,11 +5,14 @@
   "description": "AI-powered WhatsApp Business assistant for TickBags.com orders and queries",
   "permissions": [
     "storage",
-    "activeTab"
+    "activeTab",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "https://web.whatsapp.com/*",
     "https://dashboard.tickbags.com/*",
+    "https://cdn.shopify.com/*",
+    "https://*.myshopify.com/*",
     "http://localhost:*/*",
     "http://127.0.0.1:*/*"
   ],

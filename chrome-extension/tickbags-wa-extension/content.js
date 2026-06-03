@@ -277,6 +277,10 @@ async function triggerAIReply(customerMessage, msgKey) {
 
     const sent = sendWhatsAppMessage(reply);
     if (sent) {
+      const imageAttachments = Array.isArray(result.attachments) ? result.attachments.filter(item => item?.type === "image" && item?.url).slice(0, 3) : [];
+      if (imageAttachments.length) {
+        setTimeout(() => sendWhatsAppImages(imageAttachments), 1200);
+      }
       markVisibleIncomingMessagesHandled();
       setTimeout(markVisibleIncomingMessagesHandled, 1200);
       await recordSuggestionSent(currentChatId);
@@ -406,6 +410,85 @@ function insertFormattedMessage(inputBox, text) {
       document.execCommand("insertLineBreak");
     }
   });
+}
+
+async function sendWhatsAppImages(attachments) {
+  for (const attachment of attachments) {
+    try {
+      const sent = await sendWhatsAppImage(attachment);
+      if (!sent) {
+        showNotification("Could not send product image automatically.", "error");
+        return;
+      }
+      await wait(900);
+    } catch (error) {
+      showNotification("Image send failed: " + error.message, "error");
+      return;
+    }
+  }
+}
+
+async function sendWhatsAppImage(attachment) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    throw new Error("clipboard image paste is not available");
+  }
+
+  const response = await fetch(attachment.url);
+  if (!response.ok) throw new Error("could not download product image");
+  const sourceBlob = await response.blob();
+  const mimeType = sourceBlob.type && sourceBlob.type.startsWith("image/") ? sourceBlob.type : "image/png";
+  const blob = sourceBlob.type ? sourceBlob : sourceBlob.slice(0, sourceBlob.size, mimeType);
+
+  await navigator.clipboard.write([new ClipboardItem({ [mimeType]: blob })]);
+
+  const inputBox = findMessageInput();
+  if (!inputBox) throw new Error("message input not found");
+  inputBox.focus();
+  const pasted = document.execCommand("paste");
+  if (!pasted) {
+    inputBox.dispatchEvent(new ClipboardEvent("paste", { bubbles: true }));
+  }
+
+  await wait(900);
+  const sendBtn = findMediaSendButton();
+  if (!sendBtn) return false;
+  sendBtn.click();
+  return true;
+}
+
+function findMessageInput() {
+  const inputSelectors = [
+    '[data-testid="conversation-compose-box-input"]',
+    '[contenteditable="true"][data-tab="10"]',
+    '[contenteditable="true"][spellcheck="true"]',
+    'footer [contenteditable="true"]',
+    '#main [contenteditable="true"]'
+  ];
+
+  for (const sel of inputSelectors) {
+    const inputBox = document.querySelector(sel);
+    if (inputBox) return inputBox;
+  }
+  return null;
+}
+
+function findMediaSendButton() {
+  const selectors = [
+    '[data-testid="send"]',
+    '[aria-label="Send"]',
+    '[data-icon="send"]',
+    'div[role="button"] span[data-icon="send"]'
+  ];
+  for (const selector of selectors) {
+    const el = document.querySelector(selector);
+    if (!el) continue;
+    return el.closest('button, div[role="button"]') || el;
+  }
+  return null;
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function recordSuggestionSent(chatId) {

@@ -1155,6 +1155,7 @@ def _color_options_reply(text: str, messages: list[dict] | None = None, conversa
     pretty_color = color.title()
     if matches:
         lines = [f"{pretty_color} color mein ye options dekh sakte hain:"]
+        attachments = []
         for index, item in enumerate(matches, start=1):
             title = str(item.get("title") or item.get("product_title") or "Product")
             price = _format_money(item.get("price"))
@@ -1166,13 +1167,43 @@ def _color_options_reply(text: str, messages: list[dict] | None = None, conversa
             if url:
                 lines.append(f"Link: {url}")
             if image:
-                lines.append(f"Picture: {image}")
+                attachments.append({
+                    "type": "image",
+                    "title": title,
+                    "url": image,
+                    "product_url": url,
+                    "price": price,
+                })
+        lines.append("")
         lines.append("Aap jis option mein interested hain uska screenshot/link send kar dein, main order details guide kar dunga.")
+        for index, item in enumerate(matches):
+            if index < len(attachments):
+                item["_attachment"] = attachments[index]
         return "\n".join(lines), matches
     return (
         f"{pretty_color} color mein bean bags, ottomans, aur floor cushions ke options dekh sakte hain. "
         "Aap kis style mein options chahte hain: bean bag, ottoman, ya floor cushion?"
     ), []
+
+
+def _product_image_attachments(matches: list[dict]) -> list[dict]:
+    attachments = []
+    for item in matches or []:
+        attachment = _safe_json_dict(item.get("_attachment"))
+        image_url = str(attachment.get("url") or item.get("image") or "").strip()
+        if not image_url:
+            continue
+        title = str(attachment.get("title") or item.get("title") or item.get("product_title") or "Product").strip()
+        product_url = str(attachment.get("product_url") or _product_url(item)).strip()
+        price = str(attachment.get("price") or _format_money(item.get("price"))).strip()
+        attachments.append({
+            "type": "image",
+            "url": image_url,
+            "title": title,
+            "product_url": product_url,
+            "price": price,
+        })
+    return attachments
 
 
 def _find_product_matches(query: str, messages: list[dict] | None = None, conversation: dict | None = None, limit: int = 4) -> list[dict]:
@@ -1435,6 +1466,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
         if color_option_matches:
             decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
             decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
+            decision["product_attachments"] = _product_image_attachments(color_option_matches)
     elif product_reply:
         decision.update({
             "intent": "price_question" if asking_price else "product_question",
@@ -1604,6 +1636,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
         if color_option_matches:
             decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
             decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
+            decision["product_attachments"] = _product_image_attachments(color_option_matches)
     elif product_reply and (
         asking_price
         or str(decision.get("intent") or "").lower() in {"product_question", "price_question"}
@@ -1797,6 +1830,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
         if color_option_matches:
             decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
             decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
+            decision["product_attachments"] = _product_image_attachments(color_option_matches)
         return normalize_ai_decision(decision)
 
     if tracking_request and decision.get("needs_human"):

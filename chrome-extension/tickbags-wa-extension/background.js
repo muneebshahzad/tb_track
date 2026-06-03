@@ -59,5 +59,10 @@ async function handleAIRequest({ customerMessage, chatName, conversationHistory 
   if (!data.success || !data.reply) {
     throw new Error(data.error || "TickBot did not return a draft");
   }
-  return { reply: String(data.reply).trim(), decision: data.decision || {} };
+  const decision = data.decision || {};
+  return {
+    reply: String(data.reply).trim(),
+    decision,
+    attachments: Array.isArray(decision.product_attachments) ? decision.product_attachments : []
+  };
 }

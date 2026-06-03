@@ -27,12 +27,9 @@ AI-powered WhatsApp Business assistant for TickBags.com
 
 ## How It Works
 
-- When a customer sends a message, the AI automatically **suggests a reply**
-- A suggestion panel pops up above the message box showing:
-  - The customer's message
-  - The AI-generated reply (editable)
-  - **Send**, **Regenerate**, or **Dismiss** buttons
-- You review and click **Send** — the AI never sends automatically
+- When a customer sends a message, the extension asks the TickBot backend for a reply
+- If Global AI is on and the current chat is enabled, the reply is inserted into WhatsApp Web and sent automatically
+- Use the Global or per-chat toggle to pause automatic replies
 
 ---
 

@@ -217,7 +217,12 @@ async function triggerAIReply(customerMessage, msgKey) {
     history.push({ role: "assistant", content: reply });
     if (history.length > 10) history.splice(0, 2);
 
-    showReplySuggestion(reply, customerMessage);
+    const sent = sendWhatsAppMessage(reply);
+    if (sent) {
+      await recordSuggestionSent(currentChatId);
+      showNotification("TickBags AI reply sent.", "success");
+    }
+    processingKey = null;
 
   } catch (err) {
     hideTypingIndicator();
@@ -304,7 +309,7 @@ function sendWhatsAppMessage(text) {
 
   if (!inputBox) {
     showNotification("⚠️ Could not find message input", "error");
-    return;
+    return false;
   }
 
   inputBox.focus();
@@ -319,6 +324,7 @@ function sendWhatsAppMessage(text) {
       inputBox.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true }));
     }
   }, 300);
+  return true;
 }
 
 async function recordSuggestionSent(chatId) {

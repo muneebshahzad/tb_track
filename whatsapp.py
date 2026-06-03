@@ -2303,33 +2303,8 @@ def enqueue_auto_reply(
 
 
 def send_order_confirmation(order: dict[str, Any]) -> bool:
-    customer = order.get("customer_details") or {}
-    phone = normalize_whatsapp_phone(customer.get("phone") or "")
-    if not phone:
-        for item in order.get("line_items", []) or []:
-            phone = normalize_whatsapp_phone(item.get("phone") or "")
-            if phone:
-                break
-    if not phone:
-        return False
-
-    body = os.getenv(
-        "WHATSAPP_ORDER_CONFIRMATION_TEMPLATE",
-        "Thank you for your order {{order_id}} from TickBags. We have received your payment and will update you when it is dispatched.",
-    )
-    body = body.replace("{{order_id}}", str(order.get("order_id") or ""))
-    ok, provider_id, meta = send_meta_text_message(phone, body)
-    if ok or os.getenv("WHATSAPP_DRY_RUN", "1") == "1":
-        save_whatsapp_message(
-            phone,
-            "outbound",
-            body,
-            customer_name=customer.get("name") or "",
-            provider_message_id=provider_id if ok else "dry-run",
-            metadata={"source": "orders_paid_webhook", "dry_run": not ok, "meta": meta},
-        )
-        update_whatsapp_conversation_status(phone, "open")
-        return True
+    # Disabled intentionally: Shopify webhooks must not send customer-facing
+    # order/payment confirmations until this flow is redesigned.
     return False
 
 

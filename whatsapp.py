@@ -813,6 +813,10 @@ AI_COLOR_WORDS = (
     "cream", "tan", "mustard", "teal",
 )
 
+AI_ATTRIBUTE_WORDS = AI_COLOR_WORDS + (
+    "leather", "suede", "velvet", "fabric", "jute", "rexine", "cotton",
+)
+
 
 def _safe_json_dict(value: Any) -> dict:
     if isinstance(value, dict):
@@ -1108,18 +1112,39 @@ def _is_broad_category_availability(text: str) -> bool:
     return any(phrase in text for phrase in AI_AVAILABILITY_PHRASES) and any(term in text for term in AI_BROAD_CATEGORY_TERMS)
 
 
-def _requested_color(text: str) -> str:
+def _prefers_roman_urdu(text: str) -> bool:
     normalized = _normalized_customer_text(text)
-    for color in AI_COLOR_WORDS:
-        if re.search(rf"\b{re.escape(color)}\b", normalized):
-            return color
+    roman_markers = (
+        "hai", "hain", "hy", "main", "mein", "mujhe", "mujhy", "chahiye",
+        "dikha", "dikhayen", "bata", "kya", "kia", "kar", "kr", "karo",
+        "dein", "wala", "wali", "ye", "is ka", "kitna",
+    )
+    english_markers = (
+        "show", "suggest", "option", "options", "some", "need", "want",
+        "please", "this", "one", "leather", "color", "beanbags", "bean",
+    )
+    roman_score = sum(1 for marker in roman_markers if marker in normalized)
+    english_score = sum(1 for marker in english_markers if marker in normalized)
+    return roman_score > english_score
+
+
+def _requested_attribute(text: str) -> str:
+    normalized = _normalized_customer_text(text)
+    for attribute in AI_ATTRIBUTE_WORDS:
+        if re.search(rf"\b{re.escape(attribute)}\b", normalized):
+            return attribute
     return ""
+
+
+def _requested_color(text: str) -> str:
+    attribute = _requested_attribute(text)
+    return attribute if attribute in AI_COLOR_WORDS else ""
 
 
 def _is_color_options_request(text: str, messages: list[dict] | None = None, conversation: dict | None = None) -> bool:
     normalized = _normalized_customer_text(text)
-    color = _requested_color(normalized)
-    if not color:
+    attribute = _requested_attribute(normalized)
+    if not attribute:
         return False
     if len(normalized.split()) <= 4:
         return True
@@ -1131,8 +1156,8 @@ def _is_color_options_request(text: str, messages: list[dict] | None = None, con
 
 
 def _color_options_reply(text: str, messages: list[dict] | None = None, conversation: dict | None = None) -> tuple[str, list[dict]]:
-    color = _requested_color(text)
-    if not color:
+    attribute = _requested_attribute(text)
+    if not attribute:
         return "", []
     context = _normalized_customer_text(_recent_product_context(messages, conversation))
     context_terms = [term for term in AI_BROAD_CATEGORY_TERMS if term in context]
@@ -1147,7 +1172,7 @@ def _color_options_reply(text: str, messages: list[dict] | None = None, conversa
             str(item.get("sku") or ""),
             str(item.get("handle") or ""),
         ]))
-        if color not in haystack:
+        if attribute not in haystack:
             continue
         if context_terms and not any(term in haystack for term in context_terms):
             continue
@@ -1158,9 +1183,14 @@ def _color_options_reply(text: str, messages: list[dict] | None = None, conversa
         matches.append(item)
         if len(matches) >= 3:
             break
-    pretty_color = color.title()
+    pretty_attribute = attribute.title()
+    roman_urdu = _prefers_roman_urdu(text)
     if matches:
-        lines = [f"{pretty_color} color mein ye options dekh sakte hain:"]
+        lines = [
+            f"{pretty_attribute} options you can choose from:"
+            if not roman_urdu
+            else f"{pretty_attribute} mein ye options dekh sakte hain:"
+        ]
         attachments = []
         for index, item in enumerate(matches, start=1):
             title = str(item.get("title") or item.get("product_title") or "Product")
@@ -1181,14 +1211,25 @@ def _color_options_reply(text: str, messages: list[dict] | None = None, conversa
                     "price": price,
                 })
         lines.append("")
-        lines.append("Aap jis option mein interested hain uska screenshot/link send kar dein, main order details guide kar dunga.")
+        lines.append(
+            "Tell me which option you like, and I will guide you with the order details."
+            if not roman_urdu
+            else "Aap jis option mein interested hain uska screenshot/link send kar dein, main order details guide kar dunga."
+        )
         for index, item in enumerate(matches):
             if index < len(attachments):
                 item["_attachment"] = attachments[index]
         return "\n".join(lines), matches
     return (
-        f"{pretty_color} color mein bean bags, ottomans, aur floor cushions ke options dekh sakte hain. "
-        "Aap kis style mein options chahte hain: bean bag, ottoman, ya floor cushion?"
+        (
+            f"We have {attribute} options in bean bags, ottomans, and floor cushions. "
+            "Which style would you like to see: bean bag, ottoman, or floor cushion?"
+        )
+        if not roman_urdu
+        else (
+            f"{pretty_attribute} mein bean bags, ottomans, aur floor cushions ke options dekh sakte hain. "
+            "Aap kis style mein options chahte hain: bean bag, ottoman, ya floor cushion?"
+        )
     ), []
 
 
@@ -1294,8 +1335,18 @@ def _product_details_reply(matches: list[dict], query: str, asking_price: bool =
     return "\n".join(lines)
 
 
-def _order_help_reply(product_context: str = "") -> str:
+def _order_help_reply(product_context: str = "", customer_text: str = "") -> str:
     product_line = f" ({product_context})" if product_context else ""
+    if not _prefers_roman_urdu(customer_text):
+        return (
+            f"To place the order{product_line}, please share these details:\n"
+            "- Name\n"
+            "- Phone number\n"
+            "- Complete address\n"
+            "- Quantity\n"
+            "- Color/variant\n"
+            "Once we have these details, the team will create your order."
+        )
     return (
         f"Order place karne ke liye{product_line} ye details send kar dein:\n"
         "- Name\n"
@@ -1492,7 +1543,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "should_auto_reply": True,
             "needs_human": False,
             "labels": ["product_interest", "image_received", "collecting_details"],
-            "reply_text": _order_help_reply("selected product/image"),
+            "reply_text": _order_help_reply("selected product/image", latest_body),
             "order_state": "collecting_details",
             "order_candidate": {"product_image_reference": "recent WhatsApp image"},
             "missing_order_fields": ["name", "phone", "address", "quantity", "variant"],
@@ -1526,7 +1577,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "should_auto_reply": True,
             "needs_human": False,
             "labels": ["product_interest", "collecting_details"],
-            "reply_text": _order_help_reply(product_context),
+            "reply_text": _order_help_reply(product_context, latest_body),
             "order_state": "collecting_details",
             "missing_order_fields": ["name", "phone", "address", "quantity", "variant"],
         })
@@ -1563,7 +1614,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
         decision.update({
             "intent": "order_intent",
             "labels": ["product_interest", "collecting_details"],
-            "reply_text": _order_help_reply(product_context),
+            "reply_text": _order_help_reply(product_context, latest_body),
             "order_state": "collecting_details",
             "order_candidate": candidate,
             "missing_order_fields": ["product", "name", "phone", "address"],
@@ -1668,7 +1719,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             "should_auto_reply": True,
             "needs_human": False,
             "labels": sorted(set((decision.get("labels") or []) + ["product_interest", "image_received", "collecting_details"])),
-            "reply_text": _order_help_reply("selected product/image"),
+            "reply_text": _order_help_reply("selected product/image", latest_body),
             "order_state": "collecting_details",
             "order_candidate": {"product_image_reference": "recent WhatsApp image"},
             "missing_order_fields": ["name", "phone", "address", "quantity", "variant"],
@@ -1738,7 +1789,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             "should_auto_reply": True,
             "needs_human": False,
             "labels": sorted(set((decision.get("labels") or []) + ["product_interest", "collecting_details"])),
-            "reply_text": _order_help_reply(product_context),
+            "reply_text": _order_help_reply(product_context, latest_body),
             "order_state": "collecting_details",
             "missing_order_fields": ["name", "phone", "address", "quantity", "variant"],
             "escalation_reason": "",
@@ -1841,7 +1892,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
         return normalize_ai_decision(decision)
 
     if buying_intent and not tracking_request:
-        reply_text = _order_help_reply("selected product/image") if image_buying_intent else _order_help_reply(_recent_product_context(messages, conversation))
+        reply_text = _order_help_reply("selected product/image", latest_text) if image_buying_intent else _order_help_reply(_recent_product_context(messages, conversation), latest_text)
         decision.update({
             "intent": "order_intent",
             "needs_human": False,

@@ -404,12 +404,21 @@ async function insertFormattedMessage(inputBox, text) {
   }
 
   const lines = safeText.split("\n");
-  lines.forEach((line, index) => {
+  for (const [index, line] of lines.entries()) {
     document.execCommand("insertText", false, line);
     if (index < lines.length - 1) {
-      document.execCommand("insertLineBreak");
+      inputBox.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true
+      }));
+      document.execCommand("insertText", false, "\n");
     }
-  });
+  }
   return true;
 }
 

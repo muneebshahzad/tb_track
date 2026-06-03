@@ -741,9 +741,18 @@ AI_OUT_OF_SCOPE_PHRASES = (
     "doctor", "lawyer", "investment", "crypto",
 )
 
+TICKBAGS_LOCATION_REPLY = (
+    "We are based at Defence Road, Engineer's Town, Lahore: "
+    "https://maps.app.goo.gl/Z2m1XN6Jm2BNY3fn8\n\n"
+    "You can visit us here!"
+)
+
 AI_LOCATION_PHRASES = (
-    "where are you based", "where r u based", "where in pakistan", "location",
-    "pin location", "store", "shop", "address kaha", "kahan", "kidhar",
+    "where are you based", "where r u based", "where are u based",
+    "where are you located", "where r u located", "where is your shop",
+    "where is your store", "where in pakistan", "your location", "location",
+    "pin location", "map location", "google map", "store", "shop",
+    "address kaha", "address kya", "address kia", "kahan", "kidhar",
 )
 
 AI_SUGGESTION_PHRASES = (
@@ -1238,6 +1247,15 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "labels": ["ai"],
             "reply_text": "I am good, thank you. How can I help you with TickBags today?",
         })
+    elif any(phrase in latest_text for phrase in AI_LOCATION_PHRASES):
+        decision.update({
+            "intent": "delivery_question",
+            "confidence": 0.92,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["delivery_question", "location"],
+            "reply_text": TICKBAGS_LOCATION_REPLY,
+        })
     elif any(phrase in latest_text for phrase in ("why don't you", "why dont you", "no reply", "reply?", "respond", "where are you")):
         decision.update({
             "intent": "greeting",
@@ -1383,15 +1401,6 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
         decision.update({"intent": "delivery_question", "confidence": 0.88, "labels": ["delivery_question"], "reply_text": delivery_reply, "should_auto_reply": True})
     elif any(word in latest_text for word in ("payment", "cod", "cash", "bank", "advance")):
         decision.update({"intent": "payment_question", "confidence": 0.86, "labels": ["payment_question"], "reply_text": payment_reply, "should_auto_reply": True})
-    elif any(phrase in latest_text for phrase in AI_LOCATION_PHRASES):
-        decision.update({
-            "intent": "delivery_question",
-            "confidence": 0.82,
-            "should_auto_reply": True,
-            "needs_human": False,
-            "labels": ["delivery_question"],
-            "reply_text": "We are based in Pakistan. Please share your city and the product you want, and I will guide you with the next step.",
-        })
     elif any(phrase in latest_text for phrase in AI_SUGGESTION_PHRASES):
         decision.update({
             "intent": "product_question",
@@ -1599,6 +1608,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
     risk_hit = any(word in text for word in AI_RISK_PHRASES)
     outside_scope = any(word in text for word in AI_OUT_OF_SCOPE_PHRASES)
     broad_category_availability = _is_broad_category_availability(text)
+    location_request = any(phrase in _normalized_customer_text(latest_text) for phrase in AI_LOCATION_PHRASES)
     tracking_request = _is_tracking_request(latest_text)
     buying_intent = _is_buying_intent(latest_text)
     if risk_hit or outside_scope:
@@ -1613,6 +1623,18 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
             "labels": sorted(labels),
             "escalation_reason": decision.get("escalation_reason") or "Message requires human review.",
             "reply_text": settings.get("escalation_reply") or settings.get("human_handoff_reply") or "Let me have our team check this and reply with the correct details.",
+        })
+        return normalize_ai_decision(decision)
+
+    if location_request:
+        decision.update({
+            "intent": "delivery_question",
+            "needs_human": False,
+            "should_auto_reply": True,
+            "confidence": max(float(decision.get("confidence") or 0), 0.92),
+            "labels": sorted(labels | {"delivery_question", "location"}),
+            "reply_text": TICKBAGS_LOCATION_REPLY,
+            "escalation_reason": "",
         })
         return normalize_ai_decision(decision)
 
@@ -1809,6 +1831,7 @@ def analyze_inbound_message(channel: str, contact_key: str, body: str, conversat
         "If conversation.ai_mode is needs_human but the customer starts a fresh greeting or simple sales/support question, it is safe to respond normally and set needs_human=false. "
         "Do not force every message into product collection. If the customer is just greeting or chatting, respond warmly and briefly. "
         "TickBags sells bean bags, ottomans, floor cushions, and home decor. For broad category questions like 'bean bags available?', it is safe to say yes and ask the customer for color/size or a product picture/link. "
+        "For location/address questions, reply exactly with: We are based at Defence Road, Engineer's Town, Lahore: https://maps.app.goo.gl/Z2m1XN6Jm2BNY3fn8\n\nYou can visit us here! "
         "If context.knowledge_matches contains a close reusable answer, prefer it instead of escalating. "
         "When the customer asks for product details, price, stock, image, or link, use matched_products/product context only. "
         "If matched_products is empty for exact price, exact stock, exact variant, or exact product details, ask for the product name, link, screenshot, or picture instead of inventing facts. "

@@ -285,7 +285,7 @@ async function triggerAIReply(customerMessage, msgKey) {
     history.push({ role: "assistant", content: reply });
     if (history.length > 10) history.splice(0, 2);
 
-    const sent = sendWhatsAppMessage(reply);
+    const sent = await sendWhatsAppMessage(reply);
     if (sent) {
       const imageAttachments = Array.isArray(result.attachments) ? result.attachments.filter(item => item?.type === "image" && item?.url).slice(0, 3) : [];
       if (imageAttachments.length) {
@@ -295,6 +295,8 @@ async function triggerAIReply(customerMessage, msgKey) {
       setTimeout(markVisibleIncomingMessagesHandled, 1200);
       await recordSuggestionSent(currentChatId);
       showNotification("TickBags AI reply sent.", "success");
+    } else {
+      showNotification("Could not send reply. Please click Send manually.", "error");
     }
     processingKey = null;
 
@@ -366,52 +368,40 @@ function showReplySuggestion(suggestedReply, originalMessage) {
 
 // ─── SEND MESSAGE ────────────────────────────────────────────────────────────
 
-function sendWhatsAppMessage(text) {
-  const inputSelectors = [
-    '[data-testid="conversation-compose-box-input"]',
-    '[contenteditable="true"][data-tab="10"]',
-    '[contenteditable="true"][spellcheck="true"]',
-    'footer [contenteditable="true"]',
-    '#main [contenteditable="true"]'
-  ];
-
-  let inputBox = null;
-  for (const sel of inputSelectors) {
-    inputBox = document.querySelector(sel);
-    if (inputBox) break;
-  }
-
+async function sendWhatsAppMessage(text) {
+  const inputBox = findMessageInput();
   if (!inputBox) {
     showNotification("⚠️ Could not find message input", "error");
     return false;
   }
 
   inputBox.focus();
-  insertFormattedMessage(inputBox, text);
+  await insertFormattedMessage(inputBox, text);
   inputBox.dispatchEvent(new Event("input", { bubbles: true }));
 
-  setTimeout(() => {
-    const sendBtn = document.querySelector('[data-testid="send"], [aria-label="Send"], [data-icon="send"]');
-    if (sendBtn) {
-      sendBtn.click();
-    } else {
-      inputBox.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, bubbles: true }));
-    }
-  }, 300);
-  return true;
+  await wait(500);
+  const sendBtn = findMediaSendButton();
+  if (sendBtn) {
+    sendBtn.click();
+    return true;
+  }
+
+  return false;
 }
 
-function insertFormattedMessage(inputBox, text) {
+async function insertFormattedMessage(inputBox, text) {
   const safeText = String(text || "").replace(/\r\n/g, "\n").trim();
-  if (!safeText) return;
+  if (!safeText) return false;
 
-  const escapedHtml = safeText
-    .split("\n")
-    .map(line => escapeHtml(line))
-    .join("<br>");
-
-  const inserted = document.execCommand("insertHTML", false, escapedHtml);
-  if (inserted) return;
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(safeText);
+      const pasted = document.execCommand("paste");
+      if (pasted) return true;
+    } catch (error) {
+      // Fall back to execCommand insertion below.
+    }
+  }
 
   const lines = safeText.split("\n");
   lines.forEach((line, index) => {
@@ -420,6 +410,7 @@ function insertFormattedMessage(inputBox, text) {
       document.execCommand("insertLineBreak");
     }
   });
+  return true;
 }
 
 async function sendWhatsAppImages(attachments) {

@@ -1,4 +1,5 @@
 // TickBags WA Assistant - Popup Script
+let popupCurrentChatId = null;
 
 async function getContentState() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -14,12 +15,13 @@ async function getContentState() {
 
 async function init() {
   const stored = await chrome.storage.local.get([
-    "globalAIEnabled", "disabledChats", "tickbotBackendUrl", "tickbotExtensionKey",
+    "globalAIEnabled", "disabledChats", "onlyChatId", "tickbotBackendUrl", "tickbotExtensionKey",
     "statsReplied", "statsChats"
   ]);
 
-  const globalEnabled = stored.globalAIEnabled !== false;
+  let globalEnabled = stored.globalAIEnabled !== false;
   const disabledChats = new Set(stored.disabledChats || []);
+  let onlyChatId = stored.onlyChatId || "";
   const backendUrl = stored.tickbotBackendUrl || "https://dashboard.tickbags.com";
   const extensionKey = stored.tickbotExtensionKey || "";
 
@@ -27,13 +29,16 @@ async function init() {
   const globalToggle = document.getElementById("global-toggle");
   globalToggle.checked = globalEnabled;
   globalToggle.addEventListener("change", async (e) => {
-    await chrome.storage.local.set({ globalAIEnabled: e.target.checked });
+    globalEnabled = e.target.checked;
+    if (globalEnabled) onlyChatId = "";
+    await chrome.storage.local.set({ globalAIEnabled: globalEnabled, onlyChatId });
     // Tell content script
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.url?.includes("web.whatsapp.com")) {
-      chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_GLOBAL", value: e.target.checked });
+      chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_GLOBAL", value: globalEnabled });
     }
-    updateHeaderStatus(e.target.checked, null, disabledChats);
+    document.getElementById("only-chat-toggle").checked = false;
+    updateHeaderStatus(globalEnabled, popupCurrentChatId, disabledChats, onlyChatId);
   });
 
   // Backend settings
@@ -85,8 +90,6 @@ async function init() {
 
   // Chat toggle — get current chat from content script
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  let currentChatId = null;
-
   if (tab?.url?.includes("web.whatsapp.com")) {
     chrome.tabs.sendMessage(tab.id, { type: "GET_CURRENT_CHAT" }, (response) => {
       if (chrome.runtime.lastError || !response?.chatId) {
@@ -95,27 +98,47 @@ async function init() {
         return;
       }
 
-      currentChatId = response.chatId;
+      popupCurrentChatId = response.chatId;
       const chatToggle = document.getElementById("chat-toggle");
+      const onlyChatToggle = document.getElementById("only-chat-toggle");
       chatToggle.disabled = false;
-      chatToggle.checked = !disabledChats.has(currentChatId);
-      document.getElementById("current-chat-name").textContent = currentChatId;
+      onlyChatToggle.disabled = false;
+      chatToggle.checked = !disabledChats.has(popupCurrentChatId);
+      onlyChatToggle.checked = onlyChatId === popupCurrentChatId;
+      document.getElementById("current-chat-name").textContent = popupCurrentChatId;
 
       chatToggle.addEventListener("change", async (e) => {
         chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_CHAT", value: e.target.checked });
         if (!e.target.checked) {
-          disabledChats.add(currentChatId);
+          disabledChats.add(popupCurrentChatId);
         } else {
-          disabledChats.delete(currentChatId);
+          disabledChats.delete(popupCurrentChatId);
         }
         await chrome.storage.local.set({ disabledChats: [...disabledChats] });
-        updateHeaderStatus(globalToggle.checked, currentChatId, disabledChats);
+        updateHeaderStatus(globalEnabled, popupCurrentChatId, disabledChats, onlyChatId);
       });
 
-      updateHeaderStatus(globalEnabled, currentChatId, disabledChats);
+      onlyChatToggle.addEventListener("change", async (e) => {
+        onlyChatId = e.target.checked ? popupCurrentChatId : "";
+        if (onlyChatId) {
+          globalEnabled = false;
+          globalToggle.checked = false;
+          disabledChats.delete(popupCurrentChatId);
+          chatToggle.checked = true;
+        }
+        await chrome.storage.local.set({
+          onlyChatId,
+          globalAIEnabled: globalEnabled,
+          disabledChats: [...disabledChats]
+        });
+        chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_ONLY_CHAT", value: e.target.checked });
+        updateHeaderStatus(globalEnabled, popupCurrentChatId, disabledChats, onlyChatId);
+      });
+
+      updateHeaderStatus(globalEnabled, popupCurrentChatId, disabledChats, onlyChatId);
     });
   } else {
-    updateHeaderStatus(false, null, disabledChats);
+    updateHeaderStatus(false, null, disabledChats, onlyChatId);
     document.getElementById("header-status-text").textContent = "Open WhatsApp Web";
   }
 
@@ -125,7 +148,7 @@ async function init() {
   document.getElementById("stat-disabled").textContent = disabledChats.size;
 
   if (!tab?.url?.includes("web.whatsapp.com")) {
-    updateHeaderStatus(false, null, disabledChats);
+    updateHeaderStatus(false, null, disabledChats, onlyChatId);
     document.getElementById("header-status-text").textContent = "Open WhatsApp Web";
   }
 }
@@ -143,18 +166,13 @@ function isValidBackendUrl(value) {
   }
 }
 
-function updateHeaderStatus(globalOn, chatId, disabledChats) {
+function updateHeaderStatus(globalOn, chatId, disabledChats, onlyChatId = "") {
   const dot = document.getElementById("header-status-dot");
   const text = document.getElementById("header-status-text");
 
-  if (!globalOn) {
-    dot.className = "status-dot off";
-    text.textContent = "AI Paused (Global)";
-    return;
-  }
   if (!chatId) {
-    dot.className = "status-dot on";
-    text.textContent = "AI Active — open a chat";
+    dot.className = globalOn ? "status-dot on" : "status-dot off";
+    text.textContent = globalOn ? "AI Active — open a chat" : "Open a chat";
     return;
   }
   if (disabledChats?.has(chatId)) {
@@ -162,14 +180,31 @@ function updateHeaderStatus(globalOn, chatId, disabledChats) {
     text.textContent = "Paused for this chat";
     return;
   }
-  dot.className = "status-dot on";
-  text.textContent = "AI Active ✓";
+  if (onlyChatId === chatId) {
+    dot.className = "status-dot on";
+    text.textContent = "Only This Chat active";
+    return;
+  }
+  if (onlyChatId) {
+    dot.className = "status-dot off";
+    text.textContent = "Only another chat active";
+    return;
+  }
+  if (globalOn) {
+    dot.className = "status-dot on";
+    text.textContent = "AI Active globally";
+    return;
+  }
+  dot.className = "status-dot off";
+  text.textContent = "AI Paused";
 }
 
 // Handle messages from content.js
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === "STATE_CHANGED") {
     document.getElementById("global-toggle").checked = msg.globalAIEnabled;
+    const onlyToggle = document.getElementById("only-chat-toggle");
+    if (onlyToggle) onlyToggle.checked = !!popupCurrentChatId && msg.onlyChatId === popupCurrentChatId;
   }
 });
 

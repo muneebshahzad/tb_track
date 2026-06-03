@@ -29,7 +29,8 @@ AI-powered WhatsApp Business assistant for TickBags.com
 
 - When a customer sends a message, the extension asks the TickBot backend for a reply
 - If Global AI is on and the current chat is enabled, the reply is inserted into WhatsApp Web and sent automatically
-- Use the Global or per-chat toggle to pause automatic replies
+- Use Only This Chat to keep Global AI off and auto-reply only in the open chat
+- Use the Global, Only This Chat, or per-chat toggle to control automatic replies
 
 ---
 
@@ -43,6 +44,11 @@ AI-powered WhatsApp Business assistant for TickBags.com
 - On the floating panel while a chat is open
 - Disable AI for specific chats (e.g., chats with suppliers, personal contacts)
 - Setting is remembered per chat name
+
+### Only This Chat
+- Available in the popup and floating panel
+- Turns Global AI off and enables auto-replies only for the currently open chat
+- Turning Global AI back on clears Only This Chat mode
 
 ---
 
@@ -85,6 +91,6 @@ tickbags-wa-extension/
 
 ## Troubleshooting
 
-- **No suggestion appearing?** Make sure the backend URL is saved and Global AI is ON
+- **No suggestion appearing?** Make sure the backend URL is saved and either Global AI or Only This Chat is ON
 - **Backend says Unauthorized?** Add the same key in the popup that is set as `TICKBOT_EXTENSION_KEY` or `INTERNAL_API_KEY`
 - **Wrong language or wrong business info?** Update the TickBot backend prompt/settings, not this extension

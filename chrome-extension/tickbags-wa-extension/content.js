@@ -2,6 +2,7 @@
 
 let globalAIEnabled = true;
 let disabledChats = new Set();
+let onlyChatId = "";
 let backendUrl = "https://dashboard.tickbags.com";
 let currentChatId = null;
 let chatConversationHistory = {};
@@ -13,9 +14,10 @@ let floatingPanel = null;
 // ─── INIT ───────────────────────────────────────────────────────────────────
 
 async function init() {
-  const stored = await chrome.storage.local.get(["globalAIEnabled", "disabledChats", "tickbotBackendUrl"]);
+  const stored = await chrome.storage.local.get(["globalAIEnabled", "disabledChats", "onlyChatId", "tickbotBackendUrl"]);
   globalAIEnabled = stored.globalAIEnabled !== false;
   disabledChats = new Set(stored.disabledChats || []);
+  onlyChatId = stored.onlyChatId || "";
   backendUrl = stored.tickbotBackendUrl || "https://dashboard.tickbags.com";
 
   injectFloatingPanel();
@@ -23,16 +25,30 @@ async function init() {
   startMessagePolling();
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === "TOGGLE_GLOBAL") { globalAIEnabled = msg.value; updatePanelState(); }
+    if (msg.type === "TOGGLE_GLOBAL") {
+      globalAIEnabled = msg.value;
+      if (globalAIEnabled) onlyChatId = "";
+      updatePanelState();
+    }
     if (msg.type === "TOGGLE_CHAT") {
       if (msg.value) disabledChats.delete(currentChatId);
       else disabledChats.add(currentChatId);
       updatePanelState();
     }
+    if (msg.type === "TOGGLE_ONLY_CHAT") {
+      onlyChatId = msg.value && currentChatId ? currentChatId : "";
+      if (onlyChatId) globalAIEnabled = false;
+      updatePanelState();
+    }
     if (msg.type === "BACKEND_SETTINGS_UPDATED") { backendUrl = msg.backendUrl || backendUrl; }
     if (msg.type === "GET_CURRENT_CHAT") { sendResponse({ chatId: currentChatId || getCurrentChatId() }); return true; }
     if (msg.type === "GET_STATE") {
-      sendResponse({ globalAIEnabled, currentChatId, chatEnabled: currentChatId ? !disabledChats.has(currentChatId) : true });
+      sendResponse({
+        globalAIEnabled,
+        currentChatId,
+        chatEnabled: currentChatId ? !disabledChats.has(currentChatId) : true,
+        onlyChatId
+      });
       return true;
     }
   });
@@ -77,7 +93,7 @@ function checkForNewMessages() {
 
   updatePanelState();
   if (!currentChatId) return;
-  if (!globalAIEnabled || disabledChats.has(currentChatId) || !backendUrl) {
+  if (!isCurrentChatActive() || !backendUrl) {
     markVisibleIncomingMessagesHandled();
     return;
   }
@@ -404,6 +420,13 @@ function injectFloatingPanel() {
         <span class="tb-slider"></span>
       </label>
     </div>
+    <div class="tb-toggle-row" id="tb-only-chat-row">
+      <span class="tb-toggle-label">Only This Chat</span>
+      <label class="tb-switch">
+        <input type="checkbox" id="tb-only-chat-toggle">
+        <span class="tb-slider"></span>
+      </label>
+    </div>
     <div class="tb-status" id="tb-status-dot">
       <span class="tb-dot active"></span>
       <span id="tb-status-text">AI Active</span>
@@ -414,9 +437,10 @@ function injectFloatingPanel() {
 
   document.getElementById("tb-global-toggle").addEventListener("change", (e) => {
     globalAIEnabled = e.target.checked;
-    chrome.storage.local.set({ globalAIEnabled });
+    if (globalAIEnabled) onlyChatId = "";
+    chrome.storage.local.set({ globalAIEnabled, onlyChatId });
     updatePanelState();
-    chrome.runtime.sendMessage({ type: "STATE_CHANGED", globalAIEnabled });
+    chrome.runtime.sendMessage({ type: "STATE_CHANGED", globalAIEnabled, onlyChatId });
   });
 
   document.getElementById("tb-chat-toggle").addEventListener("change", (e) => {
@@ -426,28 +450,52 @@ function injectFloatingPanel() {
     chrome.storage.local.set({ disabledChats: [...disabledChats] });
     updatePanelState();
   });
+
+  document.getElementById("tb-only-chat-toggle").addEventListener("change", (e) => {
+    if (!currentChatId) {
+      e.target.checked = false;
+      return;
+    }
+    onlyChatId = e.target.checked ? currentChatId : "";
+    if (onlyChatId) {
+      globalAIEnabled = false;
+      disabledChats.delete(currentChatId);
+    }
+    chrome.storage.local.set({ onlyChatId, globalAIEnabled, disabledChats: [...disabledChats] });
+    updatePanelState();
+    chrome.runtime.sendMessage({ type: "STATE_CHANGED", globalAIEnabled, onlyChatId });
+  });
+}
+
+function isCurrentChatActive() {
+  if (!currentChatId || disabledChats.has(currentChatId)) return false;
+  return globalAIEnabled || onlyChatId === currentChatId;
 }
 
 function updatePanelState() {
   if (!floatingPanel) return;
   const globalToggle = document.getElementById("tb-global-toggle");
   const chatToggle = document.getElementById("tb-chat-toggle");
+  const onlyChatToggle = document.getElementById("tb-only-chat-toggle");
   const statusDot = document.querySelector(".tb-dot");
   const statusText = document.getElementById("tb-status-text");
   const chatRow = document.getElementById("tb-chat-toggle-row");
 
   if (globalToggle) globalToggle.checked = globalAIEnabled;
   if (chatToggle && currentChatId) chatToggle.checked = !disabledChats.has(currentChatId);
+  if (onlyChatToggle) onlyChatToggle.checked = !!currentChatId && onlyChatId === currentChatId;
 
-  const isActive = globalAIEnabled && currentChatId && !disabledChats.has(currentChatId);
+  const isActive = isCurrentChatActive();
   if (statusDot) statusDot.className = "tb-dot " + (isActive ? "active" : "inactive");
   if (statusText) {
-    if (!globalAIEnabled) statusText.textContent = "AI Off (Global)";
-    else if (!currentChatId) statusText.textContent = "No chat open";
+    if (!currentChatId) statusText.textContent = "No chat open";
     else if (disabledChats.has(currentChatId)) statusText.textContent = "AI Off (This Chat)";
-    else statusText.textContent = "AI Active";
+    else if (onlyChatId === currentChatId) statusText.textContent = "AI Active (Only This Chat)";
+    else if (onlyChatId) statusText.textContent = "AI Off (Only another chat)";
+    else if (!globalAIEnabled) statusText.textContent = "AI Off (Global)";
+    else statusText.textContent = "AI Active (Global)";
   }
-  if (chatRow) chatRow.style.opacity = globalAIEnabled ? "1" : "0.4";
+  if (chatRow) chatRow.style.opacity = (globalAIEnabled || onlyChatId === currentChatId) ? "1" : "0.55";
 }
 
 function makeDraggable(el) {

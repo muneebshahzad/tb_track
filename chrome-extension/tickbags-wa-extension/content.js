@@ -76,23 +76,21 @@ function checkForNewMessages() {
   if (chatId) currentChatId = chatId;
 
   updatePanelState();
-  if (!globalAIEnabled) return;
   if (!currentChatId) return;
-  if (disabledChats.has(currentChatId)) return;
-  if (!backendUrl) return;
+  if (!globalAIEnabled || disabledChats.has(currentChatId) || !backendUrl) {
+    markVisibleIncomingMessagesHandled();
+    return;
+  }
 
   const messages = getVisibleIncomingMessages();
   if (!messages.length) {
     return checkViaFocusableItems();
   }
 
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (hasMessageBeenHandled(message.key)) continue;
-    markMessageProcessing(message.key);
-    triggerAIReply(message.text, message.key);
-    return;
-  }
+  const latestMessage = messages[messages.length - 1];
+  if (hasMessageBeenHandled(latestMessage.key)) return;
+  markMessageProcessing(latestMessage.key);
+  triggerAIReply(latestMessage.text, latestMessage.key);
 }
 
 function getVisibleIncomingMessages() {
@@ -143,6 +141,15 @@ function buildMessageKey(row, text) {
 
 function hasMessageBeenHandled(key) {
   return !key || processedMessageKeys.has(key) || key === lastProcessedMsgKey || key === processingKey;
+}
+
+function markVisibleIncomingMessagesHandled() {
+  for (const message of getVisibleIncomingMessages()) {
+    if (message.key) processedMessageKeys.add(message.key);
+  }
+  while (processedMessageKeys.size > 80) {
+    processedMessageKeys.delete(processedMessageKeys.values().next().value);
+  }
 }
 
 function markMessageProcessing(key) {

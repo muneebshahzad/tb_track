@@ -285,12 +285,10 @@ async function triggerAIReply(customerMessage, msgKey) {
     history.push({ role: "assistant", content: reply });
     if (history.length > 10) history.splice(0, 2);
 
-    const sent = await sendWhatsAppMessage(reply);
+    const imageAttachments = Array.isArray(result.attachments) ? result.attachments.filter(item => item?.type === "image" && item?.url).slice(0, 3) : [];
+    const messageToSend = appendImageLinks(reply, imageAttachments);
+    const sent = await sendWhatsAppMessage(messageToSend);
     if (sent) {
-      const imageAttachments = Array.isArray(result.attachments) ? result.attachments.filter(item => item?.type === "image" && item?.url).slice(0, 3) : [];
-      if (imageAttachments.length) {
-        setTimeout(() => sendWhatsAppImages(imageAttachments), 1200);
-      }
       markVisibleIncomingMessagesHandled();
       setTimeout(markVisibleIncomingMessagesHandled, 1200);
       await recordSuggestionSent(currentChatId);
@@ -305,6 +303,16 @@ async function triggerAIReply(customerMessage, msgKey) {
     showNotification("Extension error: " + err.message, "error");
     processingKey = null;
   }
+}
+
+function appendImageLinks(reply, attachments) {
+  if (!attachments.length) return reply;
+  const lines = [String(reply || "").trim(), "", "Pictures:"];
+  attachments.forEach((attachment, index) => {
+    const title = String(attachment.title || `Option ${index + 1}`).trim();
+    lines.push(`${index + 1}. ${title}: ${attachment.url}`);
+  });
+  return lines.join("\n");
 }
 
 // ─── REPLY SUGGESTION PANEL ──────────────────────────────────────────────────

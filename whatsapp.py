@@ -1116,8 +1116,8 @@ def _prefers_roman_urdu(text: str) -> bool:
     normalized = _normalized_customer_text(text)
     roman_markers = (
         "hai", "hain", "hy", "main", "mein", "mujhe", "mujhy", "chahiye",
-        "dikha", "dikhayen", "bata", "kya", "kia", "kar", "kr", "karo",
-        "dein", "wala", "wali", "ye", "is ka", "kitna",
+        "dikha", "dikhayen", "dikhayein", "bata", "kya", "kia", "kar", "kr", "karo",
+        "dein", "wala", "wali", "ye", "is ka", "kitna", "pehle", "pehly",
     )
     english_markers = (
         "show", "suggest", "option", "options", "some", "need", "want",
@@ -1125,7 +1125,7 @@ def _prefers_roman_urdu(text: str) -> bool:
     )
     roman_score = sum(1 for marker in roman_markers if marker in normalized)
     english_score = sum(1 for marker in english_markers if marker in normalized)
-    return roman_score > english_score
+    return roman_score > 0 and roman_score >= english_score
 
 
 def _requested_attribute(text: str) -> str:
@@ -1153,6 +1153,101 @@ def _is_color_options_request(text: str, messages: list[dict] | None = None, con
     if any(word in normalized for word in ("option", "options", "dikha", "dikhayen", "dikhao", "show", "suggest")):
         return True
     return bool(_recent_product_context(messages, conversation))
+
+
+def _requested_option_limit(text: str, default: int = 5, maximum: int = 10) -> int:
+    match = re.search(r"\b([1-9]|10)\b", _normalized_customer_text(text))
+    if not match:
+        return default
+    return min(maximum, max(1, int(match.group(1))))
+
+
+def _is_general_options_request(text: str) -> bool:
+    normalized = _normalized_customer_text(text)
+    option_terms = ("option", "options", "suggest", "recommend", "dikha", "dikhayen", "dikhao", "show")
+    if not any(term in normalized for term in option_terms):
+        return False
+    if _requested_attribute(normalized):
+        return False
+    return True
+
+
+def _product_search_terms(text: str) -> list[str]:
+    normalized = _normalized_customer_text(text)
+    terms = [term for term in AI_BROAD_CATEGORY_TERMS if term in normalized]
+    if "beanbags" in normalized and "bean bag" not in terms:
+        terms.append("bean bag")
+    if "beanbag" in normalized and "bean bag" not in terms:
+        terms.append("bean bag")
+    return terms
+
+
+def _general_options_reply(text: str, limit: int | None = None) -> tuple[str, list[dict]]:
+    roman_urdu = _prefers_roman_urdu(text)
+    requested_limit = limit or _requested_option_limit(text)
+    search_terms = _product_search_terms(text)
+    matches = []
+    seen = set()
+    for item in get_product_source():
+        title = str(item.get("title") or item.get("product_title") or "")
+        haystack = _normalized_customer_text(" ".join([
+            title,
+            str(item.get("product_title") or ""),
+            str(item.get("variant_title") or ""),
+            str(item.get("sku") or ""),
+            str(item.get("handle") or ""),
+        ]))
+        if search_terms and not any(term in haystack for term in search_terms):
+            continue
+        key = (str(item.get("product_title") or title), str(item.get("variant_title") or ""), _format_money(item.get("price")))
+        if key in seen:
+            continue
+        seen.add(key)
+        matches.append(item)
+        if len(matches) >= requested_limit:
+            break
+
+    if not matches:
+        return (
+            "I can share product options, but the product catalog is not loading right now. Please tell me the style you want: bean bag, ottoman, or floor cushion."
+            if not roman_urdu
+            else "Main options share kar sakta hoon, lekin abhi product catalog load nahi ho raha. Aap style bata dein: bean bag, ottoman, ya floor cushion?"
+        ), []
+
+    lines = [
+        "Here are some options you can choose from:"
+        if not roman_urdu
+        else "Ye options dekh sakte hain:"
+    ]
+    attachments = []
+    for index, item in enumerate(matches, start=1):
+        title = str(item.get("title") or item.get("product_title") or "Product")
+        price = _format_money(item.get("price"))
+        url = _product_url(item)
+        image = str(item.get("image") or "").strip()
+        lines.append("")
+        lines.append(f"{index}. {title}")
+        lines.append(f"Price: {price}")
+        if url:
+            lines.append(f"Link: {url}")
+        if image:
+            attachments.append({
+                "type": "image",
+                "title": title,
+                "url": image,
+                "product_url": url,
+                "price": price,
+            })
+    lines.append("")
+    lines.append(
+        "Tell me which option you like, and I will guide you with the order details."
+        if not roman_urdu
+        else "Aap jis option mein interested hain uska screenshot/link send kar dein, main order details guide kar dunga."
+    )
+    for index, item in enumerate(matches):
+        if index < len(attachments):
+            item["_attachment"] = attachments[index]
+    return "\n".join(lines), matches
 
 
 def _color_options_reply(text: str, messages: list[dict] | None = None, conversation: dict | None = None) -> tuple[str, list[dict]]:
@@ -1398,6 +1493,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
     product_matches = _find_product_matches(latest_body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, latest_body, asking_price=asking_price)
     color_options_reply, color_option_matches = _color_options_reply(latest_body, messages=messages, conversation=conversation) if _is_color_options_request(latest_body, messages, conversation) else ("", [])
+    general_options_reply, general_option_matches = _general_options_reply(latest_body) if _is_general_options_request(latest_body) else ("", [])
     order_help = _is_buying_intent(latest_body)
     if latest_text.strip() in AI_GREETING_PHRASES:
         decision.update({
@@ -1524,6 +1620,20 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
             decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
             decision["product_attachments"] = _product_image_attachments(color_option_matches)
+    elif general_options_reply:
+        decision.update({
+            "intent": "product_question",
+            "confidence": 0.88,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest", "product_options"],
+            "reply_text": general_options_reply,
+            "order_state": "collecting_details",
+        })
+        if general_option_matches:
+            decision["order_candidate"] = {"product": str(general_option_matches[0].get("product_title") or general_option_matches[0].get("title") or "")}
+            decision["product_attachment_url"] = str(general_option_matches[0].get("image") or "")
+            decision["product_attachments"] = _product_image_attachments(general_option_matches)
     elif product_reply:
         decision.update({
             "intent": "price_question" if asking_price else "product_question",
@@ -1604,7 +1714,11 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "should_auto_reply": True,
             "needs_human": False,
             "labels": ["product_interest"],
-            "reply_text": "Ji bilkul. TickBags mein bean bags, ottomans, floor cushions, aur home decor options available hain. Aap kis product ke baare mein details chahte hain, ya product ka screenshot/link share kar dein.",
+            "reply_text": (
+                "Yes, I can share options. Which style would you like to see: bean bag, ottoman, or floor cushion?"
+                if not _prefers_roman_urdu(latest_body)
+                else "Ji bilkul, options share kar sakta hoon. Aap kis style ke options chahte hain: bean bag, ottoman, ya floor cushion?"
+            ),
             "order_state": "collecting_details",
         })
     elif any(word in latest_text for word in ("order", "buy", "want this", "address", "phone", "name")):
@@ -1646,6 +1760,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
     product_matches = _find_product_matches(latest_body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, latest_body, asking_price=asking_price)
     color_options_reply, color_option_matches = _color_options_reply(latest_body, messages=messages, conversation=conversation) if _is_color_options_request(latest_body, messages, conversation) else ("", [])
+    general_options_reply, general_option_matches = _general_options_reply(latest_body) if _is_general_options_request(latest_body) else ("", [])
     order_help = _is_buying_intent(latest_body)
     default_unavailable = (
         str(decision.get("escalation_reason") or "").strip().lower() == "ai decision unavailable."
@@ -1706,6 +1821,28 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
             decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
             decision["product_attachments"] = _product_image_attachments(color_option_matches)
+    elif general_options_reply and (
+        str(decision.get("intent") or "").lower() in {"product_question", "unknown"}
+        or not decision.get("reply_text")
+        or "share which color" in str(decision.get("reply_text") or "").lower()
+        or "preferred color" in str(decision.get("reply_text") or "").lower()
+        or "send the product picture" in str(decision.get("reply_text") or "").lower()
+        or decision.get("needs_human")
+    ):
+        decision.update({
+            "intent": "product_question",
+            "confidence": max(float(decision.get("confidence") or 0), 0.88),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["product_interest", "product_options"])),
+            "reply_text": general_options_reply,
+            "order_state": decision.get("order_state") if decision.get("order_state") != "no_order" else "collecting_details",
+            "escalation_reason": "",
+        })
+        if general_option_matches:
+            decision["order_candidate"] = {"product": str(general_option_matches[0].get("product_title") or general_option_matches[0].get("title") or "")}
+            decision["product_attachment_url"] = str(general_option_matches[0].get("image") or "")
+            decision["product_attachments"] = _product_image_attachments(general_option_matches)
     elif order_help and has_recent_image and (
         str(decision.get("intent") or "").lower() in {"product_question", "order_intent", "unknown"}
         or not decision.get("reply_text")
@@ -1850,6 +1987,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
     buying_intent = _is_buying_intent(latest_text)
     image_buying_intent = buying_intent and _context_has_recent_image(body, messages)
     color_options_reply, color_option_matches = _color_options_reply(latest_text, messages=messages, conversation=conversation) if _is_color_options_request(latest_text, messages, conversation) else ("", [])
+    general_options_reply, general_option_matches = _general_options_reply(latest_text) if _is_general_options_request(latest_text) else ("", [])
     if risk_hit or outside_scope:
         labels.add("needs_human")
         if risk_hit:
@@ -1922,6 +2060,23 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
             decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
             decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
             decision["product_attachments"] = _product_image_attachments(color_option_matches)
+        return normalize_ai_decision(decision)
+
+    if general_options_reply:
+        decision.update({
+            "intent": "product_question",
+            "needs_human": False,
+            "should_auto_reply": True,
+            "confidence": max(float(decision.get("confidence") or 0), 0.88),
+            "labels": sorted(labels | {"product_interest", "product_options"}),
+            "reply_text": general_options_reply,
+            "order_state": decision.get("order_state") if decision.get("order_state") != "no_order" else "collecting_details",
+            "escalation_reason": "",
+        })
+        if general_option_matches:
+            decision["order_candidate"] = {"product": str(general_option_matches[0].get("product_title") or general_option_matches[0].get("title") or "")}
+            decision["product_attachment_url"] = str(general_option_matches[0].get("image") or "")
+            decision["product_attachments"] = _product_image_attachments(general_option_matches)
         return normalize_ai_decision(decision)
 
     if tracking_request and decision.get("needs_human"):

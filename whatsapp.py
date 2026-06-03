@@ -2326,6 +2326,39 @@ def _extension_request_authorized() -> bool:
     return hmac.compare_digest(supplied_key, required_key)
 
 
+def _clean_extension_history(raw_history) -> list[dict]:
+    if not isinstance(raw_history, list):
+        return []
+    cleaned = []
+    for item in raw_history[-16:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = str(item.get("content") or item.get("text") or "").strip()
+        if not content:
+            continue
+        cleaned.append({"role": role, "content": content[:1200]})
+    return cleaned
+
+
+def _extension_contextual_message(customer_message: str, history: list[dict]) -> str:
+    if not history:
+        return customer_message
+    lines = []
+    for item in history[-12:]:
+        speaker = "Customer" if item.get("role") == "user" else "TickBags team"
+        lines.append(f"{speaker}: {item.get('content')}")
+    transcript = "\n".join(lines)
+    return (
+        "Recent WhatsApp conversation:\n"
+        f"{transcript}\n\n"
+        f"Latest customer message: {customer_message}\n"
+        "Reply only to the latest customer message, using the previous messages as context."
+    )
+
+
 @whatsapp_bp.route("/api/tickbot/extension/draft", methods=["POST", "OPTIONS"])
 def api_tickbot_extension_draft():
     if request.method == "OPTIONS":
@@ -2337,11 +2370,17 @@ def api_tickbot_extension_draft():
     customer_message = str(data.get("customer_message") or "").strip()
     chat_name = str(data.get("chat_name") or "").strip()
     contact_key = str(data.get("contact_key") or chat_name or "").strip()
+    extension_history = _clean_extension_history(data.get("conversation_history"))
     if not customer_message:
         return _extension_cors_response({"success": False, "error": "Customer message is required."}, 400)
 
     conversation = get_conversation_by_any_key(contact_key) if contact_key else None
-    decision = analyze_inbound_message("whatsapp", contact_key or chat_name or "whatsapp-extension", customer_message, conversation=conversation)
+    decision = analyze_inbound_message(
+        "whatsapp",
+        contact_key or chat_name or "whatsapp-extension",
+        _extension_contextual_message(customer_message, extension_history),
+        conversation=conversation,
+    )
     reply = str(decision.get("reply_text") or "").strip()
     if not reply:
         settings = get_whatsapp_settings()

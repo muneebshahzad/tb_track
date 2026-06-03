@@ -94,10 +94,15 @@ function checkForNewMessages() {
 }
 
 function getVisibleIncomingMessages() {
+  return getVisibleConversationMessages().filter(message => message.role === "user");
+}
+
+function getVisibleConversationMessages(limit = 16) {
   const candidates = [
     ...document.querySelectorAll('#main [role="row"]'),
     ...document.querySelectorAll('#main [data-testid="msg-container"]'),
-    ...document.querySelectorAll('#main .message-in, #main [class*="message-in"]')
+    ...document.querySelectorAll('#main .message-in, #main [class*="message-in"]'),
+    ...document.querySelectorAll('#main .message-out, #main [class*="message-out"]')
   ];
   const seen = new Set();
   const messages = [];
@@ -106,12 +111,15 @@ function getVisibleIncomingMessages() {
     const row = normalizeMessageRow(node);
     if (!row || seen.has(row)) continue;
     seen.add(row);
-    if (!isIncomingMessageRow(row)) continue;
     const text = extractMessageText(row);
     if (!text) continue;
-    messages.push({ key: buildMessageKey(row, text), text });
+    messages.push({
+      key: buildMessageKey(row, text),
+      role: isOutgoingMessageRow(row) ? "assistant" : "user",
+      text
+    });
   }
-  return messages;
+  return messages.slice(-limit);
 }
 
 function normalizeMessageRow(node) {
@@ -120,15 +128,19 @@ function normalizeMessageRow(node) {
 }
 
 function isIncomingMessageRow(row) {
+  return !isOutgoingMessageRow(row);
+}
+
+function isOutgoingMessageRow(row) {
   const className = String(row.className || "");
-  if (className.includes("message-out") || row.querySelector('[class*="message-out"]')) return false;
-  if (className.includes("message-in") || row.querySelector('[class*="message-in"]')) return true;
+  if (className.includes("message-out") || row.querySelector('[class*="message-out"]')) return true;
+  if (className.includes("message-in") || row.querySelector('[class*="message-in"]')) return false;
   const hasOutgoingTick = row.querySelector(
     '[data-testid="msg-dblcheck"], [data-testid="msg-check"], ' +
     '[data-icon="msg-dblcheck"], [data-icon="msg-check"], ' +
     '[aria-label="Read"], [aria-label="Delivered"], [aria-label="Sent"]'
   );
-  return !hasOutgoingTick;
+  return !!hasOutgoingTick;
 }
 
 function buildMessageKey(row, text) {
@@ -220,7 +232,11 @@ async function triggerAIReply(customerMessage, msgKey) {
   if (!chatConversationHistory[currentChatId]) {
     chatConversationHistory[currentChatId] = [];
   }
-  const history = chatConversationHistory[currentChatId];
+  const visibleHistory = getVisibleConversationMessages(16);
+  const history = visibleHistory.length ? visibleHistory.map(message => ({
+    role: message.role,
+    content: message.text
+  })) : chatConversationHistory[currentChatId];
 
   try {
     const result = await chrome.runtime.sendMessage({

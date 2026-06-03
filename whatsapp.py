@@ -762,7 +762,9 @@ AI_SUGGESTION_PHRASES = (
     "product ke baare", "product k bary", "product k baray", "product k barey",
     "product k baare", "product bata", "product bta", "bary main bata",
     "baray main bata", "barey main bata", "baare main bata", "bata skty",
-    "bata sakty", "bta skty", "bta sakty",
+    "bata sakty", "bta skty", "bta sakty", "options", "option",
+    "option dikha", "options dikha", "options dikhayen", "dikhao",
+    "dikhayen", "show options", "show me options",
 )
 
 AI_SMALL_TALK_PHRASES = (
@@ -803,6 +805,12 @@ AI_AVAILABILITY_PHRASES = (
 AI_BROAD_CATEGORY_TERMS = (
     "bean bag", "bean bags", "beanbag", "beanbags", "ottoman", "ottomans",
     "floor cushion", "floor cushions", "cushion", "cushions", "home decor",
+)
+
+AI_COLOR_WORDS = (
+    "black", "white", "brown", "grey", "gray", "blue", "navy", "green",
+    "red", "maroon", "pink", "purple", "yellow", "orange", "beige",
+    "cream", "tan", "mustard", "teal",
 )
 
 
@@ -1094,6 +1102,74 @@ def _is_broad_category_availability(text: str) -> bool:
     return any(phrase in text for phrase in AI_AVAILABILITY_PHRASES) and any(term in text for term in AI_BROAD_CATEGORY_TERMS)
 
 
+def _requested_color(text: str) -> str:
+    normalized = _normalized_customer_text(text)
+    for color in AI_COLOR_WORDS:
+        if re.search(rf"\b{re.escape(color)}\b", normalized):
+            return color
+    return ""
+
+
+def _is_color_options_request(text: str, messages: list[dict] | None = None, conversation: dict | None = None) -> bool:
+    normalized = _normalized_customer_text(text)
+    color = _requested_color(normalized)
+    if not color:
+        return False
+    if len(normalized.split()) <= 4:
+        return True
+    if any(phrase in normalized for phrase in AI_SUGGESTION_PHRASES):
+        return True
+    if any(word in normalized for word in ("option", "options", "dikha", "dikhayen", "dikhao", "show", "suggest")):
+        return True
+    return bool(_recent_product_context(messages, conversation))
+
+
+def _color_options_reply(text: str, messages: list[dict] | None = None, conversation: dict | None = None) -> tuple[str, list[dict]]:
+    color = _requested_color(text)
+    if not color:
+        return "", []
+    context = _normalized_customer_text(_recent_product_context(messages, conversation))
+    context_terms = [term for term in AI_BROAD_CATEGORY_TERMS if term in context]
+    matches = []
+    seen = set()
+    for item in get_product_source():
+        title = str(item.get("title") or item.get("product_title") or "")
+        haystack = _normalized_customer_text(" ".join([
+            title,
+            str(item.get("product_title") or ""),
+            str(item.get("variant_title") or ""),
+            str(item.get("sku") or ""),
+            str(item.get("handle") or ""),
+        ]))
+        if color not in haystack:
+            continue
+        if context_terms and not any(term in haystack for term in context_terms):
+            continue
+        key = (str(item.get("product_title") or title), str(item.get("variant_title") or ""), _format_money(item.get("price")))
+        if key in seen:
+            continue
+        seen.add(key)
+        matches.append(item)
+        if len(matches) >= 3:
+            break
+    pretty_color = color.title()
+    if matches:
+        lines = [f"{pretty_color} color mein ye options dekh sakte hain:"]
+        for item in matches:
+            title = str(item.get("title") or item.get("product_title") or "Product")
+            price = _format_money(item.get("price"))
+            lines.append(f"- {title}: {price}")
+        url = _product_url(matches[0])
+        if url:
+            lines.append(f"Link: {url}")
+        lines.append("Aap jis option mein interested hain uska screenshot/link send kar dein, main order details guide kar dunga.")
+        return "\n".join(lines), matches
+    return (
+        f"{pretty_color} color mein bean bags, ottomans, aur floor cushions ke options dekh sakte hain. "
+        "Aap kis style mein options chahte hain: bean bag, ottoman, ya floor cushion?"
+    ), []
+
+
 def _find_product_matches(query: str, messages: list[dict] | None = None, conversation: dict | None = None, limit: int = 4) -> list[dict]:
     lookup_query = _product_match_text(query)
     context = _recent_product_context(messages, conversation)
@@ -1228,6 +1304,7 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
     referenced_order = find_order_by_reference(order_reference) if order_reference else None
     product_matches = _find_product_matches(latest_body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, latest_body, asking_price=asking_price)
+    color_options_reply, color_option_matches = _color_options_reply(latest_body, messages=messages, conversation=conversation) if _is_color_options_request(latest_body, messages, conversation) else ("", [])
     order_help = _is_buying_intent(latest_body)
     if latest_text.strip() in AI_GREETING_PHRASES:
         decision.update({
@@ -1340,6 +1417,19 @@ def heuristic_ai_decision(channel: str, body: str, settings: dict, messages: lis
             "labels": ["order_tracking"],
             "reply_text": "Please share your order number or the phone number used for the order, and I will check the status for you.",
         })
+    elif color_options_reply:
+        decision.update({
+            "intent": "product_question",
+            "confidence": 0.88,
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": ["product_interest", "color_options"],
+            "reply_text": color_options_reply,
+            "order_state": "collecting_details",
+        })
+        if color_option_matches:
+            decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
+            decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
     elif product_reply:
         decision.update({
             "intent": "price_question" if asking_price else "product_question",
@@ -1449,6 +1539,7 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
     has_recent_image = _recent_image_context(messages)
     product_matches = _find_product_matches(latest_body, messages=messages, conversation=conversation)
     product_reply = _product_details_reply(product_matches, latest_body, asking_price=asking_price)
+    color_options_reply, color_option_matches = _color_options_reply(latest_body, messages=messages, conversation=conversation) if _is_color_options_request(latest_body, messages, conversation) else ("", [])
     order_help = _is_buying_intent(latest_body)
     default_unavailable = (
         str(decision.get("escalation_reason") or "").strip().lower() == "ai decision unavailable."
@@ -1488,6 +1579,26 @@ def strengthen_safe_ai_decision(body: str, decision: dict, settings: dict, messa
             "reply_text": "I am good, thank you. How can I help you with TickBags today?",
             "escalation_reason": "",
         })
+    elif color_options_reply and (
+        str(decision.get("intent") or "").lower() in {"product_question", "unknown"}
+        or not decision.get("reply_text")
+        or "share which color" in str(decision.get("reply_text") or "").lower()
+        or "preferred color" in str(decision.get("reply_text") or "").lower()
+        or decision.get("needs_human")
+    ):
+        decision.update({
+            "intent": "product_question",
+            "confidence": max(float(decision.get("confidence") or 0), 0.88),
+            "should_auto_reply": True,
+            "needs_human": False,
+            "labels": sorted(set((decision.get("labels") or []) + ["product_interest", "color_options"])),
+            "reply_text": color_options_reply,
+            "order_state": decision.get("order_state") if decision.get("order_state") != "no_order" else "collecting_details",
+            "escalation_reason": "",
+        })
+        if color_option_matches:
+            decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
+            decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
     elif product_reply and (
         asking_price
         or str(decision.get("intent") or "").lower() in {"product_question", "price_question"}
@@ -1611,6 +1722,7 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
     location_request = any(phrase in _normalized_customer_text(latest_text) for phrase in AI_LOCATION_PHRASES)
     tracking_request = _is_tracking_request(latest_text)
     buying_intent = _is_buying_intent(latest_text)
+    color_options_reply, color_option_matches = _color_options_reply(latest_text, messages=messages, conversation=conversation) if _is_color_options_request(latest_text, messages, conversation) else ("", [])
     if risk_hit or outside_scope:
         labels.add("needs_human")
         if risk_hit:
@@ -1664,6 +1776,22 @@ def guardrail_gpt_decision(body: str, decision: dict, settings: dict, messages: 
             "missing_order_fields": ["product", "name", "phone", "address", "quantity", "variant"],
             "escalation_reason": "",
         })
+        return normalize_ai_decision(decision)
+
+    if color_options_reply:
+        decision.update({
+            "intent": "product_question",
+            "needs_human": False,
+            "should_auto_reply": True,
+            "confidence": max(float(decision.get("confidence") or 0), 0.88),
+            "labels": sorted(labels | {"product_interest", "color_options"}),
+            "reply_text": color_options_reply,
+            "order_state": decision.get("order_state") if decision.get("order_state") != "no_order" else "collecting_details",
+            "escalation_reason": "",
+        })
+        if color_option_matches:
+            decision["order_candidate"] = {"product": str(color_option_matches[0].get("product_title") or color_option_matches[0].get("title") or "")}
+            decision["product_attachment_url"] = str(color_option_matches[0].get("image") or "")
         return normalize_ai_decision(decision)
 
     if tracking_request and decision.get("needs_human"):

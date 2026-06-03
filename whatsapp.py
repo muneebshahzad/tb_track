@@ -2309,6 +2309,57 @@ def verify_meta_signature(req) -> bool:
     return hmac.compare_digest(signature, f"sha256={expected}")
 
 
+def _extension_cors_response(payload=None, status=200):
+    response = jsonify_data(payload or {}, status)
+    origin = request.headers.get("Origin") or "*"
+    response.headers["Access-Control-Allow-Origin"] = origin if origin.startswith("chrome-extension://") else "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, X-TickBot-Key"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    return response
+
+
+def _extension_request_authorized() -> bool:
+    required_key = (os.getenv("TICKBOT_EXTENSION_KEY") or os.getenv("INTERNAL_API_KEY") or "").strip()
+    if not required_key:
+        return True
+    supplied_key = (request.headers.get("X-TickBot-Key") or "").strip()
+    return hmac.compare_digest(supplied_key, required_key)
+
+
+@whatsapp_bp.route("/api/tickbot/extension/draft", methods=["POST", "OPTIONS"])
+def api_tickbot_extension_draft():
+    if request.method == "OPTIONS":
+        return _extension_cors_response({"success": True})
+    if not _extension_request_authorized():
+        return _extension_cors_response({"success": False, "error": "Unauthorized."}, 401)
+
+    data = request.get_json(silent=True) or {}
+    customer_message = str(data.get("customer_message") or "").strip()
+    chat_name = str(data.get("chat_name") or "").strip()
+    contact_key = str(data.get("contact_key") or chat_name or "").strip()
+    if not customer_message:
+        return _extension_cors_response({"success": False, "error": "Customer message is required."}, 400)
+
+    conversation = get_conversation_by_any_key(contact_key) if contact_key else None
+    decision = analyze_inbound_message("whatsapp", contact_key or chat_name or "whatsapp-extension", customer_message, conversation=conversation)
+    reply = str(decision.get("reply_text") or "").strip()
+    if not reply:
+        settings = get_whatsapp_settings()
+        reply = settings.get("human_handoff_reply") or "Thanks for messaging TickBags. Our team will check this and reply shortly."
+
+    return _extension_cors_response({
+        "success": True,
+        "reply": reply,
+        "decision": decision,
+        "conversation": {
+            "phone": (conversation or {}).get("phone", ""),
+            "public_chat_id": (conversation or {}).get("public_chat_id", ""),
+            "ai_mode": (conversation or {}).get("ai_mode", ""),
+            "status": (conversation or {}).get("status", ""),
+        },
+    })
+
+
 @whatsapp_bp.route("/whatsapp/inbox")
 def inbox():
     return render_template("whatsapp_inbox.html", embedded_mode=True, skip_base_password_prompt=True)

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TickBags AI Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      width: 320px;
+      min-height: 420px;
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      background: #f8fdf9;
+      color: #111;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #1a6e2e 0%, #25d366 100%);
+      padding: 20px 20px 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header::before {
+      content: "";
+      position: absolute;
+      top: -20px; right: -20px;
+      width: 100px; height: 100px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 50%;
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .logo-icon {
+      font-size: 28px;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+    }
+
+    .header-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: white;
+      letter-spacing: -0.3px;
+    }
+
+    .header-sub {
+      font-size: 11px;
+      color: rgba(255,255,255,0.7);
+      margin-top: 2px;
+      letter-spacing: 0.2px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      margin-top: 10px;
+      padding: 4px 10px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 20px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.9);
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+    }
+    .status-dot.on { background: #a8ff9d; box-shadow: 0 0 0 2px rgba(168,255,157,0.3); }
+    .status-dot.off { background: rgba(255,255,255,0.4); }
+
+    /* Body */
+    .body { padding: 16px; }
+
+    /* Section */
+    .section {
+      background: white;
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      border: 1px solid #eaf5ec;
+    }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #667781;
+      margin-bottom: 12px;
+    }
+
+    /* Toggle Row */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 0;
+    }
+
+    .toggle-row + .toggle-row {
+      border-top: 1px solid #f5f5f5;
+    }
+
+    .toggle-info { flex: 1; }
+    .toggle-name { font-size: 13px; font-weight: 600; color: #1a1a1a; }
+    .toggle-desc { font-size: 11px; color: #888; margin-top: 2px; }
+
+    /* Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 42px; height: 24px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0;
+      background: #ddd;
+      border-radius: 24px;
+      transition: 0.3s;
+    }
+    .slider:before {
+      content: "";
+      position: absolute;
+      height: 18px; width: 18px;
+      left: 3px; bottom: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.3s;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .switch input:checked + .slider { background: #25d366; }
+    .switch input:checked + .slider:before { transform: translateX(18px); }
+
+    /* API Key */
+    .api-key-wrapper {
+      position: relative;
+    }
+
+    .api-input {
+      width: 100%;
+      padding: 10px 36px 10px 12px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 10px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+      color: #333;
+      background: #fafafa;
+      transition: border-color 0.2s;
+      outline: none;
+    }
+
+    .api-input:focus { border-color: #25d366; background: white; }
+    .api-input.saved { border-color: #25d366; background: #f0fdf4; }
+
+    .eye-btn {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #999;
+      font-size: 14px;
+      padding: 2px;
+    }
+
+    .save-btn {
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px;
+      background: #25d366;
+      color: white;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.2s;
+    }
+    .save-btn:hover { background: #1da851; }
+    .save-btn.saved { background: #1a6e2e; }
+
+    /* Stats row */
+    .stats-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .stat-card {
+      flex: 1;
+      background: #f0fdf4;
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+      border: 1px solid #d4f0dc;
+    }
+
+    .stat-num {
+      font-size: 20px;
+      font-weight: 800;
+      color: #1a6e2e;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: #667781;
+      margin-top: 2px;
+      font-weight: 500;
+    }
+
+    /* Footer */
+    .footer {
+      padding: 8px 16px 14px;
+      text-align: center;
+      font-size: 10px;
+      color: #bbb;
+    }
+
+    .footer a { color: #25d366; text-decoration: none; }
+
+    /* Saved msg */
+    .saved-msg {
+      font-size: 11px;
+      color: #1a6e2e;
+      text-align: center;
+      margin-top: 6px;
+      font-weight: 500;
+      display: none;
+    }
+
+    .info-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fff8e6;
+      border: 1px solid #ffd87a;
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 10px;
+      color: #8a6800;
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-top">
+      <div class="logo-icon">🛋️</div>
+      <div>
+        <div class="header-title">TickBags AI</div>
+        <div class="header-sub">WhatsApp Business Assistant</div>
+      </div>
+    </div>
+    <div class="status-badge">
+      <span class="status-dot" id="header-status-dot"></span>
+      <span id="header-status-text">Loading...</span>
+    </div>
+  </div>
+
+  <div class="body">
+
+    <!-- Controls -->
+    <div class="section">
+      <div class="section-title">AI Controls</div>
+
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <div class="toggle-name">Global AI Mode</div>
+          <div class="toggle-desc">Turn off to pause all AI replies</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="global-toggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row" id="chat-toggle-row">
+        <div class="toggle-info">
+          <div class="toggle-name">Current Chat</div>
+          <div class="toggle-desc" id="current-chat-name">Open a chat first</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="chat-toggle" disabled>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+    </div>
+
+    <!-- Backend -->
+    <div class="section">
+      <div class="section-title">TickBot Backend</div>
+      <div class="api-key-wrapper">
+        <input type="text" class="api-input" id="backend-url-input" placeholder="https://dashboard.tickbags.com">
+      </div>
+      <div class="api-key-wrapper" style="margin-top:8px;">
+        <input type="password" class="api-input" id="backend-key-input" placeholder="Optional extension key">
+        <button class="eye-btn" id="toggle-eye">👁</button>
+      </div>
+      <button class="save-btn" id="save-api-btn">Save Backend</button>
+      <div class="saved-msg" id="saved-msg">✓ Backend settings saved</div>
+
+      <div class="info-chip">
+        Drafts are generated by your TickBot backend.
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="section">
+      <div class="section-title">Session Stats</div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-num" id="stat-replied">0</div>
+          <div class="stat-label">Replied</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="stat-chats">0</div>
+          <div class="stat-label">Chats</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="stat-disabled">0</div>
+          <div class="stat-label">Paused</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    Made for <a href="https://tickbags.com" target="_blank">TickBags.com</a> · v1.1
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

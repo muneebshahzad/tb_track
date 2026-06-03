@@ -373,7 +373,7 @@ function sendWhatsAppMessage(text) {
   }
 
   inputBox.focus();
-  document.execCommand("insertText", false, text);
+  insertFormattedMessage(inputBox, text);
   inputBox.dispatchEvent(new Event("input", { bubbles: true }));
 
   setTimeout(() => {
@@ -385,6 +385,27 @@ function sendWhatsAppMessage(text) {
     }
   }, 300);
   return true;
+}
+
+function insertFormattedMessage(inputBox, text) {
+  const safeText = String(text || "").replace(/\r\n/g, "\n").trim();
+  if (!safeText) return;
+
+  const escapedHtml = safeText
+    .split("\n")
+    .map(line => escapeHtml(line))
+    .join("<br>");
+
+  const inserted = document.execCommand("insertHTML", false, escapedHtml);
+  if (inserted) return;
+
+  const lines = safeText.split("\n");
+  lines.forEach((line, index) => {
+    document.execCommand("insertText", false, line);
+    if (index < lines.length - 1) {
+      document.execCommand("insertLineBreak");
+    }
+  });
 }
 
 async function recordSuggestionSent(chatId) {

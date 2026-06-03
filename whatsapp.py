@@ -1155,13 +1155,18 @@ def _color_options_reply(text: str, messages: list[dict] | None = None, conversa
     pretty_color = color.title()
     if matches:
         lines = [f"{pretty_color} color mein ye options dekh sakte hain:"]
-        for item in matches:
+        for index, item in enumerate(matches, start=1):
             title = str(item.get("title") or item.get("product_title") or "Product")
             price = _format_money(item.get("price"))
-            lines.append(f"- {title}: {price}")
-        url = _product_url(matches[0])
-        if url:
-            lines.append(f"Link: {url}")
+            url = _product_url(item)
+            image = str(item.get("image") or "").strip()
+            lines.append("")
+            lines.append(f"{index}. {title}")
+            lines.append(f"Price: {price}")
+            if url:
+                lines.append(f"Link: {url}")
+            if image:
+                lines.append(f"Picture: {image}")
         lines.append("Aap jis option mein interested hain uska screenshot/link send kar dein, main order details guide kar dunga.")
         return "\n".join(lines), matches
     return (

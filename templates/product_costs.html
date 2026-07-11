@@ -13,6 +13,13 @@
   .calc-muted { font-size: 11px; color: #858796; white-space: nowrap; }
   .beans-panel { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
   .beans-input { width: 120px; }
+  .bulk-panel { padding:14px 16px;margin-bottom:16px; }
+  .bulk-grid { display:grid;grid-template-columns:repeat(10, minmax(96px, 1fr));gap:10px;align-items:end; }
+  .bulk-field label { display:block;font-size:10px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;white-space:nowrap; }
+  .bulk-field .cost-input { width:100%;box-sizing:border-box; }
+  .bulk-product-select { min-width:280px;max-width:420px;border:1px solid #dbe1f0;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;background:#fff;color:#3a3b45; }
+  .bulk-product-select:focus { border-color:#4e73df;box-shadow:0 0 0 3px rgba(78,115,223,0.08); }
+  .bulk-actions { display:flex;gap:8px;flex-wrap:wrap; }
   .mini-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .mini-kpi { background: #fff; border-radius: 12px; border: 1px solid #e3e6f0; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
   .row-image { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; background: #eef2ff; border: 1px solid #e3e6f0; }
@@ -20,6 +27,7 @@
   .save-btn { min-width: 84px; justify-content: center; }
   @media (max-width: 960px) {
     .mini-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .bulk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
 </style>
 
@@ -53,6 +61,37 @@
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Variants</div><div id="kpiVariants" style="font-size:22px;font-weight:700;color:#3a3b45;margin-top:6px;">0</div></div>
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Costs Set</div><div id="kpiCostsSet" style="font-size:22px;font-weight:700;color:#4e73df;margin-top:6px;">0</div></div>
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Missing Costs</div><div id="kpiMissing" style="font-size:22px;font-weight:700;color:#e74a3b;margin-top:6px;">0</div></div>
+    </div>
+
+    <div class="section-card bulk-panel">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Bulk Variant Pricing</span>
+        <span class="calc-muted">Choose one product, then fill only the fields you want to copy to its variants.</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Product</span>
+        <select class="bulk-product-select" id="bulkProductSelect">
+          <option value="">Select product variants...</option>
+        </select>
+        <span class="calc-muted" id="bulkProductCount">No product selected</span>
+      </div>
+      <div class="bulk-grid">
+        <div class="bulk-field"><label for="bulk_beans_kg">Beans KG</label><input class="cost-input" id="bulk_beans_kg" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_fabric_cost">Fabric Cost</label><input class="cost-input" id="bulk_fabric_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_yard_qty">Yard</label><input class="cost-input" id="bulk_yard_qty" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_fusium_cost">Fusium</label><input class="cost-input" id="bulk_fusium_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_making_cost">Making</label><input class="cost-input" id="bulk_making_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_overhead_cost">Overhead</label><input class="cost-input" id="bulk_overhead_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_delivery_cost">Del Cost</label><input class="cost-input" id="bulk_delivery_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_return_cost">Return Cost</label><input class="cost-input" id="bulk_return_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_ads_cost">Ads Cost</label><input class="cost-input" id="bulk_ads_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_product_price">Selling Price</label><input class="cost-input" id="bulk_product_price" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+      </div>
+      <div class="bulk-actions" style="margin-top:12px;">
+        <button class="btn btn-primary save-btn" id="bulkApplyBtn" onclick="applyBulkValues()">Apply to Variants</button>
+        <button class="btn btn-secondary save-btn" id="bulkSaveBtn" onclick="saveSelectedProductRows()">Save Variants</button>
+        <button class="btn btn-secondary save-btn" onclick="clearBulkValues()">Clear</button>
+      </div>
     </div>
 
     <div class="section-card">
@@ -97,6 +136,18 @@
 let currentSource = {{ default_source|tojson }};
 let catalogRows = [];
 let beansPrice = Number({{ beans_price|tojson }});
+const bulkFields = [
+  'beans_kg',
+  'fabric_cost',
+  'yard_qty',
+  'fusium_cost',
+  'making_cost',
+  'overhead_cost',
+  'delivery_cost',
+  'return_cost',
+  'ads_cost',
+  'product_price',
+];
 
 function formatMoneyInput(value) {
   const num = Number(value || 0);
@@ -148,12 +199,75 @@ async function loadCatalog(source = currentSource) {
     const beansInput = document.getElementById('beansPriceInput');
     if (beansInput) beansInput.value = formatMoneyInput(beansPrice);
     document.getElementById('catalogUpdatedAt').textContent = `Loaded ${new Date().toLocaleTimeString('en-PK')}`;
+    updateBulkProductOptions();
     updateCatalogKPIs();
     renderCatalog();
   } catch (error) {
     document.getElementById('catalogBody').innerHTML = `<tr><td colspan="16" class="empty-state">${error.message}</td></tr>`;
     showToast(error.message || 'Could not load cost catalog');
   }
+}
+
+function getProductBaseName(name) {
+  const value = String(name || 'Untitled product').trim();
+  if (value.includes(' - ')) return value.split(' - ')[0].trim();
+  return value;
+}
+
+function productGroupKey(row) {
+  return String(row.source_product_id || getProductBaseName(row.primary_name) || row.variant_key || '').trim();
+}
+
+function productGroupLabel(row) {
+  return getProductBaseName(row.primary_name);
+}
+
+function selectedProductRows() {
+  const selectedKey = document.getElementById('bulkProductSelect')?.value || '';
+  if (!selectedKey) return [];
+  return catalogRows.filter(row => productGroupKey(row) === selectedKey);
+}
+
+function updateBulkProductCount() {
+  const countEl = document.getElementById('bulkProductCount');
+  if (!countEl) return;
+  const rows = selectedProductRows();
+  countEl.textContent = rows.length ? `${rows.length} variants selected` : 'No product selected';
+}
+
+function updateBulkProductOptions() {
+  const select = document.getElementById('bulkProductSelect');
+  if (!select) return;
+  const previousValue = select.value;
+  const groups = new Map();
+  catalogRows.forEach(row => {
+    const key = productGroupKey(row);
+    if (!key) return;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      groups.set(key, { label: productGroupLabel(row), count: 1 });
+    }
+  });
+  const options = Array.from(groups.entries())
+    .sort((a, b) => a[1].label.localeCompare(b[1].label))
+    .map(([key, group]) => `<option value="${escapeAttr(key)}">${escapeHtml(group.label)} (${group.count})</option>`)
+    .join('');
+  select.innerHTML = `<option value="">Select product variants...</option>${options}`;
+  if (previousValue && groups.has(previousValue)) select.value = previousValue;
+  select.onchange = updateBulkProductCount;
+  updateBulkProductCount();
+}
+
+function getFilteredRows() {
+  const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
+  return catalogRows.filter(row => {
+    if (!q) return true;
+    return [
+      row.primary_name,
+    ].some(value => String(value || '').toLowerCase().includes(q));
+  });
 }
 
 function updateCatalogKPIs(filteredRows = null) {
@@ -167,13 +281,7 @@ function updateCatalogKPIs(filteredRows = null) {
 
 function renderCatalog() {
   beansPrice = num(document.getElementById('beansPriceInput')?.value || beansPrice);
-  const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
-  const rows = catalogRows.filter(row => {
-    if (!q) return true;
-    return [
-      row.primary_name,
-    ].some(value => String(value || '').toLowerCase().includes(q));
-  });
+  const rows = getFilteredRows();
 
   updateCatalogKPIs(rows);
 
@@ -231,12 +339,7 @@ function renderCatalog() {
 }
 
 function updateRowCalc(index) {
-  const rows = catalogRows.filter(row => {
-    const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
-    if (!q) return true;
-    return [row.primary_name]
-      .some(value => String(value || '').toLowerCase().includes(q));
-  });
+  const rows = getFilteredRows();
   const row = rows[index];
   if (!row) return;
   beansPrice = num(document.getElementById('beansPriceInput')?.value || beansPrice);
@@ -248,49 +351,58 @@ function updateRowCalc(index) {
   profitEl.style.color = calc.netProfit >= 0 ? '#1cc88a' : '#e74a3b';
 }
 
+function readRowInputsIntoModel(row, index) {
+  bulkFields.forEach((field) => {
+    const el = document.getElementById(`${field}-${index}`);
+    if (el) row[field] = Number(el.value || 0);
+  });
+  const secondaryName = row.secondary_name || '';
+  row.secondary_name = secondaryName;
+  return row;
+}
+
+async function saveCostRow(row) {
+  const calc = rowCalc(row);
+  const res = await fetch('/api/costing/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source: currentSource,
+      variant_key: row.variant_key,
+      primary_name: row.primary_name,
+      secondary_name: row.secondary_name || '',
+      sku: row.sku,
+      product_price: row.product_price,
+      product_cost: calc.netCost,
+      beans_kg: row.beans_kg,
+      fabric_cost: row.fabric_cost,
+      yard_qty: row.yard_qty,
+      fusium_cost: row.fusium_cost,
+      making_cost: row.making_cost,
+      overhead_cost: row.overhead_cost,
+      delivery_cost: row.delivery_cost,
+      return_cost: row.return_cost,
+      ads_cost: row.ads_cost,
+      source_product_id: row.source_product_id,
+      source_variant_id: row.source_variant_id,
+      inventory_item_id: row.inventory_item_id,
+    }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Could not save product price/cost.');
+  row.product_cost = Number((data.saved && data.saved.product_cost) || calc.netCost || 0);
+  return data;
+}
+
 async function saveRow(index, encodedKey) {
   const row = catalogRows.find(entry => encodeURIComponent(entry.variant_key) === encodedKey);
   if (!row) return;
   const btn = document.getElementById(`save-${index}`);
-  const secondaryName = row.secondary_name || '';
-  const productPrice = document.getElementById(`product_price-${index}`).value;
-  const calc = rowCalc(row, index);
   btn.disabled = true;
   btn.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/costing/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source: currentSource,
-        variant_key: row.variant_key,
-        primary_name: row.primary_name,
-        secondary_name: secondaryName,
-        sku: row.sku,
-        product_price: productPrice,
-        product_cost: calc.netCost,
-        beans_kg: document.getElementById(`beans_kg-${index}`).value,
-        fabric_cost: document.getElementById(`fabric_cost-${index}`).value,
-        yard_qty: document.getElementById(`yard_qty-${index}`).value,
-        fusium_cost: document.getElementById(`fusium_cost-${index}`).value,
-        making_cost: document.getElementById(`making_cost-${index}`).value,
-        overhead_cost: document.getElementById(`overhead_cost-${index}`).value,
-        delivery_cost: document.getElementById(`delivery_cost-${index}`).value,
-        return_cost: document.getElementById(`return_cost-${index}`).value,
-        ads_cost: document.getElementById(`ads_cost-${index}`).value,
-        source_product_id: row.source_product_id,
-        source_variant_id: row.source_variant_id,
-        inventory_item_id: row.inventory_item_id,
-      }),
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Could not save product price/cost.');
-    row.secondary_name = secondaryName;
-    row.product_price = Number(productPrice || 0);
-    row.product_cost = Number((data.saved && data.saved.product_cost) || calc.netCost || 0);
-    ['beans_kg','fabric_cost','yard_qty','fusium_cost','making_cost','overhead_cost','delivery_cost','return_cost','ads_cost'].forEach((field) => {
-      row[field] = Number(document.getElementById(`${field}-${index}`).value || 0);
-    });
+    readRowInputsIntoModel(row, index);
+    await saveCostRow(row);
     updateCatalogKPIs();
     showToast('Price and cost saved');
   } catch (error) {
@@ -299,6 +411,68 @@ async function saveRow(index, encodedKey) {
     btn.disabled = false;
     btn.textContent = 'Save';
   }
+}
+
+function getBulkValues() {
+  const values = {};
+  bulkFields.forEach((field) => {
+    const el = document.getElementById(`bulk_${field}`);
+    if (el && String(el.value).trim() !== '') values[field] = num(el.value);
+  });
+  return values;
+}
+
+function applyBulkValues() {
+  const rows = selectedProductRows();
+  if (!rows.length) {
+    showToast('Select a product first');
+    return;
+  }
+  const values = getBulkValues();
+  if (!Object.keys(values).length) {
+    showToast('Fill at least one bulk field');
+    return;
+  }
+  rows.forEach(row => {
+    Object.entries(values).forEach(([field, value]) => {
+      row[field] = value;
+    });
+    row.product_cost = rowCalc(row).netCost;
+  });
+  renderCatalog();
+  updateBulkProductCount();
+  showToast(`Applied to ${rows.length} variants`);
+}
+
+async function saveSelectedProductRows() {
+  const rows = selectedProductRows();
+  const btn = document.getElementById('bulkSaveBtn');
+  if (!rows.length) {
+    showToast('Select a product first');
+    return;
+  }
+  btn.disabled = true;
+  try {
+    for (let i = 0; i < rows.length; i += 1) {
+      btn.textContent = `Saving ${i + 1}/${rows.length}`;
+      await saveCostRow(rows[i]);
+    }
+    updateCatalogKPIs();
+    renderCatalog();
+    showToast(`Saved ${rows.length} variants`);
+  } catch (error) {
+    showToast(error.message || 'Could not save product variants');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Variants';
+  }
+}
+
+function clearBulkValues() {
+  bulkFields.forEach((field) => {
+    const el = document.getElementById(`bulk_${field}`);
+    if (el) el.value = '';
+  });
 }
 
 async function saveBeansPrice() {

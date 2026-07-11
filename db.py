@@ -35,11 +35,37 @@ def _ensure_product_costs_table(cur):
             sku TEXT NOT NULL DEFAULT '',
             primary_name TEXT NOT NULL,
             secondary_name TEXT NOT NULL DEFAULT '',
+            product_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            beans_kg NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            fabric_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            yard_qty NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            fusium_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            making_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            overhead_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            delivery_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            return_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            ads_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
             product_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             PRIMARY KEY (source, variant_key)
         )
     """)
+    for column in (
+        "product_price",
+        "beans_kg",
+        "fabric_cost",
+        "yard_qty",
+        "fusium_cost",
+        "making_cost",
+        "overhead_cost",
+        "delivery_cost",
+        "return_cost",
+        "ads_cost",
+    ):
+        cur.execute(f"""
+            ALTER TABLE product_costs
+            ADD COLUMN IF NOT EXISTS {column} NUMERIC(12, 2) NOT NULL DEFAULT 0
+        """)
 
 
 def _ensure_tickbot_auto_reply_jobs_table(cur):
@@ -468,7 +494,9 @@ def list_product_costs(source: str = "") -> list[dict]:
                 if source:
                     cur.execute("""
                         SELECT source, variant_key, source_product_id, source_variant_id, sku,
-                               primary_name, secondary_name, product_cost, updated_at
+                               primary_name, secondary_name, product_price, beans_kg,
+                               fabric_cost, yard_qty, fusium_cost, making_cost, overhead_cost,
+                               delivery_cost, return_cost, ads_cost, product_cost, updated_at
                         FROM product_costs
                         WHERE source = %s
                         ORDER BY primary_name ASC, sku ASC, variant_key ASC
@@ -476,7 +504,9 @@ def list_product_costs(source: str = "") -> list[dict]:
                 else:
                     cur.execute("""
                         SELECT source, variant_key, source_product_id, source_variant_id, sku,
-                               primary_name, secondary_name, product_cost, updated_at
+                               primary_name, secondary_name, product_price, beans_kg,
+                               fabric_cost, yard_qty, fusium_cost, making_cost, overhead_cost,
+                               delivery_cost, return_cost, ads_cost, product_cost, updated_at
                         FROM product_costs
                         ORDER BY source ASC, primary_name ASC, sku ASC, variant_key ASC
                     """)
@@ -504,6 +534,16 @@ def upsert_product_cost(
     primary_name: str,
     secondary_name: str = "",
     sku: str = "",
+    product_price=0,
+    beans_kg=0,
+    fabric_cost=0,
+    yard_qty=0,
+    fusium_cost=0,
+    making_cost=0,
+    overhead_cost=0,
+    delivery_cost=0,
+    return_cost=0,
+    ads_cost=0,
     product_cost=0,
     source_product_id: str = "",
     source_variant_id: str = "",
@@ -521,15 +561,35 @@ def upsert_product_cost(
                         sku,
                         primary_name,
                         secondary_name,
+                        product_price,
+                        beans_kg,
+                        fabric_cost,
+                        yard_qty,
+                        fusium_cost,
+                        making_cost,
+                        overhead_cost,
+                        delivery_cost,
+                        return_cost,
+                        ads_cost,
                         product_cost
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (source, variant_key) DO UPDATE
                     SET source_product_id = EXCLUDED.source_product_id,
                         source_variant_id = EXCLUDED.source_variant_id,
                         sku = EXCLUDED.sku,
                         primary_name = EXCLUDED.primary_name,
                         secondary_name = EXCLUDED.secondary_name,
+                        product_price = EXCLUDED.product_price,
+                        beans_kg = EXCLUDED.beans_kg,
+                        fabric_cost = EXCLUDED.fabric_cost,
+                        yard_qty = EXCLUDED.yard_qty,
+                        fusium_cost = EXCLUDED.fusium_cost,
+                        making_cost = EXCLUDED.making_cost,
+                        overhead_cost = EXCLUDED.overhead_cost,
+                        delivery_cost = EXCLUDED.delivery_cost,
+                        return_cost = EXCLUDED.return_cost,
+                        ads_cost = EXCLUDED.ads_cost,
                         product_cost = EXCLUDED.product_cost,
                         updated_at = NOW()
                 """, (
@@ -540,6 +600,16 @@ def upsert_product_cost(
                     sku or "",
                     primary_name,
                     secondary_name or "",
+                    product_price,
+                    beans_kg,
+                    fabric_cost,
+                    yard_qty,
+                    fusium_cost,
+                    making_cost,
+                    overhead_cost,
+                    delivery_cost,
+                    return_cost,
+                    ads_cost,
                     product_cost,
                 ))
             conn.commit()

@@ -46,10 +46,12 @@ import certifi
 
 from db import (
     delete_order_status,
+    get_app_setting,
     get_product_cost_lookup,
     init_db,
     list_product_costs,
     load_order_statuses,
+    set_app_setting,
     upsert_order_status,
     upsert_product_cost,
 )
@@ -1953,17 +1955,19 @@ def approve_shopify_cancellation(order):
 # ── Costing / profitability helpers ──────────────────────────────────────────
 
 COST_SOURCE_DARAZ = 'daraz'
-COST_SOURCE_SHOPIFY_LAHORE = 'shopify_lahore'
-COST_SOURCE_SHOPIFY_LEOPARDS = 'shopify_leopards'
+COST_SOURCE_SHOPIFY = 'shopify'
 
 COST_SOURCE_LABELS = {
     COST_SOURCE_DARAZ: 'Daraz',
-    COST_SOURCE_SHOPIFY_LAHORE: 'Shopify Lahore',
-    COST_SOURCE_SHOPIFY_LEOPARDS: 'Shopify Leopards',
+    COST_SOURCE_SHOPIFY: 'Shopify',
 }
 
 DARAZ_PROFIT_STATUSES = ['shipped', 'delivered']
 DEFAULT_DARAZ_WINDOW_DAYS = 60
+SHOPIFY_BEANS_PRICE_SETTING_KEY = 'shopify_beans_price_v1'
+DEFAULT_SHOPIFY_BEANS_PRICE = 750.0
+SHOPIFY_DEFAULT_RETURN_COST = 671.0
+SHOPIFY_DEFAULT_ADS_COST = 1200.0
 
 
 def money_decimal(value) -> Decimal:
@@ -1983,6 +1987,55 @@ def money_format(value) -> str:
     if amount == amount.to_integral():
         return f"Rs {int(amount):,}"
     return f"Rs {amount:,.2f}"
+
+
+def get_shopify_beans_price() -> float:
+    return money_float(get_app_setting(SHOPIFY_BEANS_PRICE_SETTING_KEY, str(DEFAULT_SHOPIFY_BEANS_PRICE)))
+
+
+def save_shopify_beans_price(value) -> bool:
+    return set_app_setting(SHOPIFY_BEANS_PRICE_SETTING_KEY, str(money_float(value)))
+
+
+def default_cost_calc_fields(source: str) -> dict:
+    return {
+        'beans_kg': 0.0,
+        'fabric_cost': 0.0,
+        'yard_qty': 0.0,
+        'fusium_cost': 0.0,
+        'making_cost': 0.0,
+        'overhead_cost': 0.0,
+        'delivery_cost': 0.0,
+        'return_cost': SHOPIFY_DEFAULT_RETURN_COST if source == COST_SOURCE_SHOPIFY else 0.0,
+        'ads_cost': SHOPIFY_DEFAULT_ADS_COST if source == COST_SOURCE_SHOPIFY else 0.0,
+        'product_cost': 0.0,
+    }
+
+
+def calculate_shopify_net_cost(row: dict, beans_price=None) -> float:
+    beans_rate = money_float(beans_price if beans_price is not None else get_shopify_beans_price())
+    beans_value = money_float(row.get('beans_kg')) * beans_rate
+    fabric_value = money_float(row.get('fabric_cost')) * money_float(row.get('yard_qty'))
+    net_cost = (
+        beans_value
+        + fabric_value
+        + money_float(row.get('fusium_cost'))
+        + money_float(row.get('making_cost'))
+        + money_float(row.get('overhead_cost'))
+        + money_float(row.get('delivery_cost'))
+        + money_float(row.get('return_cost'))
+        + money_float(row.get('ads_cost'))
+    )
+    return round(net_cost, 2)
+
+
+def update_shopify_variant_price(variant_id, price):
+    if not variant_id:
+        return
+    variant = shopify.Variant.find(int(variant_id))
+    variant.price = str(money_float(price))
+    if not variant.save():
+        raise RuntimeError('Shopify price update failed.')
 
 
 def parse_iso_day(value: str):
@@ -2013,6 +2066,14 @@ def daraz_item_key(item: dict) -> str:
         if value:
             return value
     return f"{(item.get('name') or '').strip()}|{(item.get('variation') or '').strip()}"
+
+
+def daraz_item_price(item: dict) -> float:
+    for key in ('paid_price', 'item_price', 'unit_price', 'product_price', 'price'):
+        value = money_float(item.get(key))
+        if value > 0:
+            return value
+    return 0.0
 
 
 def get_daraz_client():
@@ -2139,20 +2200,24 @@ def fetch_daraz_order_finance(order_id, order_date_str, gross_sale, access_token
     }
 
 
-def build_shopify_cost_catalog(source: str):
+def build_shopify_cost_catalog():
     rows = []
     for item in get_active_shopify_products(limit=250):
         variant_key = str(item.get('variant_id') or f"{item.get('product_id')}::{item.get('sku') or item.get('title')}")
-        rows.append({
-            'source': source,
+        row = {
+            'source': COST_SOURCE_SHOPIFY,
             'variant_key': variant_key,
             'source_product_id': str(item.get('product_id') or ''),
             'source_variant_id': str(item.get('variant_id') or ''),
+            'inventory_item_id': str(item.get('inventory_item_id') or ''),
             'sku': item.get('sku') or '',
             'primary_name': item.get('title') or item.get('product_title') or 'Untitled variant',
             'secondary_name': '',
+            'product_price': money_float(item.get('price')),
             'image': item.get('image') or '',
-        })
+        }
+        row.update(default_cost_calc_fields(COST_SOURCE_SHOPIFY))
+        rows.append(row)
     rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
     return rows
 
@@ -2172,7 +2237,7 @@ def build_daraz_cost_catalog():
             variant_key = daraz_item_key(item)
             if variant_key in items_by_key:
                 continue
-            items_by_key[variant_key] = {
+            row = {
                 'source': COST_SOURCE_DARAZ,
                 'variant_key': variant_key,
                 'source_product_id': str(item.get('item_id') or item.get('product_id') or ''),
@@ -2180,8 +2245,11 @@ def build_daraz_cost_catalog():
                 'sku': str(item.get('seller_sku') or item.get('shop_sku') or item.get('lazada_sku') or item.get('sku') or '').strip(),
                 'primary_name': format_daraz_item_title(item.get('name'), item.get('variation')),
                 'secondary_name': '',
+                'product_price': daraz_item_price(item),
                 'image': item.get('product_main_image') or '',
             }
+            row.update(default_cost_calc_fields(COST_SOURCE_DARAZ))
+            items_by_key[variant_key] = row
 
     rows = list(items_by_key.values())
     rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
@@ -2190,13 +2258,31 @@ def build_daraz_cost_catalog():
 
 def with_saved_costs(source: str, rows: list):
     lookup = get_product_cost_lookup(source)
+    legacy_shopify_lookup = {}
+    if source == COST_SOURCE_SHOPIFY:
+        legacy_shopify_lookup.update(get_product_cost_lookup('shopify_lahore'))
+        legacy_shopify_lookup.update(get_product_cost_lookup('shopify_leopards'))
     hydrated = []
     for row in rows:
-        saved = lookup.get(row['variant_key'])
+        saved = lookup.get(row['variant_key']) or legacy_shopify_lookup.get(row['variant_key'])
         row_copy = dict(row)
         row_copy['product_cost'] = money_float(saved.get('product_cost')) if saved else 0.0
-        row_copy['secondary_name'] = (saved.get('secondary_name') if saved else row_copy.get('secondary_name')) or ''
-        row_copy['updated_at'] = saved.get('updated_at').isoformat() if saved and saved.get('updated_at') else ''
+        if saved:
+            row_copy['product_price'] = money_float(saved.get('product_price') or row_copy.get('product_price'))
+            row_copy['secondary_name'] = saved.get('secondary_name') or row_copy.get('secondary_name') or ''
+            for field in (
+                'beans_kg',
+                'fabric_cost',
+                'yard_qty',
+                'fusium_cost',
+                'making_cost',
+                'overhead_cost',
+                'delivery_cost',
+                'return_cost',
+                'ads_cost',
+            ):
+                row_copy[field] = money_float(saved.get(field) if saved.get(field) is not None else row_copy.get(field))
+            row_copy['updated_at'] = saved.get('updated_at').isoformat() if saved.get('updated_at') else ''
         hydrated.append(row_copy)
     return hydrated
 
@@ -2204,8 +2290,8 @@ def with_saved_costs(source: str, rows: list):
 def get_cost_catalog_for_source(source: str):
     if source == COST_SOURCE_DARAZ:
         return with_saved_costs(source, build_daraz_cost_catalog())
-    if source in (COST_SOURCE_SHOPIFY_LAHORE, COST_SOURCE_SHOPIFY_LEOPARDS):
-        return with_saved_costs(source, build_shopify_cost_catalog(source))
+    if source == COST_SOURCE_SHOPIFY:
+        return with_saved_costs(source, build_shopify_cost_catalog())
     return []
 
 
@@ -3157,6 +3243,7 @@ def product_costs_page():
         'product_costs.html',
         sources=COST_SOURCE_LABELS,
         default_source=COST_SOURCE_DARAZ,
+        beans_price=get_shopify_beans_price(),
     )
 
 
@@ -3179,6 +3266,7 @@ def costing_catalog_api():
             'label': COST_SOURCE_LABELS[source],
             'rows': rows,
             'saved_count': len(saved),
+            'beans_price': get_shopify_beans_price(),
         })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
@@ -3194,6 +3282,18 @@ def costing_save_api():
     sku = str(payload.get('sku') or '').strip()
     source_product_id = str(payload.get('source_product_id') or '').strip()
     source_variant_id = str(payload.get('source_variant_id') or '').strip()
+    product_price = money_float(payload.get('product_price'))
+    calc_fields = {
+        'beans_kg': money_float(payload.get('beans_kg')),
+        'fabric_cost': money_float(payload.get('fabric_cost')),
+        'yard_qty': money_float(payload.get('yard_qty')),
+        'fusium_cost': money_float(payload.get('fusium_cost')),
+        'making_cost': money_float(payload.get('making_cost')),
+        'overhead_cost': money_float(payload.get('overhead_cost')),
+        'delivery_cost': money_float(payload.get('delivery_cost')),
+        'return_cost': money_float(payload.get('return_cost')),
+        'ads_cost': money_float(payload.get('ads_cost')),
+    }
 
     if source not in COST_SOURCE_LABELS:
         return jsonify({'ok': False, 'error': 'Unknown source.'}), 400
@@ -3202,19 +3302,35 @@ def costing_save_api():
     if not primary_name:
         return jsonify({'ok': False, 'error': 'Primary name is required.'}), 400
 
-    product_cost = money_decimal(payload.get('product_cost'))
-    success = upsert_product_cost(
-        source=source,
-        variant_key=variant_key,
-        primary_name=primary_name,
-        secondary_name=secondary_name,
-        sku=sku,
-        product_cost=str(product_cost),
-        source_product_id=source_product_id,
-        source_variant_id=source_variant_id,
-    )
-    if not success:
-        return jsonify({'ok': False, 'error': 'Could not save product cost.'}), 500
+    product_cost = calculate_shopify_net_cost(calc_fields, get_shopify_beans_price()) if source == COST_SOURCE_SHOPIFY else money_float(payload.get('product_cost'))
+    try:
+        if source == COST_SOURCE_SHOPIFY and source_variant_id:
+            update_shopify_variant_price(source_variant_id, product_price)
+
+        success = upsert_product_cost(
+            source=source,
+            variant_key=variant_key,
+            primary_name=primary_name,
+            secondary_name=secondary_name,
+            sku=sku,
+            product_price=str(product_price),
+            beans_kg=str(calc_fields['beans_kg']),
+            fabric_cost=str(calc_fields['fabric_cost']),
+            yard_qty=str(calc_fields['yard_qty']),
+            fusium_cost=str(calc_fields['fusium_cost']),
+            making_cost=str(calc_fields['making_cost']),
+            overhead_cost=str(calc_fields['overhead_cost']),
+            delivery_cost=str(calc_fields['delivery_cost']),
+            return_cost=str(calc_fields['return_cost']),
+            ads_cost=str(calc_fields['ads_cost']),
+            product_cost=str(product_cost),
+            source_product_id=source_product_id,
+            source_variant_id=source_variant_id,
+        )
+        if not success:
+            return jsonify({'ok': False, 'error': 'Could not save product cost.'}), 500
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
     return jsonify({
         'ok': True,
@@ -3224,11 +3340,22 @@ def costing_save_api():
             'primary_name': primary_name,
             'secondary_name': secondary_name,
             'sku': sku,
+            'product_price': product_price,
+            **calc_fields,
             'product_cost': float(product_cost),
             'source_product_id': source_product_id,
             'source_variant_id': source_variant_id,
         }
     })
+
+
+@app.route('/api/costing/beans-price', methods=['POST'])
+def costing_beans_price_api():
+    payload = request.get_json(silent=True) or {}
+    beans_price = money_float(payload.get('beans_price') or DEFAULT_SHOPIFY_BEANS_PRICE)
+    if not save_shopify_beans_price(beans_price):
+        return jsonify({'ok': False, 'error': 'Could not save beans price.'}), 500
+    return jsonify({'ok': True, 'beans_price': beans_price})
 
 
 @app.route('/api/daraz/profits')

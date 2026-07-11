@@ -3239,9 +3239,26 @@ def payments_page():
 
 @app.route('/product-costs')
 def product_costs_page():
+    return redirect(url_for('shopify_product_costs_page'))
+
+
+@app.route('/shopify-product-costs')
+def shopify_product_costs_page():
     return render_template(
         'product_costs.html',
-        sources=COST_SOURCE_LABELS,
+        page_title='Shopify Product Cost',
+        page_subtitle='Beanbag cost calculator for Shopify products',
+        default_source=COST_SOURCE_SHOPIFY,
+        beans_price=get_shopify_beans_price(),
+    )
+
+
+@app.route('/daraz-product-costs')
+def daraz_product_costs_page():
+    return render_template(
+        'product_costs.html',
+        page_title='Daraz Product Cost',
+        page_subtitle='Daraz product price and cost tracking',
         default_source=COST_SOURCE_DARAZ,
         beans_price=get_shopify_beans_price(),
     )

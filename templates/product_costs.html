@@ -3,8 +3,6 @@
 
 {% block content %}
 <style>
-  .source-pill { padding: 6px 12px; border-radius: 999px; border: 1px solid #d7def0; background: #fff; color: #6b7280; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .source-pill.active { background: #4e73df; border-color: #4e73df; color: #fff; }
   .cost-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .cost-table th { padding: 10px 12px; text-align: left; font-size: 10px; font-weight: 700; color: #858796; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; background: #f8f9fc; }
   .cost-table td { padding: 10px 12px; border-bottom: 1px solid #e3e6f0; vertical-align: middle; }
@@ -15,7 +13,7 @@
   .calc-muted { font-size: 11px; color: #858796; white-space: nowrap; }
   .beans-panel { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
   .beans-input { width: 120px; }
-  .mini-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .mini-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .mini-kpi { background: #fff; border-radius: 12px; border: 1px solid #e3e6f0; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
   .row-image { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; background: #eef2ff; border: 1px solid #e3e6f0; }
   .empty-state { padding: 42px 16px; text-align: center; color: #858796; font-size: 13px; }
@@ -29,24 +27,18 @@
 
 <div style="display:flex;flex-direction:column;height:calc(100% - 3px);overflow:hidden;">
   <div class="topbar">
-    <span class="topbar-title">Product Costs</span>
-    <span style="font-size:12px;color:#858796;" class="hide-mob">- Beanbag cost calculator for Shopify, with Daraz price/cost tracking</span>
+    <span class="topbar-title">{{ page_title or 'Product Costs' }}</span>
+    <span style="font-size:12px;color:#858796;" class="hide-mob">- {{ page_subtitle or 'Product price and cost tracking' }}</span>
     <div style="flex:1"></div>
     <div class="search-box">
       <span style="color:#858796;font-size:13px;">🔍</span>
-      <input id="catalogSearch" placeholder="Search names or SKU…" style="width:200px;" oninput="renderCatalog()"/>
+      <input id="catalogSearch" placeholder="Search products..." style="width:200px;" oninput="renderCatalog()"/>
     </div>
   </div>
 
   <div style="flex:1;overflow:auto;padding:16px;">
-    <div class="section-card" style="padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Source</span>
-      {% for key, label in sources.items() %}
-        <button class="source-pill {% if key == default_source %}active{% endif %}" data-source="{{ key }}" onclick="switchSource('{{ key }}', this)">{{ label }}</button>
-      {% endfor %}
-      <div style="margin-left:auto;font-size:12px;color:#858796;" id="catalogUpdatedAt">Ready</div>
-    </div>
-
+    <div style="font-size:12px;color:#858796;text-align:right;margin-bottom:10px;" id="catalogUpdatedAt">Ready</div>
+    {% if default_source == 'shopify' %}
     <div class="section-card" style="padding:14px 16px;margin-bottom:16px;">
       <div class="beans-panel">
         <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Beans Price / KG</span>
@@ -55,12 +47,12 @@
         <span class="calc-muted">Beans value = kg used x beans price. Delivery cost is manually added per product and defaults to 0.</span>
       </div>
     </div>
+    {% endif %}
 
     <div class="mini-kpi-grid">
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Variants</div><div id="kpiVariants" style="font-size:22px;font-weight:700;color:#3a3b45;margin-top:6px;">0</div></div>
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Costs Set</div><div id="kpiCostsSet" style="font-size:22px;font-weight:700;color:#4e73df;margin-top:6px;">0</div></div>
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Missing Costs</div><div id="kpiMissing" style="font-size:22px;font-weight:700;color:#e74a3b;margin-top:6px;">0</div></div>
-      <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Current Source</div><div id="kpiSource" style="font-size:18px;font-weight:700;color:#20c997;margin-top:8px;">{{ sources[default_source] }}</div></div>
     </div>
 
     <div class="section-card">
@@ -74,8 +66,6 @@
             <tr>
               <th style="width:72px;">Image</th>
               <th style="min-width:220px;">Product</th>
-              <th>Alt Name</th>
-              <th>SKU / Key</th>
               <th>Beans KG</th>
               <th>Beans Value</th>
               <th>Fabric Cost</th>
@@ -93,7 +83,7 @@
             </tr>
           </thead>
           <tbody id="catalogBody">
-            <tr><td colspan="18" class="empty-state">Loading variant catalog...</td></tr>
+            <tr><td colspan="16" class="empty-state">Loading variant catalog...</td></tr>
           </tbody>
         </table>
       </div>
@@ -104,7 +94,6 @@
 
 {% block extra_js %}
 <script>
-const sourceLabels = {{ sources|tojson }};
 let currentSource = {{ default_source|tojson }};
 let catalogRows = [];
 let beansPrice = Number({{ beans_price|tojson }});
@@ -149,20 +138,20 @@ function rowCalc(row, index = null) {
 
 async function loadCatalog(source = currentSource) {
   currentSource = source;
-  document.getElementById('catalogBody').innerHTML = '<tr><td colspan="18" class="empty-state">Loading variant catalog...</td></tr>';
+  document.getElementById('catalogBody').innerHTML = '<tr><td colspan="16" class="empty-state">Loading variant catalog...</td></tr>';
   try {
     const res = await fetch(`/api/costing/catalog?source=${encodeURIComponent(source)}`);
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not load product cost catalog.');
     catalogRows = data.rows || [];
     beansPrice = Number(data.beans_price || beansPrice || 0);
-    document.getElementById('beansPriceInput').value = formatMoneyInput(beansPrice);
-    document.getElementById('kpiSource').textContent = data.label || sourceLabels[source] || source;
+    const beansInput = document.getElementById('beansPriceInput');
+    if (beansInput) beansInput.value = formatMoneyInput(beansPrice);
     document.getElementById('catalogUpdatedAt').textContent = `Loaded ${new Date().toLocaleTimeString('en-PK')}`;
     updateCatalogKPIs();
     renderCatalog();
   } catch (error) {
-    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="18" class="empty-state">${error.message}</td></tr>`;
+    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="16" class="empty-state">${error.message}</td></tr>`;
     showToast(error.message || 'Could not load cost catalog');
   }
 }
@@ -176,12 +165,6 @@ function updateCatalogKPIs(filteredRows = null) {
   document.getElementById('catalogCount').textContent = rows.length;
 }
 
-function switchSource(source, btn) {
-  document.querySelectorAll('.source-pill').forEach(el => el.classList.remove('active'));
-  btn.classList.add('active');
-  loadCatalog(source);
-}
-
 function renderCatalog() {
   beansPrice = num(document.getElementById('beansPriceInput')?.value || beansPrice);
   const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
@@ -189,16 +172,13 @@ function renderCatalog() {
     if (!q) return true;
     return [
       row.primary_name,
-      row.secondary_name,
-      row.sku,
-      row.variant_key,
     ].some(value => String(value || '').toLowerCase().includes(q));
   });
 
   updateCatalogKPIs(rows);
 
   if (!rows.length) {
-    document.getElementById('catalogBody').innerHTML = '<tr><td colspan="18" class="empty-state">No variants match your search.</td></tr>';
+    document.getElementById('catalogBody').innerHTML = '<tr><td colspan="16" class="empty-state">No variants match your search.</td></tr>';
     return;
   }
 
@@ -209,13 +189,6 @@ function renderCatalog() {
       <td><img class="row-image" src="${row.image || 'https://static.thenounproject.com/png/1578832-200.png'}" alt=""></td>
       <td>
         <div style="font-size:13px;font-weight:700;color:#3a3b45;line-height:1.35;">${escapeHtml(row.primary_name || 'Untitled variant')}</div>
-      </td>
-      <td>
-        <input class="cost-input" id="secondary-${index}" value="${escapeAttr(row.secondary_name || '')}" placeholder="Optional alternate name"/>
-      </td>
-      <td>
-        <div style="font-size:12px;font-weight:600;color:#3a3b45;">${escapeHtml(row.sku || 'No SKU')}</div>
-        <div style="font-size:10px;color:#858796;font-family:'DM Mono',monospace;margin-top:3px;">${escapeHtml(row.variant_key)}</div>
       </td>
       <td>
         <input class="cost-input" id="beans_kg-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.beans_kg)}" oninput="updateRowCalc(${index})"/>
@@ -261,7 +234,7 @@ function updateRowCalc(index) {
   const rows = catalogRows.filter(row => {
     const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
     if (!q) return true;
-    return [row.primary_name, row.secondary_name, row.sku, row.variant_key]
+    return [row.primary_name]
       .some(value => String(value || '').toLowerCase().includes(q));
   });
   const row = rows[index];
@@ -279,7 +252,7 @@ async function saveRow(index, encodedKey) {
   const row = catalogRows.find(entry => encodeURIComponent(entry.variant_key) === encodedKey);
   if (!row) return;
   const btn = document.getElementById(`save-${index}`);
-  const secondaryName = document.getElementById(`secondary-${index}`).value.trim();
+  const secondaryName = row.secondary_name || '';
   const productPrice = document.getElementById(`product_price-${index}`).value;
   const calc = rowCalc(row, index);
   btn.disabled = true;

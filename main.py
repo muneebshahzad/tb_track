@@ -2329,7 +2329,13 @@ def fetch_daraz_products_catalog(max_pages=20):
 
         for product in products:
             attributes = product.get('attributes') or {}
-            product_name = attributes.get('name') or attributes.get('Name') or f"Daraz Item {product.get('item_id') or ''}".strip()
+            product_name = (
+                attributes.get('name_en')
+                or attributes.get('Name_en')
+                or attributes.get('name')
+                or attributes.get('Name')
+                or f"Daraz Item {product.get('item_id') or ''}".strip()
+            )
             product_images = product.get('images') or []
             for sku in product.get('skus') or []:
                 seller_sku = str(sku.get('SellerSku') or sku.get('seller_sku') or '').strip()
@@ -2342,6 +2348,8 @@ def fetch_daraz_products_catalog(max_pages=20):
                 seller_price, price_source = daraz_seller_price(sku)
                 images = sku.get('Images') or product_images or []
                 image = next((img for img in images if img), '') if isinstance(images, list) else ''
+                color_family = str((sku.get('saleProp') or {}).get('color_family') or sku.get('color_family') or '').strip()
+                display_name = f"{product_name} - {color_family}" if color_family and color_family.lower() not in product_name.lower() else product_name
                 row = {
                     'source': COST_SOURCE_DARAZ,
                     'variant_key': variant_key,
@@ -2351,8 +2359,8 @@ def fetch_daraz_products_catalog(max_pages=20):
                     'sku': seller_sku or shop_sku,
                     'shop_sku': shop_sku,
                     'seller_sku': seller_sku,
-                    'primary_name': product_name,
-                    'secondary_name': '',
+                    'primary_name': display_name,
+                    'secondary_name': color_family,
                     'product_price': seller_price,
                     'daraz_base_price': money_float(sku.get('price')),
                     'daraz_seller_price': seller_price,

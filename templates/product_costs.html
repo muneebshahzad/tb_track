@@ -32,6 +32,13 @@
   .sort-header:hover { color:#4e73df; }
   .sort-icon { font-size:10px;color:#b7bfd6;min-width:10px; }
   .sort-header.active .sort-icon { color:#4e73df; }
+  .product-group-row td { background:#f7f9fe;border-top:1px solid #e3e6f0;border-bottom:1px solid #dfe5f5;padding:9px 12px; }
+  .product-group-title { display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800;color:#2f3442; }
+  .product-group-count { border-radius:999px;background:#edf2ff;color:#4e73df;font-size:10px;font-weight:800;padding:2px 8px; }
+  .variant-product-cell { position:relative;padding-left:18px; }
+  .variant-product-cell::before { content:'';position:absolute;left:3px;top:-11px;bottom:-11px;width:2px;background:#dfe5f5; }
+  .variant-product-cell::after { content:'';position:absolute;left:0;top:21px;width:8px;height:8px;border-radius:50%;background:#8ea2d8;border:2px solid #fff;box-shadow:0 0 0 1px #dfe5f5; }
+  .variant-name { font-size:13px;font-weight:700;color:#3a3b45;line-height:1.35; }
   .mini-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .mini-kpi { background: #fff; border-radius: 12px; border: 1px solid #e3e6f0; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
   .row-image { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; background: #eef2ff; border: 1px solid #e3e6f0; }
@@ -268,7 +275,40 @@ function productGroupKey(row) {
 }
 
 function productGroupLabel(row) {
+  const name = String(row.primary_name || 'Untitled product').trim();
+  const secondary = String(row.secondary_name || '').trim();
+  if (secondary && name.toLowerCase().endsWith(` - ${secondary.toLowerCase()}`)) {
+    return name.slice(0, -(secondary.length + 3)).trim();
+  }
   return getProductBaseName(row.primary_name);
+}
+
+function variantLabel(row) {
+  const groupLabel = productGroupLabel(row);
+  const name = String(row.primary_name || 'Untitled variant').trim();
+  const secondary = String(row.secondary_name || '').trim();
+  if (secondary) return secondary;
+  if (groupLabel && name.toLowerCase().startsWith(`${groupLabel.toLowerCase()} - `)) {
+    return name.slice(groupLabel.length + 3).trim();
+  }
+  return name || groupLabel || 'Variant';
+}
+
+function groupedVisibleRows(rows) {
+  const groups = [];
+  const byKey = new Map();
+  rows.forEach((row, index) => {
+    const key = productGroupKey(row) || `row-${index}`;
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, label: productGroupLabel(row), image: row.image || '', rows: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    if (!group.image && row.image) group.image = row.image;
+    group.rows.push({ row, index });
+  });
+  return groups;
 }
 
 function selectedProductRows() {
@@ -408,15 +448,30 @@ function renderCatalog() {
     return;
   }
 
-  document.getElementById('catalogBody').innerHTML = rows.map((row, index) => {
+  const groups = groupedVisibleRows(rows);
+  document.getElementById('catalogBody').innerHTML = groups.map(group => {
+    const groupHeader = `
+      <tr class="product-group-row">
+        <td colspan="${tableColspan}">
+          <div class="product-group-title">
+            <span>${escapeHtml(group.label || 'Untitled product')}</span>
+            <span class="product-group-count">${group.rows.length} variant${group.rows.length === 1 ? '' : 's'}</span>
+          </div>
+        </td>
+      </tr>
+    `;
+    const variantRows = group.rows.map(({ row, index }) => {
     const calc = rowCalc(row);
     const suggested = suggestedPrice(calc.netCost);
     return `
     <tr>
       <td><img class="row-image" src="${row.image || 'https://static.thenounproject.com/png/1578832-200.png'}" alt=""></td>
       <td>
-        <div style="font-size:13px;font-weight:700;color:#3a3b45;line-height:1.35;">${escapeHtml(row.primary_name || 'Untitled variant')}</div>
+        <div class="variant-product-cell">
+          <div class="variant-name">${escapeHtml(variantLabel(row))}</div>
+          ${row.primary_name && variantLabel(row) === row.primary_name ? '' : `<div class="calc-muted">${escapeHtml(row.primary_name || '')}</div>`}
         ${row.sku ? `<div class="calc-muted">${escapeHtml(row.sku)}</div>` : ''}
+        </div>
       </td>
       ${currentSource === 'daraz' ? darazPriceCell(row) : ''}
       ${currentSource === 'daraz' ? shopifyMatchCell(row, index) : ''}
@@ -463,7 +518,10 @@ function renderCatalog() {
         <button class="btn btn-primary save-btn" id="save-${index}" onclick='saveRow(${JSON.stringify(index)}, ${JSON.stringify(encodeURIComponent(row.variant_key))})'>Save</button>
       </td>
     </tr>
-  `}).join('');
+  `;
+    }).join('');
+    return groupHeader + variantRows;
+  }).join('');
 }
 
 function darazPriceCell(row) {

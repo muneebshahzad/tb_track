@@ -17,9 +17,13 @@
   .bulk-grid { display:grid;grid-template-columns:repeat(10, minmax(96px, 1fr));gap:10px;align-items:end; }
   .bulk-field label { display:block;font-size:10px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;white-space:nowrap; }
   .bulk-field .cost-input { width:100%;box-sizing:border-box; }
-  .bulk-product-select { min-width:280px;max-width:420px;border:1px solid #dbe1f0;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;background:#fff;color:#3a3b45; }
+  .bulk-product-select { min-width:280px;max-width:420px;min-height:96px;border:1px solid #dbe1f0;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;background:#fff;color:#3a3b45; }
   .bulk-product-select:focus { border-color:#4e73df;box-shadow:0 0 0 3px rgba(78,115,223,0.08); }
   .bulk-actions { display:flex;gap:8px;flex-wrap:wrap; }
+  .table-actions { margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
+  .filter-pill { padding:6px 12px;border-radius:999px;border:1px solid #d7def0;background:#fff;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif; }
+  .filter-pill.active { background:#4e73df;border-color:#4e73df;color:#fff; }
+  .suggest-btn { min-width:60px;padding:6px 10px;font-size:11px; }
   .mini-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .mini-kpi { background: #fff; border-radius: 12px; border: 1px solid #e3e6f0; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
   .row-image { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; background: #eef2ff; border: 1px solid #e3e6f0; }
@@ -66,14 +70,19 @@
     <div class="section-card bulk-panel">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
         <span style="font-size:14px;font-weight:700;color:#3a3b45;">Bulk Variant Pricing</span>
-        <span class="calc-muted">Choose one product, then fill only the fields you want to copy to its variants.</span>
+        <span class="calc-muted">Select products, then fill only the fields you want to copy to their variants.</span>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
-        <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Product</span>
-        <select class="bulk-product-select" id="bulkProductSelect">
-          <option value="">Select product variants...</option>
+        <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Products</span>
+        <select class="bulk-product-select" id="bulkProductSelect" multiple>
         </select>
-        <span class="calc-muted" id="bulkProductCount">No product selected</span>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <span class="calc-muted" id="bulkProductCount">No products selected</span>
+          <div class="bulk-actions">
+            <button class="btn btn-secondary save-btn" onclick="selectVisibleProducts()">Select Visible</button>
+            <button class="btn btn-secondary save-btn" onclick="clearProductSelection()">Clear Products</button>
+          </div>
+        </div>
       </div>
       <div class="bulk-grid">
         <div class="bulk-field"><label for="bulk_beans_kg">Beans KG</label><input class="cost-input" id="bulk_beans_kg" type="number" min="0" step="0.01" placeholder="Skip"/></div>
@@ -98,6 +107,9 @@
       <div class="section-header">
         <span style="font-size:14px;font-weight:700;color:#3a3b45;">Product Cost Calculator</span>
         <span class="section-count" id="catalogCount">0</span>
+        <div class="table-actions">
+          <button class="filter-pill" id="missingOnlyBtn" onclick="toggleMissingOnly()">Missing Costs</button>
+        </div>
       </div>
       <div style="overflow-x:auto;">
         <table class="cost-table">
@@ -116,13 +128,14 @@
               <th>Return Cost</th>
               <th>Ads Cost</th>
               <th>Net Cost</th>
+              <th>Suggested Price</th>
               <th>Selling Price</th>
               <th>Net Profit</th>
               <th style="width:110px;">Save</th>
             </tr>
           </thead>
           <tbody id="catalogBody">
-            <tr><td colspan="16" class="empty-state">Loading variant catalog...</td></tr>
+            <tr><td colspan="17" class="empty-state">Loading variant catalog...</td></tr>
           </tbody>
         </table>
       </div>
@@ -136,6 +149,7 @@
 let currentSource = {{ default_source|tojson }};
 let catalogRows = [];
 let beansPrice = Number({{ beans_price|tojson }});
+let missingOnly = false;
 const bulkFields = [
   'beans_kg',
   'fabric_cost',
@@ -164,6 +178,24 @@ function formatMoney(value) {
   return Math.round(num(value)).toLocaleString('en-PK');
 }
 
+function suggestedPrice(netCost) {
+  const cost = num(netCost);
+  return cost > 0 ? Math.ceil(cost / 0.46) : 0;
+}
+
+function hasMissingCosts(row) {
+  return [
+    'beans_kg',
+    'fabric_cost',
+    'yard_qty',
+    'fusium_cost',
+    'making_cost',
+    'overhead_cost',
+    'return_cost',
+    'ads_cost',
+  ].some(field => num(row[field]) <= 0);
+}
+
 function rowCalc(row, index = null) {
   const getField = (field) => {
     if (index === null) return num(row[field]);
@@ -189,7 +221,7 @@ function rowCalc(row, index = null) {
 
 async function loadCatalog(source = currentSource) {
   currentSource = source;
-  document.getElementById('catalogBody').innerHTML = '<tr><td colspan="16" class="empty-state">Loading variant catalog...</td></tr>';
+  document.getElementById('catalogBody').innerHTML = '<tr><td colspan="17" class="empty-state">Loading variant catalog...</td></tr>';
   try {
     const res = await fetch(`/api/costing/catalog?source=${encodeURIComponent(source)}`);
     const data = await res.json();
@@ -203,7 +235,7 @@ async function loadCatalog(source = currentSource) {
     updateCatalogKPIs();
     renderCatalog();
   } catch (error) {
-    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="16" class="empty-state">${error.message}</td></tr>`;
+    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="17" class="empty-state">${error.message}</td></tr>`;
     showToast(error.message || 'Could not load cost catalog');
   }
 }
@@ -223,22 +255,26 @@ function productGroupLabel(row) {
 }
 
 function selectedProductRows() {
-  const selectedKey = document.getElementById('bulkProductSelect')?.value || '';
-  if (!selectedKey) return [];
-  return catalogRows.filter(row => productGroupKey(row) === selectedKey);
+  const selectedKeys = Array.from(document.getElementById('bulkProductSelect')?.selectedOptions || [])
+    .map(option => option.value)
+    .filter(Boolean);
+  if (!selectedKeys.length) return [];
+  const selected = new Set(selectedKeys);
+  return catalogRows.filter(row => selected.has(productGroupKey(row)));
 }
 
 function updateBulkProductCount() {
   const countEl = document.getElementById('bulkProductCount');
   if (!countEl) return;
   const rows = selectedProductRows();
-  countEl.textContent = rows.length ? `${rows.length} variants selected` : 'No product selected';
+  const productCount = new Set(rows.map(productGroupKey)).size;
+  countEl.textContent = rows.length ? `${productCount} product${productCount === 1 ? '' : 's'}, ${rows.length} variants selected` : 'No products selected';
 }
 
 function updateBulkProductOptions() {
   const select = document.getElementById('bulkProductSelect');
   if (!select) return;
-  const previousValue = select.value;
+  const previousValues = new Set(Array.from(select.selectedOptions || []).map(option => option.value));
   const groups = new Map();
   catalogRows.forEach(row => {
     const key = productGroupKey(row);
@@ -254,20 +290,48 @@ function updateBulkProductOptions() {
     .sort((a, b) => a[1].label.localeCompare(b[1].label))
     .map(([key, group]) => `<option value="${escapeAttr(key)}">${escapeHtml(group.label)} (${group.count})</option>`)
     .join('');
-  select.innerHTML = `<option value="">Select product variants...</option>${options}`;
-  if (previousValue && groups.has(previousValue)) select.value = previousValue;
+  select.innerHTML = options;
+  Array.from(select.options).forEach(option => {
+    option.selected = previousValues.has(option.value);
+  });
   select.onchange = updateBulkProductCount;
+  updateBulkProductCount();
+}
+
+function selectVisibleProducts() {
+  const select = document.getElementById('bulkProductSelect');
+  if (!select) return;
+  const visibleKeys = new Set(getFilteredRows().map(productGroupKey));
+  Array.from(select.options).forEach(option => {
+    option.selected = visibleKeys.has(option.value);
+  });
+  updateBulkProductCount();
+}
+
+function clearProductSelection() {
+  const select = document.getElementById('bulkProductSelect');
+  if (!select) return;
+  Array.from(select.options).forEach(option => {
+    option.selected = false;
+  });
   updateBulkProductCount();
 }
 
 function getFilteredRows() {
   const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
   return catalogRows.filter(row => {
+    if (missingOnly && !hasMissingCosts(row)) return false;
     if (!q) return true;
     return [
       row.primary_name,
     ].some(value => String(value || '').toLowerCase().includes(q));
   });
+}
+
+function toggleMissingOnly() {
+  missingOnly = !missingOnly;
+  document.getElementById('missingOnlyBtn')?.classList.toggle('active', missingOnly);
+  renderCatalog();
 }
 
 function updateCatalogKPIs(filteredRows = null) {
@@ -286,12 +350,13 @@ function renderCatalog() {
   updateCatalogKPIs(rows);
 
   if (!rows.length) {
-    document.getElementById('catalogBody').innerHTML = '<tr><td colspan="16" class="empty-state">No variants match your search.</td></tr>';
+    document.getElementById('catalogBody').innerHTML = '<tr><td colspan="17" class="empty-state">No variants match your search.</td></tr>';
     return;
   }
 
   document.getElementById('catalogBody').innerHTML = rows.map((row, index) => {
     const calc = rowCalc(row);
+    const suggested = suggestedPrice(calc.netCost);
     return `
     <tr>
       <td><img class="row-image" src="${row.image || 'https://static.thenounproject.com/png/1578832-200.png'}" alt=""></td>
@@ -328,6 +393,12 @@ function renderCatalog() {
       </td>
       <td><span class="calc-value" id="netCost-${index}">${formatMoney(calc.netCost)}</span></td>
       <td>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="calc-value" id="suggestedPrice-${index}">${suggested ? formatMoney(suggested) : '—'}</span>
+          <button class="btn btn-secondary suggest-btn" onclick="useSuggestedPrice(${index})">Use</button>
+        </div>
+      </td>
+      <td>
         <input class="cost-input" id="product_price-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.product_price)}" oninput="updateRowCalc(${index})"/>
       </td>
       <td><span class="calc-value" id="netProfit-${index}" style="color:${calc.netProfit >= 0 ? '#1cc88a' : '#e74a3b'}">${formatMoney(calc.netProfit)}</span></td>
@@ -344,11 +415,26 @@ function updateRowCalc(index) {
   if (!row) return;
   beansPrice = num(document.getElementById('beansPriceInput')?.value || beansPrice);
   const calc = rowCalc(row, index);
+  const suggested = suggestedPrice(calc.netCost);
   document.getElementById(`beansValue-${index}`).textContent = formatMoney(calc.beansValue);
   document.getElementById(`netCost-${index}`).textContent = formatMoney(calc.netCost);
+  document.getElementById(`suggestedPrice-${index}`).textContent = suggested ? formatMoney(suggested) : '—';
   const profitEl = document.getElementById(`netProfit-${index}`);
   profitEl.textContent = formatMoney(calc.netProfit);
   profitEl.style.color = calc.netProfit >= 0 ? '#1cc88a' : '#e74a3b';
+}
+
+function useSuggestedPrice(index) {
+  const rows = getFilteredRows();
+  const row = rows[index];
+  if (!row) return;
+  const calc = rowCalc(row, index);
+  const price = suggestedPrice(calc.netCost);
+  const priceInput = document.getElementById(`product_price-${index}`);
+  if (!price || !priceInput) return;
+  priceInput.value = formatMoneyInput(price);
+  row.product_price = price;
+  updateRowCalc(index);
 }
 
 function readRowInputsIntoModel(row, index) {
@@ -425,7 +511,7 @@ function getBulkValues() {
 function applyBulkValues() {
   const rows = selectedProductRows();
   if (!rows.length) {
-    showToast('Select a product first');
+    showToast('Select at least one product first');
     return;
   }
   const values = getBulkValues();
@@ -448,7 +534,7 @@ async function saveSelectedProductRows() {
   const rows = selectedProductRows();
   const btn = document.getElementById('bulkSaveBtn');
   if (!rows.length) {
-    showToast('Select a product first');
+    showToast('Select at least one product first');
     return;
   }
   btn.disabled = true;

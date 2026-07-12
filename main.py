@@ -22,6 +22,7 @@ import shopify
 import requests
 import json
 from urllib.parse import quote, urlparse
+import re
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from token_manager import get_access_token, save_tokens
@@ -2222,7 +2223,129 @@ def build_shopify_cost_catalog():
     return rows
 
 
-def build_daraz_cost_catalog():
+def normalize_catalog_match(value: str) -> str:
+    value = str(value or '').lower()
+    value = re.sub(r'[^a-z0-9]+', ' ', value)
+    return ' '.join(value.split())
+
+
+def catalog_match_keys(value: str) -> list[str]:
+    raw = str(value or '').strip()
+    candidates = [
+        raw,
+        re.sub(r'\([^)]*\)', ' ', raw),
+        raw.split(' - ')[0],
+        raw.split('|')[0],
+    ]
+    keys = []
+    for candidate in candidates:
+        normalized = normalize_catalog_match(candidate)
+        normalized = re.sub(r'\b(free|foot|stool|with|without|color|colour)\b', ' ', normalized)
+        normalized = ' '.join(normalized.split())
+        if normalized and normalized not in keys:
+            keys.append(normalized)
+    return keys
+
+
+def parse_daraz_special_date(value):
+    text = str(value or '').strip()
+    if not text:
+        return None
+    for fmt in ('%Y-%m-%d%H:%M', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(text[:16], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def daraz_seller_price(sku: dict) -> tuple[float, str]:
+    base_price = money_float(sku.get('price'))
+    special_price = money_float(sku.get('special_price'))
+    if special_price <= 0:
+        return base_price, 'base'
+
+    now = datetime.now()
+    starts_at = parse_daraz_special_date(sku.get('special_from_time') or sku.get('special_from_date'))
+    ends_at = parse_daraz_special_date(sku.get('special_to_time') or sku.get('special_to_date'))
+    if starts_at and now < starts_at:
+        return base_price, 'base'
+    if ends_at and now > ends_at:
+        return base_price, 'base'
+    return special_price, 'seller_special'
+
+
+def fetch_daraz_products_catalog(max_pages=20):
+    access_token = get_access_token()
+    client = get_daraz_client()
+    rows = []
+    seen = set()
+    limit = 50
+
+    for page in range(max_pages):
+        offset = page * limit
+        req = lazop.LazopRequest('/products/get', 'GET')
+        req.add_api_param('filter', 'live')
+        req.add_api_param('limit', str(limit))
+        req.add_api_param('offset', str(offset))
+        req.add_api_param('options', '1')
+        response = client.execute(req, access_token)
+        body = response.body or {}
+        data = body.get('data') or {}
+        products = data.get('products') or []
+        if not products:
+            break
+
+        for product in products:
+            attributes = product.get('attributes') or {}
+            product_name = attributes.get('name') or attributes.get('Name') or f"Daraz Item {product.get('item_id') or ''}".strip()
+            product_images = product.get('images') or []
+            for sku in product.get('skus') or []:
+                seller_sku = str(sku.get('SellerSku') or sku.get('seller_sku') or '').strip()
+                shop_sku = str(sku.get('ShopSku') or sku.get('shop_sku') or '').strip()
+                sku_id = str(sku.get('SkuId') or sku.get('sku_id') or '').strip()
+                variant_key = seller_sku or shop_sku or sku_id or str(product.get('item_id') or '')
+                if not variant_key or variant_key in seen:
+                    continue
+                seen.add(variant_key)
+                seller_price, price_source = daraz_seller_price(sku)
+                images = sku.get('Images') or product_images or []
+                image = next((img for img in images if img), '') if isinstance(images, list) else ''
+                row = {
+                    'source': COST_SOURCE_DARAZ,
+                    'variant_key': variant_key,
+                    'source_product_id': str(product.get('item_id') or ''),
+                    'source_variant_id': sku_id,
+                    'inventory_item_id': '',
+                    'sku': seller_sku or shop_sku,
+                    'shop_sku': shop_sku,
+                    'seller_sku': seller_sku,
+                    'primary_name': product_name,
+                    'secondary_name': '',
+                    'product_price': seller_price,
+                    'daraz_base_price': money_float(sku.get('price')),
+                    'daraz_seller_price': seller_price,
+                    'daraz_special_price': money_float(sku.get('special_price')),
+                    'daraz_live_price': 0.0,
+                    'daraz_live_price_source': '',
+                    'daraz_price_source': price_source,
+                    'daraz_special_from': str(sku.get('special_from_time') or ''),
+                    'daraz_special_to': str(sku.get('special_to_time') or sku.get('special_to_date') or ''),
+                    'daraz_status': str(sku.get('Status') or product.get('status') or ''),
+                    'daraz_stock': int(float(sku.get('quantity') or sku.get('Available') or 0)),
+                    'image': image,
+                }
+                row.update(default_cost_calc_fields(COST_SOURCE_DARAZ))
+                rows.append(row)
+
+        total_products = money_float(data.get('total_products'))
+        if len(products) < limit or (total_products and len(rows) >= total_products):
+            break
+
+    return rows
+
+
+def build_daraz_order_cost_catalog():
     orders = fetch_daraz_order_summaries(DARAZ_PROFIT_STATUSES)
     access_token = get_access_token()
     items_by_key = {}
@@ -2252,6 +2375,62 @@ def build_daraz_cost_catalog():
             items_by_key[variant_key] = row
 
     rows = list(items_by_key.values())
+    rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
+    return rows
+
+
+def build_shopify_match_lookup():
+    rows = with_saved_costs(COST_SOURCE_SHOPIFY, build_shopify_cost_catalog())
+    by_sku = {}
+    by_name = {}
+    for row in rows:
+        sku = normalize_catalog_match(row.get('sku'))
+        if sku:
+            by_sku.setdefault(sku, row)
+        for name in catalog_match_keys(row.get('primary_name')):
+            by_name.setdefault(name, row)
+    return by_sku, by_name
+
+
+def attach_shopify_matches_to_daraz(rows):
+    by_sku, by_name = build_shopify_match_lookup()
+    for row in rows:
+        matched = None
+        reason = ''
+        for sku_value in (row.get('seller_sku'), row.get('shop_sku'), row.get('sku')):
+            matched = by_sku.get(normalize_catalog_match(sku_value))
+            if matched:
+                reason = 'SKU'
+                break
+        if not matched:
+            for name_key in catalog_match_keys(row.get('primary_name')):
+                matched = by_name.get(name_key)
+                if matched:
+                    break
+            if matched:
+                reason = 'Name'
+        if matched:
+            row['matched_shopify_key'] = matched.get('variant_key') or ''
+            row['matched_shopify_name'] = matched.get('primary_name') or ''
+            row['matched_shopify_sku'] = matched.get('sku') or ''
+            row['matched_shopify_price'] = money_float(matched.get('product_price'))
+            row['match_reason'] = reason
+        else:
+            row['matched_shopify_key'] = ''
+            row['matched_shopify_name'] = ''
+            row['matched_shopify_sku'] = ''
+            row['matched_shopify_price'] = 0.0
+            row['match_reason'] = ''
+    return rows
+
+
+def build_daraz_cost_catalog():
+    try:
+        rows = fetch_daraz_products_catalog()
+    except Exception as e:
+        print(f"Could not fetch Daraz product catalog, falling back to order items: {e}")
+        rows = build_daraz_order_cost_catalog()
+    rows = attach_shopify_matches_to_daraz(rows)
     rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
     return rows
 

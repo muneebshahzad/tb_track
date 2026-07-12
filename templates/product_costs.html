@@ -24,6 +24,10 @@
   .filter-pill { padding:6px 12px;border-radius:999px;border:1px solid #d7def0;background:#fff;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif; }
   .filter-pill.active { background:#4e73df;border-color:#4e73df;color:#fff; }
   .suggest-btn { min-width:60px;padding:6px 10px;font-size:11px; }
+  .match-card { min-width:180px;display:flex;flex-direction:column;gap:5px; }
+  .match-title { font-size:12px;font-weight:700;color:#3a3b45;line-height:1.3; }
+  .price-stack { min-width:120px;display:flex;flex-direction:column;gap:4px; }
+  .price-note { font-size:10px;color:#858796;white-space:nowrap; }
   .mini-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .mini-kpi { background: #fff; border-radius: 12px; border: 1px solid #e3e6f0; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
   .row-image { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; background: #eef2ff; border: 1px solid #e3e6f0; }
@@ -100,6 +104,9 @@
         <button class="btn btn-primary save-btn" id="bulkApplyBtn" onclick="applyBulkValues()">Apply to Variants</button>
         <button class="btn btn-secondary save-btn" id="bulkSaveBtn" onclick="saveSelectedProductRows()">Save Variants</button>
         <button class="btn btn-secondary save-btn" onclick="clearBulkValues()">Clear</button>
+        {% if default_source == 'daraz' %}
+        <button class="btn btn-secondary save-btn" onclick="applyMatchedShopifyPrices()">Apply Shopify Prices</button>
+        {% endif %}
       </div>
     </div>
 
@@ -117,6 +124,10 @@
             <tr>
               <th style="width:72px;">Image</th>
               <th style="min-width:220px;">Product</th>
+              {% if default_source == 'daraz' %}
+              <th>Daraz Price</th>
+              <th>Shopify Match</th>
+              {% endif %}
               <th>Beans KG</th>
               <th>Beans Value</th>
               <th>Fabric Cost</th>
@@ -135,7 +146,7 @@
             </tr>
           </thead>
           <tbody id="catalogBody">
-            <tr><td colspan="17" class="empty-state">Loading variant catalog...</td></tr>
+            <tr><td colspan="{% if default_source == 'daraz' %}19{% else %}17{% endif %}" class="empty-state">Loading variant catalog...</td></tr>
           </tbody>
         </table>
       </div>
@@ -150,6 +161,7 @@ let currentSource = {{ default_source|tojson }};
 let catalogRows = [];
 let beansPrice = Number({{ beans_price|tojson }});
 let missingOnly = false;
+const tableColspan = currentSource === 'daraz' ? 19 : 17;
 const bulkFields = [
   'beans_kg',
   'fabric_cost',
@@ -221,7 +233,7 @@ function rowCalc(row, index = null) {
 
 async function loadCatalog(source = currentSource) {
   currentSource = source;
-  document.getElementById('catalogBody').innerHTML = '<tr><td colspan="17" class="empty-state">Loading variant catalog...</td></tr>';
+  document.getElementById('catalogBody').innerHTML = `<tr><td colspan="${tableColspan}" class="empty-state">Loading variant catalog...</td></tr>`;
   try {
     const res = await fetch(`/api/costing/catalog?source=${encodeURIComponent(source)}`);
     const data = await res.json();
@@ -235,7 +247,7 @@ async function loadCatalog(source = currentSource) {
     updateCatalogKPIs();
     renderCatalog();
   } catch (error) {
-    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="17" class="empty-state">${error.message}</td></tr>`;
+    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="${tableColspan}" class="empty-state">${error.message}</td></tr>`;
     showToast(error.message || 'Could not load cost catalog');
   }
 }
@@ -324,6 +336,11 @@ function getFilteredRows() {
     if (!q) return true;
     return [
       row.primary_name,
+      row.sku,
+      row.seller_sku,
+      row.shop_sku,
+      row.matched_shopify_name,
+      row.matched_shopify_sku,
     ].some(value => String(value || '').toLowerCase().includes(q));
   });
 }
@@ -350,7 +367,7 @@ function renderCatalog() {
   updateCatalogKPIs(rows);
 
   if (!rows.length) {
-    document.getElementById('catalogBody').innerHTML = '<tr><td colspan="17" class="empty-state">No variants match your search.</td></tr>';
+    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="${tableColspan}" class="empty-state">No variants match your search.</td></tr>`;
     return;
   }
 
@@ -362,7 +379,10 @@ function renderCatalog() {
       <td><img class="row-image" src="${row.image || 'https://static.thenounproject.com/png/1578832-200.png'}" alt=""></td>
       <td>
         <div style="font-size:13px;font-weight:700;color:#3a3b45;line-height:1.35;">${escapeHtml(row.primary_name || 'Untitled variant')}</div>
+        ${row.sku ? `<div class="calc-muted">${escapeHtml(row.sku)}</div>` : ''}
       </td>
+      ${currentSource === 'daraz' ? darazPriceCell(row) : ''}
+      ${currentSource === 'daraz' ? shopifyMatchCell(row, index) : ''}
       <td>
         <input class="cost-input" id="beans_kg-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.beans_kg)}" oninput="updateRowCalc(${index})"/>
       </td>
@@ -409,6 +429,43 @@ function renderCatalog() {
   `}).join('');
 }
 
+function darazPriceCell(row) {
+  const basePrice = num(row.daraz_base_price);
+  const sellerPrice = num(row.daraz_seller_price || row.product_price);
+  const specialPrice = num(row.daraz_special_price);
+  const livePrice = num(row.daraz_live_price);
+  const sourceLabel = row.daraz_price_source === 'seller_special' ? 'Seller special' : 'Seller base';
+  return `
+    <td>
+      <div class="price-stack">
+        <span class="calc-value">${formatMoney(sellerPrice || basePrice)}</span>
+        <span class="price-note">${escapeHtml(sourceLabel)}${basePrice ? `: ${formatMoney(basePrice)}` : ''}</span>
+        ${specialPrice ? `<span class="price-note">Special field: ${formatMoney(specialPrice)}</span>` : ''}
+        ${livePrice ? `<span class="price-note">Live campaign: ${formatMoney(livePrice)}</span>` : '<span class="price-note">Live campaign: not exposed</span>'}
+      </div>
+    </td>
+  `;
+}
+
+function shopifyMatchCell(row, index) {
+  const matchedPrice = num(row.matched_shopify_price);
+  if (!matchedPrice) {
+    return '<td><span class="calc-muted">No Shopify match</span></td>';
+  }
+  return `
+    <td>
+      <div class="match-card">
+        <span class="match-title">${escapeHtml(row.matched_shopify_name || 'Matched Shopify product')}</span>
+        <span class="calc-muted">${escapeHtml(row.match_reason || 'Match')}${row.matched_shopify_sku ? ` - ${escapeHtml(row.matched_shopify_sku)}` : ''}</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span class="calc-value">${formatMoney(matchedPrice)}</span>
+          <button class="btn btn-secondary suggest-btn" onclick="useMatchedShopifyPrice(${index})">Use</button>
+        </div>
+      </div>
+    </td>
+  `;
+}
+
 function updateRowCalc(index) {
   const rows = getFilteredRows();
   const row = rows[index];
@@ -434,6 +491,18 @@ function useSuggestedPrice(index) {
   if (!price || !priceInput) return;
   priceInput.value = formatMoneyInput(price);
   row.product_price = price;
+  updateRowCalc(index);
+}
+
+function useMatchedShopifyPrice(index) {
+  const rows = getFilteredRows();
+  const row = rows[index];
+  if (!row) return;
+  const matchedPrice = num(row.matched_shopify_price);
+  const priceInput = document.getElementById(`product_price-${index}`);
+  if (!matchedPrice || !priceInput) return;
+  priceInput.value = formatMoneyInput(matchedPrice);
+  row.product_price = matchedPrice;
   updateRowCalc(index);
 }
 
@@ -528,6 +597,26 @@ function applyBulkValues() {
   renderCatalog();
   updateBulkProductCount();
   showToast(`Applied to ${rows.length} variants`);
+}
+
+function applyMatchedShopifyPrices() {
+  const rows = selectedProductRows();
+  if (!rows.length) {
+    showToast('Select at least one product first');
+    return;
+  }
+  let applied = 0;
+  rows.forEach(row => {
+    const matchedPrice = num(row.matched_shopify_price);
+    if (matchedPrice > 0) {
+      row.product_price = matchedPrice;
+      row.product_cost = rowCalc(row).netCost;
+      applied += 1;
+    }
+  });
+  renderCatalog();
+  updateBulkProductCount();
+  showToast(applied ? `Applied Shopify price to ${applied} variants` : 'No matched Shopify prices found');
 }
 
 async function saveSelectedProductRows() {

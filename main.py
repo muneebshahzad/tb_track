@@ -1294,6 +1294,7 @@ def get_active_shopify_products(limit=120):
                 'price': float(getattr(variant, 'price', 0) or 0),
                 'image': variant_image,
                 'sku': getattr(variant, 'sku', '') or '',
+                'barcode': getattr(variant, 'barcode', '') or '',
             })
     return results
 
@@ -2212,6 +2213,7 @@ def build_shopify_cost_catalog():
             'source_variant_id': str(item.get('variant_id') or ''),
             'inventory_item_id': str(item.get('inventory_item_id') or ''),
             'sku': item.get('sku') or '',
+            'barcode': item.get('barcode') or '',
             'primary_name': item.get('title') or item.get('product_title') or 'Untitled variant',
             'secondary_name': '',
             'product_price': money_float(item.get('price')),
@@ -2244,6 +2246,35 @@ def catalog_match_keys(value: str) -> list[str]:
         normalized = ' '.join(normalized.split())
         if normalized and normalized not in keys:
             keys.append(normalized)
+    return keys
+
+
+def catalog_identifier_keys(value: str) -> list[str]:
+    raw = str(value or '').strip()
+    if not raw:
+        return []
+    keys = []
+
+    def add(candidate):
+        normalized = normalize_catalog_match(candidate)
+        if normalized and normalized not in keys:
+            keys.append(normalized)
+
+    add(raw)
+    compact = re.sub(r'[^a-zA-Z0-9]+', '', raw).lower()
+    if compact and compact not in keys:
+        keys.append(compact)
+
+    barcode_match = re.match(r'^(\d{8,14})[-_\s]+[a-zA-Z0-9]+$', raw)
+    if barcode_match:
+        add(barcode_match.group(1))
+
+    normalized_raw = normalize_catalog_match(raw)
+    parts = normalized_raw.split()
+    if len(parts) > 2:
+        add(' '.join(parts[:-1]))
+    if len(parts) > 3:
+        add(' '.join(parts[:-2]))
     return keys
 
 
@@ -2381,26 +2412,29 @@ def build_daraz_order_cost_catalog():
 
 def build_shopify_match_lookup():
     rows = with_saved_costs(COST_SOURCE_SHOPIFY, build_shopify_cost_catalog())
-    by_sku = {}
+    by_identifier = {}
     by_name = {}
     for row in rows:
-        sku = normalize_catalog_match(row.get('sku'))
-        if sku:
-            by_sku.setdefault(sku, row)
+        for value in (row.get('sku'), row.get('barcode')):
+            for key in catalog_identifier_keys(value):
+                by_identifier.setdefault(key, row)
         for name in catalog_match_keys(row.get('primary_name')):
             by_name.setdefault(name, row)
-    return by_sku, by_name
+    return by_identifier, by_name
 
 
 def attach_shopify_matches_to_daraz(rows):
-    by_sku, by_name = build_shopify_match_lookup()
+    by_identifier, by_name = build_shopify_match_lookup()
     for row in rows:
         matched = None
         reason = ''
         for sku_value in (row.get('seller_sku'), row.get('shop_sku'), row.get('sku')):
-            matched = by_sku.get(normalize_catalog_match(sku_value))
+            for identifier_key in catalog_identifier_keys(sku_value):
+                matched = by_identifier.get(identifier_key)
+                if matched:
+                    reason = 'SKU'
+                    break
             if matched:
-                reason = 'SKU'
                 break
         if not matched:
             for name_key in catalog_match_keys(row.get('primary_name')):

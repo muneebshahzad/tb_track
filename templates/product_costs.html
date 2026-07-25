@@ -117,6 +117,8 @@
         <button class="btn btn-secondary save-btn" onclick="clearBulkValues()">Clear</button>
         {% if default_source == 'daraz' %}
         <button class="btn btn-secondary save-btn" onclick="applyMatchedShopifyPrices()">Apply Shopify Prices</button>
+        <button class="btn btn-primary save-btn" id="bulkSaveMatchedBtn" onclick="bulkSaveMatchedShopifyPrices()">Save All Matches</button>
+        <a class="btn btn-secondary save-btn" href="/daraz-product-costs/sync-review">Review Missing</a>
         {% endif %}
       </div>
     </div>
@@ -748,6 +750,25 @@ function applyMatchedShopifyPrices() {
   renderCatalog();
   updateBulkProductCount();
   showToast(applied ? `Applied Shopify price to ${applied} variants` : 'No matched Shopify prices found');
+}
+
+async function bulkSaveMatchedShopifyPrices() {
+  const btn = document.getElementById('bulkSaveMatchedBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/daraz-sync/save-matched-prices', { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not save matched prices');
+    showToast(`Saved ${data.saved || 0} matched prices${data.failed ? `, ${data.failed} failed` : ''}`);
+    await loadCatalog(currentSource);
+  } catch (error) {
+    showToast(error.message || 'Could not save matched prices');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save All Matches';
+  }
 }
 
 async function saveSelectedProductRows() {

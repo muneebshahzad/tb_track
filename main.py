@@ -23,6 +23,7 @@ import requests
 import json
 from urllib.parse import quote, urlparse
 import re
+from xml.sax.saxutils import escape as xml_escape
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from token_manager import get_access_token, save_tokens
@@ -1291,6 +1292,10 @@ def get_active_shopify_products(limit=120):
                 'title': display_title,
                 'product_title': getattr(product, 'title', ''),
                 'variant_title': variant_title,
+                'product_description': getattr(product, 'body_html', '') or '',
+                'product_vendor': getattr(product, 'vendor', '') or '',
+                'product_type': getattr(product, 'product_type', '') or '',
+                'product_images': [getattr(image, 'src', '') for image in product_images if getattr(image, 'src', '')],
                 'price': float(getattr(variant, 'price', 0) or 0),
                 'image': variant_image,
                 'sku': getattr(variant, 'sku', '') or '',
@@ -2070,6 +2075,124 @@ def update_daraz_sku_price(item_id, sku_id, seller_sku, price):
     return body
 
 
+def daraz_api_call(path, method='POST', payload=None):
+    req = lazop.LazopRequest(path, method)
+    if payload is not None:
+        req.add_api_param('payload', payload if isinstance(payload, str) else json.dumps(payload))
+    response = get_daraz_client().execute(req, get_access_token())
+    body = response.body or {}
+    if str(body.get('code') or response.code or '') not in {'', '0'}:
+        raise RuntimeError(body.get('message') or response.message or f'Daraz API call failed: {path}')
+    return body
+
+
+def migrate_daraz_image_url(url):
+    url = str(url or '').strip()
+    if not url:
+        return ''
+    host = urlparse(url).netloc.lower()
+    if 'slatic.net' in host or 'daraz.pk' in host or 'lazada' in host:
+        return url
+    payload = f'<Request><Image><Url>{xml_escape(url)}</Url></Image></Request>'
+    body = daraz_api_call('/image/migrate', 'POST', payload)
+    return (((body.get('data') or {}).get('image') or {}).get('url') or '').strip()
+
+
+def migrate_daraz_images(urls, limit=8):
+    migrated = []
+    seen = set()
+    for url in urls or []:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        try:
+            migrated_url = migrate_daraz_image_url(url)
+            if migrated_url and migrated_url not in migrated:
+                migrated.append(migrated_url)
+        except Exception as e:
+            print(f"Could not migrate Daraz image {url}: {e}")
+        if len(migrated) >= limit:
+            break
+    return migrated
+
+
+def daraz_sku_payload_from_shopify(row, settings, image_urls=None):
+    seller_sku = str(row.get('sku') or row.get('barcode') or row.get('variant_key') or '').strip()
+    variant_title = str(row.get('variant_title') or row.get('secondary_name') or '').strip()
+    if variant_title in {'', 'Default Title'}:
+        variant_title = 'Default'
+    sku_payload = {
+        'SellerSku': seller_sku,
+        'quantity': str(int(money_float(settings.get('quantity') or 1000))),
+        'price': f"{money_float(row.get('product_price')):.2f}",
+        'package_weight': str(settings.get('package_weight') or '2'),
+        'package_length': str(settings.get('package_length') or '20'),
+        'package_width': str(settings.get('package_width') or '20'),
+        'package_height': str(settings.get('package_height') or '20'),
+        'package_content': str(settings.get('package_content') or 'Bean bag'),
+        'color_family': variant_title,
+        'saleProp': {'color_family': variant_title},
+    }
+    images = migrate_daraz_images(image_urls or [row.get('image')])
+    if images:
+        sku_payload['Images'] = {'Image': images[:8]}
+    return sku_payload
+
+
+def create_daraz_product_from_shopify(group, settings):
+    category_id = str(settings.get('category_id') or '').strip()
+    if not category_id:
+        raise RuntimeError('Daraz category ID is required before creating new products.')
+    product_images = migrate_daraz_images(group.get('images') or [])
+    description = str(settings.get('description') or group.get('description') or group.get('label') or '').strip()
+    short_description = str(settings.get('short_description') or group.get('label') or '').strip()
+    payload = {
+        'Request': {
+            'Product': {
+                'PrimaryCategory': category_id,
+                'Images': {'Image': product_images[:8]} if product_images else {},
+                'Attributes': {
+                    'name': group.get('label') or 'Shopify product',
+                    'name_en': group.get('label') or 'Shopify product',
+                    'description': description,
+                    'short_description': short_description,
+                    'brand': str(settings.get('brand') or group.get('vendor') or 'No Brand'),
+                    'model': group.get('label') or 'Bean bag',
+                },
+                'Skus': {
+                    'Sku': [
+                        daraz_sku_payload_from_shopify(row, settings, [row.get('image')] or product_images)
+                        for row in group.get('rows') or []
+                    ]
+                },
+            }
+        }
+    }
+    return daraz_api_call('/product/create', 'POST', payload)
+
+
+def add_daraz_variant_from_shopify(row, target_group, settings):
+    if not target_group:
+        raise RuntimeError('Existing Daraz product could not be found for this Shopify variant.')
+    associated_sku = str((target_group.get('rows') or [{}])[0].get('seller_sku') or (target_group.get('rows') or [{}])[0].get('sku') or '').strip()
+    item_id = str(target_group.get('item_id') or '').strip()
+    if not item_id or not associated_sku:
+        raise RuntimeError('Existing Daraz item id and AssociatedSku are required to add variants.')
+    payload = {
+        'Request': {
+            'Product': {
+                'ItemId': item_id,
+                'AssociatedSku': associated_sku,
+                'Attributes': {},
+                'Skus': {
+                    'Sku': [daraz_sku_payload_from_shopify(row, settings, [row.get('image')])]
+                },
+            }
+        }
+    }
+    return daraz_api_call('/product/update', 'POST', payload)
+
+
 def parse_iso_day(value: str):
     if not value:
         return None
@@ -2246,6 +2369,12 @@ def build_shopify_cost_catalog():
             'barcode': item.get('barcode') or '',
             'primary_name': item.get('title') or item.get('product_title') or 'Untitled variant',
             'secondary_name': '',
+            'product_title': item.get('product_title') or '',
+            'variant_title': item.get('variant_title') or '',
+            'product_description': item.get('product_description') or '',
+            'product_vendor': item.get('product_vendor') or '',
+            'product_type': item.get('product_type') or '',
+            'product_images': item.get('product_images') or [],
             'product_price': money_float(item.get('price')),
             'image': item.get('image') or '',
         }
@@ -2359,6 +2488,7 @@ def fetch_daraz_products_catalog(max_pages=20):
 
         for product in products:
             attributes = product.get('attributes') or {}
+            primary_category = str(product.get('primary_category') or product.get('PrimaryCategory') or '')
             product_name = (
                 attributes.get('name_en')
                 or attributes.get('Name_en')
@@ -2385,12 +2515,17 @@ def fetch_daraz_products_catalog(max_pages=20):
                     'variant_key': variant_key,
                     'source_product_id': str(product.get('item_id') or ''),
                     'source_variant_id': sku_id,
+                    'primary_category': primary_category,
                     'inventory_item_id': '',
                     'sku': seller_sku or shop_sku,
                     'shop_sku': shop_sku,
                     'seller_sku': seller_sku,
                     'primary_name': display_name,
                     'secondary_name': color_family,
+                    'product_title': product_name,
+                    'variant_title': color_family,
+                    'product_description': attributes.get('description') or attributes.get('short_description') or '',
+                    'product_images': product_images,
                     'product_price': seller_price,
                     'daraz_base_price': money_float(sku.get('price')),
                     'daraz_seller_price': seller_price,
@@ -2505,6 +2640,190 @@ def build_daraz_cost_catalog():
     rows = attach_shopify_matches_to_daraz(rows)
     rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
     return rows
+
+
+def cost_product_label(row):
+    name = str(row.get('primary_name') or 'Untitled product').strip()
+    secondary = str(row.get('secondary_name') or '').strip()
+    if secondary and name.lower().endswith(f" - {secondary.lower()}"):
+        return name[:-(len(secondary) + 3)].strip()
+    if ' - ' in name:
+        return name.split(' - ')[0].strip()
+    return name
+
+
+def group_cost_rows(rows, source=''):
+    groups = {}
+    for row in rows:
+        key = str(row.get('source_product_id') or cost_product_label(row) or row.get('variant_key') or '').strip()
+        group = groups.setdefault(key, {
+            'key': key,
+            'item_id': str(row.get('source_product_id') or ''),
+            'label': cost_product_label(row),
+            'category_id': str(row.get('primary_category') or ''),
+            'vendor': row.get('product_vendor') or '',
+            'description': row.get('product_description') or '',
+            'images': [],
+            'rows': [],
+            'source': source or row.get('source') or '',
+        })
+        for image in (row.get('product_images') or [row.get('image')]):
+            if image and image not in group['images']:
+                group['images'].append(image)
+        if row.get('image') and row.get('image') not in group['images']:
+            group['images'].append(row.get('image'))
+        group['rows'].append(row)
+    return groups
+
+
+def build_daraz_lookup_groups(daraz_groups):
+    by_identifier = {}
+    by_name = {}
+    for group in daraz_groups.values():
+        for row in group.get('rows') or []:
+            for value in (row.get('seller_sku'), row.get('shop_sku'), row.get('sku'), row.get('variant_key')):
+                for key in catalog_identifier_keys(value):
+                    by_identifier.setdefault(key, group)
+        for key in catalog_match_keys(group.get('label')):
+            by_name.setdefault(key, group)
+    return by_identifier, by_name
+
+
+def find_daraz_group_for_shopify_group(shopify_group, by_identifier, by_name):
+    for row in shopify_group.get('rows') or []:
+        for value in (row.get('sku'), row.get('barcode'), row.get('variant_key')):
+            for key in catalog_identifier_keys(value):
+                if key in by_identifier:
+                    return by_identifier[key]
+    for key in catalog_match_keys(shopify_group.get('label')):
+        if key in by_name:
+            return by_name[key]
+    return None
+
+
+def daraz_has_shopify_variant(shopify_row, daraz_group):
+    if not daraz_group:
+        return False
+    shopify_keys = set()
+    for value in (shopify_row.get('sku'), shopify_row.get('barcode'), shopify_row.get('variant_key')):
+        shopify_keys.update(catalog_identifier_keys(value))
+    for row in daraz_group.get('rows') or []:
+        if row.get('matched_shopify_key') == shopify_row.get('variant_key'):
+            return True
+        for value in (row.get('seller_sku'), row.get('shop_sku'), row.get('sku'), row.get('variant_key')):
+            if shopify_keys.intersection(catalog_identifier_keys(value)):
+                return True
+    return False
+
+
+def build_daraz_sync_plan():
+    shopify_rows = with_saved_costs(COST_SOURCE_SHOPIFY, build_shopify_cost_catalog())
+    daraz_rows = with_saved_costs(COST_SOURCE_DARAZ, build_daraz_cost_catalog())
+    shopify_groups = group_cost_rows(shopify_rows, COST_SOURCE_SHOPIFY)
+    daraz_groups = group_cost_rows(daraz_rows, COST_SOURCE_DARAZ)
+    by_identifier, by_name = build_daraz_lookup_groups(daraz_groups)
+
+    price_updates = []
+    for row in daraz_rows:
+        matched_price = money_float(row.get('matched_shopify_price'))
+        if matched_price > 0 and abs(matched_price - money_float(row.get('product_price'))) >= 0.01:
+            price_updates.append({
+                'id': f"price:{row.get('variant_key')}",
+                'daraz_variant_key': row.get('variant_key'),
+                'daraz_item_id': row.get('source_product_id'),
+                'daraz_sku_id': row.get('source_variant_id'),
+                'seller_sku': row.get('seller_sku') or row.get('sku'),
+                'daraz_name': row.get('primary_name'),
+                'daraz_price': money_float(row.get('product_price')),
+                'shopify_name': row.get('matched_shopify_name'),
+                'shopify_sku': row.get('matched_shopify_sku'),
+                'shopify_price': matched_price,
+            })
+
+    missing_products = []
+    missing_variants = []
+    for group_key, group in shopify_groups.items():
+        daraz_group = find_daraz_group_for_shopify_group(group, by_identifier, by_name)
+        if not daraz_group:
+            missing_products.append({
+                'id': f"create:{group_key}",
+                'shopify_group_key': group_key,
+                'name': group.get('label'),
+                'variant_count': len(group.get('rows') or []),
+                'images': group.get('images') or [],
+                'rows': [
+                    {
+                        'variant_key': row.get('variant_key'),
+                        'name': row.get('primary_name'),
+                        'variant': row.get('variant_title') or row.get('secondary_name') or '',
+                        'sku': row.get('sku') or row.get('barcode'),
+                        'price': money_float(row.get('product_price')),
+                        'image': row.get('image') or '',
+                    }
+                    for row in group.get('rows') or []
+                ],
+            })
+            continue
+        for row in group.get('rows') or []:
+            if not daraz_has_shopify_variant(row, daraz_group):
+                missing_variants.append({
+                    'id': f"variant:{row.get('variant_key')}",
+                    'shopify_variant_key': row.get('variant_key'),
+                    'target_daraz_item_id': daraz_group.get('item_id'),
+                    'target_daraz_name': daraz_group.get('label'),
+                    'name': row.get('primary_name'),
+                    'variant': row.get('variant_title') or row.get('secondary_name') or '',
+                    'sku': row.get('sku') or row.get('barcode'),
+                    'price': money_float(row.get('product_price')),
+                    'image': row.get('image') or '',
+                })
+
+    return {
+        'price_updates': price_updates,
+        'missing_products': missing_products,
+        'missing_variants': missing_variants,
+        'summary': {
+            'price_updates': len(price_updates),
+            'missing_products': len(missing_products),
+            'missing_variants': len(missing_variants),
+        },
+    }
+
+
+def save_daraz_matched_price(row, price):
+    update_daraz_sku_price(row.get('source_product_id'), row.get('source_variant_id'), row.get('seller_sku') or row.get('sku'), price)
+    calc_fields = {field: money_float(row.get(field)) for field in (
+        'beans_kg',
+        'fabric_cost',
+        'yard_qty',
+        'fusium_cost',
+        'making_cost',
+        'overhead_cost',
+        'delivery_cost',
+        'return_cost',
+        'ads_cost',
+    )}
+    product_cost = money_float(row.get('product_cost'))
+    return upsert_product_cost(
+        source=COST_SOURCE_DARAZ,
+        variant_key=row.get('variant_key'),
+        primary_name=row.get('primary_name') or '',
+        secondary_name=row.get('secondary_name') or '',
+        sku=row.get('sku') or row.get('seller_sku') or '',
+        product_price=str(money_float(price)),
+        beans_kg=str(calc_fields['beans_kg']),
+        fabric_cost=str(calc_fields['fabric_cost']),
+        yard_qty=str(calc_fields['yard_qty']),
+        fusium_cost=str(calc_fields['fusium_cost']),
+        making_cost=str(calc_fields['making_cost']),
+        overhead_cost=str(calc_fields['overhead_cost']),
+        delivery_cost=str(calc_fields['delivery_cost']),
+        return_cost=str(calc_fields['return_cost']),
+        ads_cost=str(calc_fields['ads_cost']),
+        product_cost=str(product_cost),
+        source_product_id=row.get('source_product_id') or '',
+        source_variant_id=row.get('source_variant_id') or '',
+    )
 
 
 def with_saved_costs(source: str, rows: list):
@@ -3515,6 +3834,11 @@ def daraz_product_costs_page():
     )
 
 
+@app.route('/daraz-product-costs/sync-review')
+def daraz_product_sync_review_page():
+    return render_template('daraz_sync_review.html')
+
+
 @app.route('/daraz-profits')
 def daraz_profits_page():
     return render_template('daraz_profits.html')
@@ -3535,6 +3859,113 @@ def costing_catalog_api():
             'rows': rows,
             'saved_count': len(saved),
             'beans_price': get_shopify_beans_price(),
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/daraz-sync/review')
+def daraz_sync_review_api():
+    try:
+        return jsonify({'ok': True, **build_daraz_sync_plan()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/daraz-sync/save-matched-prices', methods=['POST'])
+def daraz_sync_save_matched_prices_api():
+    try:
+        rows = with_saved_costs(COST_SOURCE_DARAZ, build_daraz_cost_catalog())
+        results = []
+        for row in rows:
+            matched_price = money_float(row.get('matched_shopify_price'))
+            if matched_price <= 0:
+                continue
+            item = {
+                'variant_key': row.get('variant_key'),
+                'name': row.get('primary_name'),
+                'price': matched_price,
+                'ok': False,
+            }
+            try:
+                save_daraz_matched_price(row, matched_price)
+                item['ok'] = True
+            except Exception as e:
+                item['error'] = str(e)
+            results.append(item)
+        return jsonify({
+            'ok': True,
+            'saved': sum(1 for item in results if item.get('ok')),
+            'failed': sum(1 for item in results if not item.get('ok')),
+            'results': results,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/daraz-sync/apply', methods=['POST'])
+def daraz_sync_apply_api():
+    payload = request.get_json(silent=True) or {}
+    selected = set(str(item) for item in (payload.get('selected_ids') or []))
+    settings = payload.get('settings') or {}
+    if not selected:
+        return jsonify({'ok': False, 'error': 'Select at least one sync item.'}), 400
+
+    try:
+        shopify_groups = group_cost_rows(with_saved_costs(COST_SOURCE_SHOPIFY, build_shopify_cost_catalog()), COST_SOURCE_SHOPIFY)
+        daraz_rows = with_saved_costs(COST_SOURCE_DARAZ, build_daraz_cost_catalog())
+        daraz_groups = group_cost_rows(daraz_rows, COST_SOURCE_DARAZ)
+        daraz_rows_by_variant = {row.get('variant_key'): row for row in daraz_rows}
+        shopify_rows_by_variant = {
+            row.get('variant_key'): row
+            for group in shopify_groups.values()
+            for row in group.get('rows') or []
+        }
+        plan = build_daraz_sync_plan()
+        results = []
+
+        for action in plan.get('price_updates') or []:
+            if action.get('id') not in selected:
+                continue
+            row = daraz_rows_by_variant.get(action.get('daraz_variant_key'))
+            item = {'id': action.get('id'), 'type': 'price', 'name': action.get('daraz_name'), 'ok': False}
+            try:
+                save_daraz_matched_price(row, action.get('shopify_price'))
+                item['ok'] = True
+            except Exception as e:
+                item['error'] = str(e)
+            results.append(item)
+
+        for action in plan.get('missing_products') or []:
+            if action.get('id') not in selected:
+                continue
+            group = shopify_groups.get(action.get('shopify_group_key'))
+            item = {'id': action.get('id'), 'type': 'create_product', 'name': action.get('name'), 'ok': False}
+            try:
+                item['response'] = create_daraz_product_from_shopify(group, settings)
+                item['ok'] = True
+            except Exception as e:
+                item['error'] = str(e)
+            results.append(item)
+
+        for action in plan.get('missing_variants') or []:
+            if action.get('id') not in selected:
+                continue
+            row = shopify_rows_by_variant.get(action.get('shopify_variant_key'))
+            target_group = next((group for group in daraz_groups.values() if group.get('item_id') == action.get('target_daraz_item_id')), None)
+            item = {'id': action.get('id'), 'type': 'add_variant', 'name': action.get('name'), 'ok': False}
+            try:
+                item['response'] = add_daraz_variant_from_shopify(row, target_group, settings)
+                item['ok'] = True
+            except Exception as e:
+                item['error'] = str(e)
+            results.append(item)
+
+        return jsonify({
+            'ok': True,
+            'applied': sum(1 for item in results if item.get('ok')),
+            'failed': sum(1 for item in results if not item.get('ok')),
+            'results': results,
         })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500

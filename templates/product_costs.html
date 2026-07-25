@@ -202,6 +202,10 @@ function formatMoney(value) {
   return Math.round(num(value)).toLocaleString('en-PK');
 }
 
+function rowDomKey(row) {
+  return encodeURIComponent(row.variant_key || '').replaceAll('%', '_');
+}
+
 function suggestedPrice(netCost) {
   const cost = num(netCost);
   return cost > 0 ? Math.ceil(cost / 0.56) : 0;
@@ -241,6 +245,33 @@ function rowCalc(row, index = null) {
   const netCost = materialTotal + returnCost + adsCost;
   const netProfit = (sellingPrice * 0.96) - netCost;
   return { beansValue, netCost, netProfit };
+}
+
+function rowCalcByKey(row) {
+  const key = rowDomKey(row);
+  const getField = (field) => {
+    const el = document.getElementById(`${field}-${key}`);
+    return el ? num(el.value) : num(row[field]);
+  };
+  const sellingPrice = getField('product_price');
+  const beansKg = getField('beans_kg');
+  const fabricCost = getField('fabric_cost');
+  const yardQty = getField('yard_qty');
+  const fusiumCost = getField('fusium_cost');
+  const makingCost = getField('making_cost');
+  const overheadCost = getField('overhead_cost');
+  const deliveryCost = getField('delivery_cost');
+  const returnCost = getField('return_cost');
+  const adsCost = getField('ads_cost');
+  const beansValue = beansKg * beansPrice;
+  const materialTotal = beansValue + (fabricCost * yardQty) + fusiumCost + makingCost + overheadCost + deliveryCost;
+  const netCost = materialTotal + returnCost + adsCost;
+  const netProfit = (sellingPrice * 0.96) - netCost;
+  return { beansValue, netCost, netProfit };
+}
+
+function findRowByEncodedKey(encodedKey) {
+  return catalogRows.find(entry => encodeURIComponent(entry.variant_key) === encodedKey);
 }
 
 async function loadCatalog(source = currentSource) {
@@ -461,6 +492,9 @@ function renderCatalog() {
       </tr>
     `;
     const variantRows = group.rows.map(({ row, index }) => {
+    const key = rowDomKey(row);
+    const encodedKey = encodeURIComponent(row.variant_key);
+    const encodedKeyJson = JSON.stringify(encodedKey);
     const calc = rowCalc(row);
     const suggested = suggestedPrice(calc.netCost);
     return `
@@ -474,48 +508,48 @@ function renderCatalog() {
         </div>
       </td>
       ${currentSource === 'daraz' ? darazPriceCell(row) : ''}
-      ${currentSource === 'daraz' ? shopifyMatchCell(row, index) : ''}
+      ${currentSource === 'daraz' ? shopifyMatchCell(row, encodedKey) : ''}
       <td>
-        <input class="cost-input" id="beans_kg-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.beans_kg)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="beans_kg-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.beans_kg)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
-      <td><span class="calc-value" id="beansValue-${index}">${formatMoney(calc.beansValue)}</span></td>
+      <td><span class="calc-value" id="beansValue-${key}">${formatMoney(calc.beansValue)}</span></td>
       <td>
-        <input class="cost-input" id="fabric_cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.fabric_cost)}" oninput="updateRowCalc(${index})"/>
-      </td>
-      <td>
-        <input class="cost-input" id="yard_qty-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.yard_qty)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="fabric_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.fabric_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <input class="cost-input" id="fusium_cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.fusium_cost)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="yard_qty-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.yard_qty)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <input class="cost-input" id="making_cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.making_cost)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="fusium_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.fusium_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <input class="cost-input" id="overhead_cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.overhead_cost)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="making_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.making_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <input class="cost-input" id="delivery_cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.delivery_cost)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="overhead_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.overhead_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <input class="cost-input" id="return_cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.return_cost)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="delivery_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.delivery_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <input class="cost-input" id="ads_cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.ads_cost)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="return_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.return_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
-      <td><span class="calc-value" id="netCost-${index}">${formatMoney(calc.netCost)}</span></td>
+      <td>
+        <input class="cost-input" id="ads_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.ads_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
+      </td>
+      <td><span class="calc-value" id="netCost-${key}">${formatMoney(calc.netCost)}</span></td>
       <td>
         <div style="display:flex;align-items:center;gap:6px;">
-          <span class="calc-value" id="suggestedPrice-${index}">${suggested ? formatMoney(suggested) : '—'}</span>
-          <button class="btn btn-secondary suggest-btn" onclick="useSuggestedPrice(${index})">Use</button>
+          <span class="calc-value" id="suggestedPrice-${key}">${suggested ? formatMoney(suggested) : '—'}</span>
+          <button class="btn btn-secondary suggest-btn" onclick="useSuggestedPriceByKey(${encodedKeyJson})">Use</button>
         </div>
       </td>
       <td>
-        <input class="cost-input" id="product_price-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.product_price)}" oninput="updateRowCalc(${index})"/>
+        <input class="cost-input" id="product_price-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.product_price)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
-      <td><span class="calc-value" id="netProfit-${index}" style="color:${calc.netProfit >= 0 ? '#1cc88a' : '#e74a3b'}">${formatMoney(calc.netProfit)}</span></td>
+      <td><span class="calc-value" id="netProfit-${key}" style="color:${calc.netProfit >= 0 ? '#1cc88a' : '#e74a3b'}">${formatMoney(calc.netProfit)}</span></td>
       <td>
-        <button class="btn btn-primary save-btn" id="save-${index}" onclick='saveRow(${JSON.stringify(index)}, ${JSON.stringify(encodeURIComponent(row.variant_key))})'>Save</button>
+        <button class="btn btn-primary save-btn" id="save-${key}" onclick="saveRow(${encodedKeyJson})">Save</button>
       </td>
     </tr>
   `;
@@ -542,11 +576,12 @@ function darazPriceCell(row) {
   `;
 }
 
-function shopifyMatchCell(row, index) {
+function shopifyMatchCell(row, encodedKey) {
   const matchedPrice = num(row.matched_shopify_price);
   if (!matchedPrice) {
     return '<td><span class="calc-muted">No Shopify match</span></td>';
   }
+  const encodedKeyJson = JSON.stringify(encodedKey);
   return `
     <td>
       <div class="match-card">
@@ -554,56 +589,57 @@ function shopifyMatchCell(row, index) {
         <span class="calc-muted">${escapeHtml(row.match_reason || 'Match')}${row.matched_shopify_sku ? ` - ${escapeHtml(row.matched_shopify_sku)}` : ''}</span>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <span class="calc-value">${formatMoney(matchedPrice)}</span>
-          <button class="btn btn-secondary suggest-btn" onclick="useMatchedShopifyPrice(${index})">Use</button>
+          <button class="btn btn-secondary suggest-btn" onclick="useMatchedShopifyPriceByKey(${encodedKeyJson})">Use</button>
         </div>
       </div>
     </td>
   `;
 }
 
-function updateRowCalc(index) {
-  const rows = getFilteredRows();
-  const row = rows[index];
+function updateRowCalcByKey(encodedKey) {
+  const row = findRowByEncodedKey(encodedKey);
   if (!row) return;
+  const key = rowDomKey(row);
   beansPrice = num(document.getElementById('beansPriceInput')?.value || beansPrice);
-  const calc = rowCalc(row, index);
+  const calc = rowCalcByKey(row);
   const suggested = suggestedPrice(calc.netCost);
-  document.getElementById(`beansValue-${index}`).textContent = formatMoney(calc.beansValue);
-  document.getElementById(`netCost-${index}`).textContent = formatMoney(calc.netCost);
-  document.getElementById(`suggestedPrice-${index}`).textContent = suggested ? formatMoney(suggested) : '—';
-  const profitEl = document.getElementById(`netProfit-${index}`);
+  document.getElementById(`beansValue-${key}`).textContent = formatMoney(calc.beansValue);
+  document.getElementById(`netCost-${key}`).textContent = formatMoney(calc.netCost);
+  document.getElementById(`suggestedPrice-${key}`).textContent = suggested ? formatMoney(suggested) : '—';
+  const profitEl = document.getElementById(`netProfit-${key}`);
   profitEl.textContent = formatMoney(calc.netProfit);
   profitEl.style.color = calc.netProfit >= 0 ? '#1cc88a' : '#e74a3b';
 }
 
-function useSuggestedPrice(index) {
-  const rows = getFilteredRows();
-  const row = rows[index];
+function useSuggestedPriceByKey(encodedKey) {
+  const row = findRowByEncodedKey(encodedKey);
   if (!row) return;
-  const calc = rowCalc(row, index);
+  const key = rowDomKey(row);
+  const calc = rowCalcByKey(row);
   const price = suggestedPrice(calc.netCost);
-  const priceInput = document.getElementById(`product_price-${index}`);
+  const priceInput = document.getElementById(`product_price-${key}`);
   if (!price || !priceInput) return;
   priceInput.value = formatMoneyInput(price);
   row.product_price = price;
-  updateRowCalc(index);
+  updateRowCalcByKey(encodedKey);
 }
 
-function useMatchedShopifyPrice(index) {
-  const rows = getFilteredRows();
-  const row = rows[index];
+function useMatchedShopifyPriceByKey(encodedKey) {
+  const row = findRowByEncodedKey(encodedKey);
   if (!row) return;
+  const key = rowDomKey(row);
   const matchedPrice = num(row.matched_shopify_price);
-  const priceInput = document.getElementById(`product_price-${index}`);
+  const priceInput = document.getElementById(`product_price-${key}`);
   if (!matchedPrice || !priceInput) return;
   priceInput.value = formatMoneyInput(matchedPrice);
   row.product_price = matchedPrice;
-  updateRowCalc(index);
+  updateRowCalcByKey(encodedKey);
 }
 
-function readRowInputsIntoModel(row, index) {
+function readRowInputsIntoModel(row) {
+  const key = rowDomKey(row);
   bulkFields.forEach((field) => {
-    const el = document.getElementById(`${field}-${index}`);
+    const el = document.getElementById(`${field}-${key}`);
     if (el) row[field] = Number(el.value || 0);
   });
   const secondaryName = row.secondary_name || '';
@@ -644,14 +680,14 @@ async function saveCostRow(row) {
   return data;
 }
 
-async function saveRow(index, encodedKey) {
-  const row = catalogRows.find(entry => encodeURIComponent(entry.variant_key) === encodedKey);
+async function saveRow(encodedKey) {
+  const row = findRowByEncodedKey(encodedKey);
   if (!row) return;
-  const btn = document.getElementById(`save-${index}`);
+  const btn = document.getElementById(`save-${rowDomKey(row)}`);
   btn.disabled = true;
   btn.textContent = 'Saving…';
   try {
-    readRowInputsIntoModel(row, index);
+    readRowInputsIntoModel(row);
     await saveCostRow(row);
     updateCatalogKPIs();
     showToast('Price and cost saved');
@@ -725,6 +761,7 @@ async function saveSelectedProductRows() {
   try {
     for (let i = 0; i < rows.length; i += 1) {
       btn.textContent = `Saving ${i + 1}/${rows.length}`;
+      readRowInputsIntoModel(rows[i]);
       await saveCostRow(rows[i]);
     }
     updateCatalogKPIs();

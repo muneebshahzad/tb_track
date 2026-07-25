@@ -2040,6 +2040,36 @@ def update_shopify_variant_price(variant_id, price):
         raise RuntimeError('Shopify price update failed.')
 
 
+def update_daraz_sku_price(item_id, sku_id, seller_sku, price):
+    item_id = str(item_id or '').strip()
+    sku_id = str(sku_id or '').strip()
+    seller_sku = str(seller_sku or '').strip()
+    if not item_id or not sku_id or not seller_sku:
+        raise RuntimeError('Daraz item id, sku id, and seller sku are required to update price.')
+
+    req = lazop.LazopRequest('/product/price_quantity/update', 'POST')
+    payload = {
+        'Request': {
+            'Product': {
+                'Skus': {
+                    'Sku': {
+                        'ItemId': item_id,
+                        'SkuId': sku_id,
+                        'SellerSku': seller_sku,
+                        'Price': f"{money_float(price):.2f}",
+                    }
+                }
+            }
+        }
+    }
+    req.add_api_param('payload', json.dumps(payload))
+    response = get_daraz_client().execute(req, get_access_token())
+    body = response.body or {}
+    if str(body.get('code') or response.code or '') not in {'', '0'}:
+        raise RuntimeError(body.get('message') or response.message or 'Daraz price update failed.')
+    return body
+
+
 def parse_iso_day(value: str):
     if not value:
         return None
@@ -3544,6 +3574,8 @@ def costing_save_api():
     try:
         if source == COST_SOURCE_SHOPIFY and source_variant_id:
             update_shopify_variant_price(source_variant_id, product_price)
+        if source == COST_SOURCE_DARAZ:
+            update_daraz_sku_price(source_product_id, source_variant_id, sku, product_price)
 
         success = upsert_product_cost(
             source=source,

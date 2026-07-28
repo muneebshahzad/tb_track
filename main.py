@@ -4033,6 +4033,9 @@ def exhibition_create_order_api():
     if not product_name:
         return jsonify({'ok': False, 'error': 'Product name is required.'}), 400
     delivery_method = payload.get('delivery_method') if payload.get('delivery_method') in EXHIBITION_DELIVERY_METHODS else 'Pickup from Expo'
+    delivery_address = str(payload.get('delivery_address') or '').strip()
+    if delivery_method == 'Home Delivery' and not delivery_address:
+        return jsonify({'ok': False, 'error': 'Delivery address is required for home delivery.'}), 400
     payment_method = payload.get('payment_method') if payload.get('payment_method') in EXHIBITION_PAYMENT_METHODS else 'Cash'
     payment_split = payload.get('payment_split') if payload.get('payment_split') in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
     amounts = calculate_exhibition_order_amounts(
@@ -4057,6 +4060,7 @@ def exhibition_create_order_api():
         unit_price=amounts['unit_price'],
         discount=amounts['discount'],
         delivery_method=delivery_method,
+        delivery_address=delivery_address if delivery_method == 'Home Delivery' else '',
         delivery_charges=amounts['delivery_charges'],
         payment_method=payment_method,
         payment_split=payment_split,

@@ -133,6 +133,10 @@
             <label class="ex-label" for="deliveryCharges">Delivery Charges</label>
             <input class="ex-input" id="deliveryCharges" type="number" min="0" step="1" value="0">
           </div>
+          <div class="ex-field full" id="deliveryAddressWrap" style="display:none;">
+            <label class="ex-label" for="deliveryAddress">Delivery Address</label>
+            <textarea class="ex-textarea" id="deliveryAddress" placeholder="Required for home delivery"></textarea>
+          </div>
           <div class="ex-field">
             <label class="ex-label" for="paymentMethod">Payment Method</label>
             <select class="ex-select" id="paymentMethod">
@@ -287,12 +291,16 @@ function updateTotals() {
   const discount = Math.max(Number(document.getElementById('discount').value || 0), 0);
   const method = document.getElementById('deliveryMethod').value;
   const deliveryInput = document.getElementById('deliveryCharges');
+  const addressInput = document.getElementById('deliveryAddress');
   if (pickupMethods.has(method)) {
     deliveryInput.value = 0;
     deliveryInput.disabled = true;
+    addressInput.value = '';
   } else {
     deliveryInput.disabled = false;
   }
+  document.getElementById('deliveryAddressWrap').style.display = method === 'Home Delivery' ? 'flex' : 'none';
+  addressInput.required = method === 'Home Delivery';
   const delivery = pickupMethods.has(method) ? 0 : Number(deliveryInput.value || 0);
   const total = Math.max((qty * price) - discount + delivery, 0);
   const split = document.getElementById('paymentSplit').value;
@@ -328,6 +336,7 @@ document.getElementById('orderForm').addEventListener('submit', async event => {
     unit_price: document.getElementById('unitPrice').value,
     discount: document.getElementById('discount').value,
     delivery_method: document.getElementById('deliveryMethod').value,
+    delivery_address: document.getElementById('deliveryAddress').value.trim(),
     delivery_charges: document.getElementById('deliveryCharges').value,
     payment_method: document.getElementById('paymentMethod').value,
     payment_split: document.getElementById('paymentSplit').value,

@@ -52,6 +52,7 @@
     <div class="row"><span>Unit Price</span><strong>Rs {{ order.unit_price | format_number }}</strong></div>
     <div class="row"><span>Discount</span><strong>Rs {{ order.discount | format_number }}</strong></div>
     <div class="row"><span>Delivery</span><strong>{{ order.delivery_method }}</strong></div>
+    {% if order.delivery_address %}<div class="row"><span>Address</span><strong>{{ order.delivery_address }}</strong></div>{% endif %}
     <div class="row"><span>Delivery Charges</span><strong>Rs {{ order.delivery_charges | format_number }}</strong></div>
 
     <div class="line"></div>

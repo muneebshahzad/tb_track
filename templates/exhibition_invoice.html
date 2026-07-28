@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ order.order_number }} Invoice</title>
+  <title>{{ invoice.order_number }} Invoice</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #eef1f7; font-family: Arial, sans-serif; color: #111; }
@@ -36,36 +36,33 @@
     <div class="center">
       <div class="brand">Tick Bags</div>
       <div class="small">Exhibition Order Invoice</div>
-      <div class="small muted">{{ order.exhibition_name or 'Exhibition' }}</div>
-      {% if order.exhibition_location %}<div class="small muted">{{ order.exhibition_location }}</div>{% endif %}
+      <div class="small muted">{{ invoice.exhibition_name }}</div>
+      {% if invoice.exhibition_location %}<div class="small muted">{{ invoice.exhibition_location }}</div>{% endif %}
     </div>
 
     <div class="line"></div>
-    <div class="row"><span>Invoice</span><strong>{{ order.order_number }}</strong></div>
-    <div class="row"><span>Date</span><strong>{{ order.created_at.strftime('%d %b %Y %I:%M %p') if order.created_at else '' }}</strong></div>
-    {% if order.customer_name %}<div class="row"><span>Customer</span><strong>{{ order.customer_name }}</strong></div>{% endif %}
-    {% if order.customer_phone %}<div class="row"><span>Phone</span><strong>{{ order.customer_phone }}</strong></div>{% endif %}
+    <div class="row"><span>Invoice</span><strong>{{ invoice.order_number }}</strong></div>
+    <div class="row"><span>Date</span><strong>{{ invoice.created_display }}</strong></div>
+    {% if invoice.customer_name %}<div class="row"><span>Customer</span><strong>{{ invoice.customer_name }}</strong></div>{% endif %}
+    {% if invoice.customer_phone %}<div class="row"><span>Phone</span><strong>{{ invoice.customer_phone }}</strong></div>{% endif %}
 
     <div class="line"></div>
-    <div class="item">{{ order.product_name }}</div>
-    <div class="row"><span>Qty</span><strong>{{ order.quantity }}</strong></div>
-    <div class="row"><span>Unit Price</span><strong>Rs {{ order.unit_price | format_number }}</strong></div>
-    <div class="row"><span>Discount</span><strong>Rs {{ order.discount | format_number }}</strong></div>
-    <div class="row"><span>Delivery</span><strong>{{ order.delivery_method }}</strong></div>
-    {% if order.delivery_address %}<div class="row"><span>Address</span><strong>{{ order.delivery_address }}</strong></div>{% endif %}
-    <div class="row"><span>Delivery Charges</span><strong>Rs {{ order.delivery_charges | format_number }}</strong></div>
+    <div class="item">{{ invoice.product_name }}</div>
+    <div class="row"><span>Qty</span><strong>{{ invoice.quantity }}</strong></div>
+    <div class="row"><span>Unit Price</span><strong>{{ invoice.unit_price }}</strong></div>
+    <div class="row"><span>Discount</span><strong>{{ invoice.discount }}</strong></div>
+    <div class="row"><span>Delivery</span><strong>{{ invoice.delivery_method }}</strong></div>
+    {% if invoice.delivery_address %}<div class="row"><span>Address</span><strong>{{ invoice.delivery_address }}</strong></div>{% endif %}
+    <div class="row"><span>Delivery Charges</span><strong>{{ invoice.delivery_charges }}</strong></div>
 
     <div class="line"></div>
-    <div class="row total"><span>Total</span><strong>Rs {{ order.total_amount | format_number }}</strong></div>
-    <div class="row"><span>Paid</span><strong>Rs {{ order.paid_amount | format_number }}</strong></div>
-    <div class="row"><span>Balance</span><strong>Rs {{ (order.total_amount - order.paid_amount) | format_number }}</strong></div>
-    <div class="row"><span>Payment</span><strong>{{ order.payment_method }} · {{ order.payment_split }}</strong></div>
+    <div class="row total"><span>Total</span><strong>{{ invoice.total_amount }}</strong></div>
+    <div class="row"><span>Paid</span><strong>{{ invoice.paid_amount }}</strong></div>
+    <div class="row"><span>Balance</span><strong>{{ invoice.balance }}</strong></div>
+    <div class="row"><span>Payment</span><strong>{{ invoice.payment_label }}</strong></div>
 
     <div class="line"></div>
     <div class="center small">Thank you for shopping with Tick Bags.</div>
   </main>
-  <script>
-    setTimeout(() => window.print(), 450);
-  </script>
 </body>
 </html>

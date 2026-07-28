@@ -4032,7 +4032,33 @@ def exhibition_invoice_page(order_id):
     order = get_exhibition_order(order_id)
     if not order:
         return "Invoice not found", 404
-    return render_template('exhibition_invoice.html', order=order)
+    created_at = order.get('created_at')
+    if hasattr(created_at, 'strftime'):
+        created_display = created_at.strftime('%d %b %Y %I:%M %p')
+    else:
+        created_display = str(created_at or '')
+    total_amount = money_decimal(order.get('total_amount'))
+    paid_amount = money_decimal(order.get('paid_amount'))
+    invoice = {
+        'order_number': order.get('order_number') or '',
+        'exhibition_name': order.get('exhibition_name') or 'Exhibition',
+        'exhibition_location': order.get('exhibition_location') or '',
+        'created_display': created_display,
+        'customer_name': order.get('customer_name') or '',
+        'customer_phone': order.get('customer_phone') or '',
+        'product_name': order.get('product_name') or '',
+        'quantity': int(order.get('quantity') or 1),
+        'unit_price': money_format(order.get('unit_price')),
+        'discount': money_format(order.get('discount')),
+        'delivery_method': order.get('delivery_method') or '',
+        'delivery_address': order.get('delivery_address') or '',
+        'delivery_charges': money_format(order.get('delivery_charges')),
+        'total_amount': money_format(total_amount),
+        'paid_amount': money_format(paid_amount),
+        'balance': money_format(total_amount - paid_amount),
+        'payment_label': f"{order.get('payment_method') or ''} · {order.get('payment_split') or ''}".strip(' ·'),
+    }
+    return render_template('exhibition_invoice.html', invoice=invoice)
 
 
 @app.route('/api/exhibition/bootstrap')

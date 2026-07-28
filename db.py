@@ -1,4 +1,5 @@
 import os
+from datetime import date, datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -66,6 +67,63 @@ def _ensure_product_costs_table(cur):
             ALTER TABLE product_costs
             ADD COLUMN IF NOT EXISTS {column} NUMERIC(12, 2) NOT NULL DEFAULT 0
         """)
+
+
+def _ensure_exhibition_tables(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS exhibitions (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            location TEXT NOT NULL DEFAULT '',
+            starts_on DATE,
+            ends_on DATE,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS exhibition_orders (
+            id BIGSERIAL PRIMARY KEY,
+            exhibition_id BIGINT REFERENCES exhibitions(id) ON DELETE SET NULL,
+            order_number TEXT NOT NULL UNIQUE,
+            customer_name TEXT NOT NULL DEFAULT '',
+            customer_phone TEXT NOT NULL DEFAULT '',
+            product_name TEXT NOT NULL,
+            shopify_product_id TEXT NOT NULL DEFAULT '',
+            shopify_variant_id TEXT NOT NULL DEFAULT '',
+            sku TEXT NOT NULL DEFAULT '',
+            quantity INTEGER NOT NULL DEFAULT 1,
+            unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            discount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            delivery_method TEXT NOT NULL DEFAULT 'Pickup from Expo',
+            delivery_charges NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            payment_method TEXT NOT NULL DEFAULT 'Cash',
+            payment_split TEXT NOT NULL DEFAULT '100% Paid',
+            custom_paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_exhibition_orders_exhibition
+        ON exhibition_orders (exhibition_id, created_at DESC)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS exhibition_expenses (
+            id BIGSERIAL PRIMARY KEY,
+            exhibition_id BIGINT REFERENCES exhibitions(id) ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            expense_date DATE DEFAULT CURRENT_DATE,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_exhibition_expenses_exhibition
+        ON exhibition_expenses (exhibition_id, expense_date DESC, id DESC)
+    """)
 
 
 def _ensure_tickbot_auto_reply_jobs_table(cur):
@@ -395,6 +453,7 @@ def init_db():
                 """)
                 _ensure_app_settings_table(cur)
                 _ensure_product_costs_table(cur)
+                _ensure_exhibition_tables(cur)
                 _ensure_tickbot_auto_reply_jobs_table(cur)
                 _ensure_whatsapp_tables(cur)
             conn.commit()
@@ -526,6 +585,222 @@ def get_product_cost_lookup(source: str = "") -> dict:
         key = row['variant_key'] if source else f"{row['source']}::{row['variant_key']}"
         lookup[key] = row
     return lookup
+
+
+def _date_or_none(value):
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def list_exhibitions() -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    SELECT id, name, location, starts_on, ends_on, notes, created_at
+                    FROM exhibitions
+                    ORDER BY COALESCE(starts_on, created_at::date) DESC, id DESC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+                _set_last_db_error("")
+                return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_exhibitions error: {e}")
+        return []
+
+
+def create_exhibition(name: str, location: str = "", starts_on=None, ends_on=None, notes: str = "") -> dict | None:
+    name = str(name or "").strip()
+    if not name:
+        return None
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    INSERT INTO exhibitions (name, location, starts_on, ends_on, notes)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id, name, location, starts_on, ends_on, notes, created_at
+                """, (name, location or "", _date_or_none(starts_on), _date_or_none(ends_on), notes or ""))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_exhibition error: {e}")
+        return None
+
+
+def list_exhibition_orders(exhibition_id=None, limit: int | None = None) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                params = []
+                where = ""
+                if exhibition_id:
+                    where = "WHERE o.exhibition_id = %s"
+                    params.append(exhibition_id)
+                limit_sql = ""
+                if limit:
+                    limit_sql = "LIMIT %s"
+                    params.append(limit)
+                cur.execute(f"""
+                    SELECT o.*, e.name AS exhibition_name
+                    FROM exhibition_orders o
+                    LEFT JOIN exhibitions e ON e.id = o.exhibition_id
+                    {where}
+                    ORDER BY o.created_at DESC, o.id DESC
+                    {limit_sql}
+                """, tuple(params))
+                rows = [dict(row) for row in cur.fetchall()]
+                _set_last_db_error("")
+                return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_exhibition_orders error: {e}")
+        return []
+
+
+def get_exhibition_order(order_id) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    SELECT o.*, e.name AS exhibition_name, e.location AS exhibition_location
+                    FROM exhibition_orders o
+                    LEFT JOIN exhibitions e ON e.id = o.exhibition_id
+                    WHERE o.id = %s
+                """, (order_id,))
+                row = cur.fetchone()
+                _set_last_db_error("")
+                return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_exhibition_order error: {e}")
+        return None
+
+
+def create_exhibition_order(
+    exhibition_id,
+    order_number: str,
+    customer_name: str,
+    customer_phone: str,
+    product_name: str,
+    shopify_product_id: str = "",
+    shopify_variant_id: str = "",
+    sku: str = "",
+    quantity=1,
+    unit_price=0,
+    discount=0,
+    delivery_method: str = "Pickup from Expo",
+    delivery_charges=0,
+    payment_method: str = "Cash",
+    payment_split: str = "100% Paid",
+    custom_paid_amount=0,
+    total_amount=0,
+    paid_amount=0,
+) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    INSERT INTO exhibition_orders (
+                        exhibition_id, order_number, customer_name, customer_phone,
+                        product_name, shopify_product_id, shopify_variant_id, sku,
+                        quantity, unit_price, discount, delivery_method, delivery_charges,
+                        payment_method, payment_split, custom_paid_amount, total_amount, paid_amount
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """, (
+                    exhibition_id or None,
+                    order_number,
+                    customer_name or "",
+                    customer_phone or "",
+                    product_name,
+                    shopify_product_id or "",
+                    shopify_variant_id or "",
+                    sku or "",
+                    int(quantity or 1),
+                    unit_price,
+                    discount,
+                    delivery_method or "Pickup from Expo",
+                    delivery_charges,
+                    payment_method or "Cash",
+                    payment_split or "100% Paid",
+                    custom_paid_amount,
+                    total_amount,
+                    paid_amount,
+                ))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_exhibition_order error: {e}")
+        return None
+
+
+def list_exhibition_expenses(exhibition_id=None) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                params = []
+                where = ""
+                if exhibition_id:
+                    where = "WHERE x.exhibition_id = %s"
+                    params.append(exhibition_id)
+                cur.execute(f"""
+                    SELECT x.*, e.name AS exhibition_name
+                    FROM exhibition_expenses x
+                    LEFT JOIN exhibitions e ON e.id = x.exhibition_id
+                    {where}
+                    ORDER BY x.expense_date DESC, x.id DESC
+                """, tuple(params))
+                rows = [dict(row) for row in cur.fetchall()]
+                _set_last_db_error("")
+                return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_exhibition_expenses error: {e}")
+        return []
+
+
+def create_exhibition_expense(exhibition_id, label: str, amount=0, expense_date=None, notes: str = "") -> dict | None:
+    label = str(label or "").strip()
+    if not exhibition_id or not label:
+        return None
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    INSERT INTO exhibition_expenses (exhibition_id, label, amount, expense_date, notes)
+                    VALUES (%s, %s, %s, COALESCE(%s, CURRENT_DATE), %s)
+                    RETURNING *
+                """, (exhibition_id, label, amount, _date_or_none(expense_date), notes or ""))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_exhibition_expense error: {e}")
+        return None
 
 
 def upsert_product_cost(

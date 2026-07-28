@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+{% block title %}Exhibition Portal{% endblock %}
+{% block content %}
+<style>
+  .ex-wrap { height: 100%; overflow: auto; background: #f6f7fb; }
+  .ex-topbar { height: 56px; background: #fff; border-bottom: 1px solid #e3e6f0; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; gap: 16px; }
+  .ex-title { font-size: 18px; font-weight: 800; color: #30313d; }
+  .ex-subtitle { font-size: 13px; color: #858796; font-weight: 500; }
+  .ex-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .ex-page { padding: 18px 24px 28px; display: grid; grid-template-columns: minmax(520px, 1fr) 360px; gap: 18px; }
+  .ex-panel { background: #fff; border: 1px solid #e0e5f2; border-radius: 10px; box-shadow: 0 2px 8px rgba(23, 35, 71, 0.05); overflow: hidden; }
+  .ex-panel-head { padding: 16px 18px; border-bottom: 1px solid #e9edf7; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .ex-panel-title { font-size: 15px; font-weight: 800; color: #30313d; }
+  .ex-grid { padding: 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .ex-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .ex-field.full { grid-column: 1 / -1; }
+  .ex-label { color: #858796; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+  .ex-input, .ex-select, .ex-textarea { width: 100%; border: 1px solid #d9e0ef; border-radius: 8px; padding: 10px 12px; font: 600 14px 'DM Sans', sans-serif; color: #30313d; background: #fff; outline: none; }
+  .ex-input:focus, .ex-select:focus, .ex-textarea:focus { border-color: #4e73df; box-shadow: 0 0 0 3px rgba(78,115,223,0.12); }
+  .ex-textarea { min-height: 78px; resize: vertical; }
+  .ex-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 0 18px 18px; }
+  .ex-metric { background: #f8f9fc; border: 1px solid #e3e6f0; border-radius: 8px; padding: 12px; }
+  .ex-metric-label { font-size: 10px; color: #858796; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; }
+  .ex-metric-value { font-size: 18px; font-weight: 900; color: #30313d; }
+  .ex-row { padding: 14px 16px; border-bottom: 1px solid #edf0f7; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
+  .ex-row:last-child { border-bottom: none; }
+  .ex-row-title { font-size: 14px; font-weight: 800; color: #30313d; }
+  .ex-row-meta { margin-top: 3px; font-size: 12px; color: #858796; }
+  .ex-total { text-align: right; font-size: 15px; font-weight: 900; color: #30313d; }
+  .ex-muted { color: #858796; font-size: 13px; }
+  .ex-product-preview { display: flex; gap: 12px; align-items: center; padding: 12px; background: #f8f9fc; border: 1px solid #e3e6f0; border-radius: 8px; }
+  .ex-product-preview img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; background: #eef1f8; flex-shrink: 0; }
+  .ex-product-name { font-size: 14px; font-weight: 800; color: #30313d; }
+  .ex-product-meta { font-size: 12px; color: #858796; margin-top: 3px; }
+  .ex-create-row { padding: 0 18px 18px; display: flex; justify-content: flex-end; }
+  .ex-mini-form { display: none; padding: 0 18px 18px; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+  .ex-mini-form.open { display: grid; }
+  @media (max-width: 1100px) {
+    .ex-page { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 720px) {
+    .ex-topbar { height: auto; align-items: flex-start; flex-direction: column; padding: 14px; }
+    .ex-page { padding: 12px; }
+    .ex-grid, .ex-summary { grid-template-columns: 1fr; }
+    .ex-mini-form.open { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="ex-wrap">
+  <div class="ex-topbar">
+    <div>
+      <div class="ex-title">Exhibition Portal</div>
+      <div class="ex-subtitle">Create expo orders and print thermal invoices</div>
+    </div>
+    <div class="ex-actions">
+      <a class="btn btn-outline" href="/exhibition/accounts">Accounts</a>
+      <button class="btn btn-primary" type="button" onclick="toggleExhibitionForm()">New Exhibition</button>
+    </div>
+  </div>
+
+  <div class="ex-page">
+    <section class="ex-panel">
+      <div class="ex-panel-head">
+        <div class="ex-panel-title">Add Order</div>
+        <div class="ex-muted" id="loadState">Loading Shopify products...</div>
+      </div>
+
+      <div class="ex-mini-form" id="exhibitionForm">
+        <div class="ex-field">
+          <label class="ex-label" for="newExhibitionName">Exhibition</label>
+          <input class="ex-input" id="newExhibitionName" placeholder="Lahore Expo 4,5,6 Aug 2026">
+        </div>
+        <div class="ex-field">
+          <label class="ex-label" for="newExhibitionLocation">Location</label>
+          <input class="ex-input" id="newExhibitionLocation" placeholder="Lahore Expo">
+        </div>
+        <button class="btn btn-success" type="button" onclick="createExhibition()">Create</button>
+      </div>
+
+      <form id="orderForm">
+        <div class="ex-grid">
+          <div class="ex-field">
+            <label class="ex-label" for="exhibitionSelect">Exhibition</label>
+            <select class="ex-select" id="exhibitionSelect" required></select>
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="productPicker">Shopify Product</label>
+            <input class="ex-input" id="productPicker" list="productOptions" placeholder="Search product or SKU..." autocomplete="off">
+            <datalist id="productOptions"></datalist>
+          </div>
+          <div class="ex-field full" id="productPreviewWrap" style="display:none;">
+            <div class="ex-product-preview">
+              <img id="productImage" alt="">
+              <div>
+                <div class="ex-product-name" id="productPreviewName"></div>
+                <div class="ex-product-meta" id="productPreviewMeta"></div>
+              </div>
+            </div>
+          </div>
+          <div class="ex-field full">
+            <label class="ex-label" for="productName">Product Name</label>
+            <input class="ex-input" id="productName" required>
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="customerName">Customer Name</label>
+            <input class="ex-input" id="customerName" placeholder="Optional">
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="customerPhone">Customer Phone</label>
+            <input class="ex-input" id="customerPhone" placeholder="Optional">
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="unitPrice">Price</label>
+            <input class="ex-input" id="unitPrice" type="number" min="0" step="1" value="0">
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="quantity">Quantity</label>
+            <input class="ex-input" id="quantity" type="number" min="1" step="1" value="1">
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="discount">Discount</label>
+            <input class="ex-input" id="discount" type="number" min="0" step="1" value="0">
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="deliveryMethod">Delivery Method</label>
+            <select class="ex-select" id="deliveryMethod">
+              <option>Pickup from Expo</option>
+              <option>Home Delivery</option>
+              <option>Pickup from Warehouse</option>
+            </select>
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="deliveryCharges">Delivery Charges</label>
+            <input class="ex-input" id="deliveryCharges" type="number" min="0" step="1" value="0">
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="paymentMethod">Payment Method</label>
+            <select class="ex-select" id="paymentMethod">
+              <option>Cash</option>
+              <option>Bank</option>
+            </select>
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="paymentSplit">Payment Split</label>
+            <select class="ex-select" id="paymentSplit">
+              <option>100% Paid</option>
+              <option>50% Paid</option>
+              <option>Custom Amount</option>
+            </select>
+          </div>
+          <div class="ex-field" id="customPaidWrap" style="display:none;">
+            <label class="ex-label" for="customPaidAmount">Custom Paid Amount</label>
+            <input class="ex-input" id="customPaidAmount" type="number" min="0" step="1" value="0">
+          </div>
+        </div>
+        <div class="ex-summary">
+          <div class="ex-metric"><div class="ex-metric-label">Subtotal</div><div class="ex-metric-value" id="subtotalValue">Rs 0</div></div>
+          <div class="ex-metric"><div class="ex-metric-label">Total</div><div class="ex-metric-value" id="totalValue">Rs 0</div></div>
+          <div class="ex-metric"><div class="ex-metric-label">Paid</div><div class="ex-metric-value" id="paidValue">Rs 0</div></div>
+        </div>
+        <div class="ex-create-row">
+          <button class="btn btn-success" id="createOrderBtn" type="submit">Create Order</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="ex-panel">
+      <div class="ex-panel-head">
+        <div class="ex-panel-title">Recent Exhibition Orders</div>
+        <button class="btn btn-outline" type="button" onclick="loadBootstrap()">Refresh</button>
+      </div>
+      <div id="recentOrders"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+let products = [];
+let selectedProduct = null;
+const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
+const pickupMethods = new Set(['Pickup from Expo', 'Pickup from Warehouse']);
+
+function toggleExhibitionForm() {
+  document.getElementById('exhibitionForm').classList.toggle('open');
+}
+
+function fillExhibitions(exhibitions) {
+  const select = document.getElementById('exhibitionSelect');
+  select.innerHTML = '';
+  if (!exhibitions.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Create an exhibition first';
+    select.appendChild(opt);
+    return;
+  }
+  exhibitions.forEach(ex => {
+    const opt = document.createElement('option');
+    opt.value = ex.id;
+    opt.textContent = ex.name;
+    select.appendChild(opt);
+  });
+}
+
+function fillProducts(items) {
+  products = items || [];
+  const list = document.getElementById('productOptions');
+  list.innerHTML = '';
+  products.forEach((product, index) => {
+    const opt = document.createElement('option');
+    opt.value = `${product.name} | ${product.sku || product.shopify_variant_id || index}`;
+    opt.dataset.index = index;
+    list.appendChild(opt);
+  });
+}
+
+function renderRecentOrders(rows) {
+  const box = document.getElementById('recentOrders');
+  if (!rows.length) {
+    box.innerHTML = '<div class="ex-row"><div class="ex-muted">No exhibition orders yet.</div></div>';
+    return;
+  }
+  box.innerHTML = rows.map(row => `
+    <div class="ex-row">
+      <div>
+        <div class="ex-row-title">${row.order_number} · ${row.product_name}</div>
+        <div class="ex-row-meta">${row.exhibition_name || 'No exhibition'} · ${row.payment_method} · Paid ${money(row.paid_amount)}</div>
+      </div>
+      <div class="ex-total">
+        ${money(row.total_amount)}
+        <div><a class="btn btn-outline" href="/exhibition/invoice/${row.id}" target="_blank" style="margin-top:6px;">Invoice</a></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadBootstrap() {
+  document.getElementById('loadState').textContent = 'Loading Shopify products...';
+  const res = await fetch('/api/exhibition/bootstrap');
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Could not load exhibition data.');
+  fillExhibitions(data.exhibitions || []);
+  fillProducts(data.products || []);
+  renderRecentOrders(data.recent_orders || []);
+  document.getElementById('loadState').textContent = `${(data.products || []).length} Shopify variants loaded`;
+}
+
+async function createExhibition() {
+  const name = document.getElementById('newExhibitionName').value.trim();
+  if (!name) return showToast('Add an exhibition name.');
+  const payload = {
+    name,
+    location: document.getElementById('newExhibitionLocation').value.trim()
+  };
+  const res = await fetch('/api/exhibition/exhibitions', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not create exhibition.');
+  await loadBootstrap();
+  document.getElementById('exhibitionSelect').value = data.exhibition.id;
+  document.getElementById('newExhibitionName').value = '';
+  document.getElementById('newExhibitionLocation').value = '';
+  document.getElementById('exhibitionForm').classList.remove('open');
+  showToast('Exhibition created.');
+}
+
+function pickProduct() {
+  const value = document.getElementById('productPicker').value;
+  const option = [...document.querySelectorAll('#productOptions option')].find(opt => opt.value === value);
+  selectedProduct = option ? products[Number(option.dataset.index)] : null;
+  if (!selectedProduct) return;
+  document.getElementById('productName').value = selectedProduct.name || '';
+  document.getElementById('unitPrice').value = Math.round(Number(selectedProduct.price || 0));
+  document.getElementById('productPreviewWrap').style.display = 'block';
+  document.getElementById('productImage').src = selectedProduct.image || '';
+  document.getElementById('productPreviewName').textContent = selectedProduct.name || '';
+  document.getElementById('productPreviewMeta').textContent = `SKU ${selectedProduct.sku || 'N/A'} · Cost ${money(selectedProduct.cost)}`;
+  updateTotals();
+}
+
+function updateTotals() {
+  const qty = Math.max(Number(document.getElementById('quantity').value || 1), 1);
+  const price = Number(document.getElementById('unitPrice').value || 0);
+  const discount = Math.max(Number(document.getElementById('discount').value || 0), 0);
+  const method = document.getElementById('deliveryMethod').value;
+  const deliveryInput = document.getElementById('deliveryCharges');
+  if (pickupMethods.has(method)) {
+    deliveryInput.value = 0;
+    deliveryInput.disabled = true;
+  } else {
+    deliveryInput.disabled = false;
+  }
+  const delivery = pickupMethods.has(method) ? 0 : Number(deliveryInput.value || 0);
+  const total = Math.max((qty * price) - discount + delivery, 0);
+  const split = document.getElementById('paymentSplit').value;
+  document.getElementById('customPaidWrap').style.display = split === 'Custom Amount' ? 'flex' : 'none';
+  let paid = total;
+  if (split === '50% Paid') paid = total * 0.5;
+  if (split === 'Custom Amount') paid = Math.min(Math.max(Number(document.getElementById('customPaidAmount').value || 0), 0), total);
+  document.getElementById('subtotalValue').textContent = money(qty * price);
+  document.getElementById('totalValue').textContent = money(total);
+  document.getElementById('paidValue').textContent = money(paid);
+}
+
+document.getElementById('productPicker').addEventListener('change', pickProduct);
+['unitPrice', 'quantity', 'discount', 'deliveryMethod', 'deliveryCharges', 'paymentSplit', 'customPaidAmount'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updateTotals);
+  document.getElementById(id).addEventListener('change', updateTotals);
+});
+
+document.getElementById('orderForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = document.getElementById('createOrderBtn');
+  button.disabled = true;
+  button.textContent = 'Creating...';
+  const payload = {
+    exhibition_id: document.getElementById('exhibitionSelect').value,
+    customer_name: document.getElementById('customerName').value.trim(),
+    customer_phone: document.getElementById('customerPhone').value.trim(),
+    product_name: document.getElementById('productName').value.trim(),
+    shopify_product_id: selectedProduct ? selectedProduct.shopify_product_id : '',
+    shopify_variant_id: selectedProduct ? selectedProduct.shopify_variant_id : '',
+    sku: selectedProduct ? selectedProduct.sku : '',
+    quantity: document.getElementById('quantity').value,
+    unit_price: document.getElementById('unitPrice').value,
+    discount: document.getElementById('discount').value,
+    delivery_method: document.getElementById('deliveryMethod').value,
+    delivery_charges: document.getElementById('deliveryCharges').value,
+    payment_method: document.getElementById('paymentMethod').value,
+    payment_split: document.getElementById('paymentSplit').value,
+    custom_paid_amount: document.getElementById('customPaidAmount').value
+  };
+  try {
+    const res = await fetch('/api/exhibition/orders', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not create order.');
+    window.open(data.invoice_url, '_blank');
+    document.getElementById('orderForm').reset();
+    selectedProduct = null;
+    document.getElementById('productPreviewWrap').style.display = 'none';
+    updateTotals();
+    await loadBootstrap();
+  } catch (err) {
+    showToast(err.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Create Order';
+  }
+});
+
+loadBootstrap().catch(err => {
+  document.getElementById('loadState').textContent = 'Could not load data';
+  showToast(err.message);
+});
+updateTotals();
+</script>
+{% endblock %}

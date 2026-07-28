@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Exhibition Accounts{% endblock %}
+{% block content %}
+<style>
+  .acc-wrap { height: 100%; overflow: auto; background: #f6f7fb; }
+  .acc-topbar { min-height: 56px; background: #fff; border-bottom: 1px solid #e3e6f0; display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; gap: 16px; }
+  .acc-title { font-size: 18px; font-weight: 900; color: #30313d; }
+  .acc-subtitle { font-size: 13px; color: #858796; font-weight: 500; }
+  .acc-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .acc-select, .acc-input { border: 1px solid #d9e0ef; border-radius: 8px; padding: 9px 12px; font: 600 13px 'DM Sans', sans-serif; color: #30313d; background: #fff; outline: none; }
+  .acc-page { padding: 18px 24px 28px; display: flex; flex-direction: column; gap: 18px; }
+  .acc-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+  .acc-stat { background: #fff; border: 1px solid #e0e5f2; border-radius: 10px; padding: 14px; box-shadow: 0 2px 8px rgba(23,35,71,0.05); min-width: 0; }
+  .acc-stat-label { color: #858796; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .acc-stat-value { color: #30313d; font-size: 20px; font-weight: 900; white-space: nowrap; }
+  .acc-panels { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; align-items: start; }
+  .acc-panel { background: #fff; border: 1px solid #e0e5f2; border-radius: 10px; box-shadow: 0 2px 8px rgba(23,35,71,0.05); overflow: hidden; }
+  .acc-panel-head { padding: 15px 18px; border-bottom: 1px solid #e9edf7; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .acc-panel-title { font-size: 15px; color: #30313d; font-weight: 900; }
+  .acc-table { width: 100%; border-collapse: collapse; }
+  .acc-table th { text-align: left; background: #f8f9fc; color: #858796; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding: 11px 14px; border-bottom: 1px solid #e3e6f0; }
+  .acc-table td { padding: 13px 14px; border-bottom: 1px solid #edf0f7; vertical-align: top; font-size: 13px; color: #30313d; }
+  .acc-table tr:last-child td { border-bottom: none; }
+  .acc-main { font-weight: 900; }
+  .acc-muted { color: #858796; margin-top: 3px; }
+  .acc-badge { display: inline-flex; border-radius: 99px; padding: 3px 8px; background: #eef2ff; color: #3150b7; font-size: 11px; font-weight: 800; }
+  .acc-badge.warn { background: #fff3cd; color: #856404; }
+  .acc-form { padding: 16px 18px; display: grid; gap: 12px; }
+  .acc-form-row { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
+  .acc-empty { padding: 18px; color: #858796; font-size: 13px; }
+  @media (max-width: 1250px) {
+    .acc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .acc-panels { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 720px) {
+    .acc-topbar { align-items: flex-start; flex-direction: column; padding: 14px; }
+    .acc-page { padding: 12px; }
+    .acc-stats { grid-template-columns: 1fr; }
+    .acc-form-row { grid-template-columns: 1fr; }
+    .acc-table { min-width: 860px; }
+    .acc-table-wrap { overflow-x: auto; }
+  }
+</style>
+
+<div class="acc-wrap">
+  <div class="acc-topbar">
+    <div>
+      <div class="acc-title">Exhibition Accounts</div>
+      <div class="acc-subtitle">Sales, expenses, product costs, and profit by exhibition</div>
+    </div>
+    <div class="acc-controls">
+      <select class="acc-select" id="exhibitionSelect" onchange="loadAccounts()"></select>
+      <a class="btn btn-outline" href="/exhibition">Add Order</a>
+    </div>
+  </div>
+
+  <div class="acc-page">
+    <section class="acc-stats">
+      <div class="acc-stat"><div class="acc-stat-label">Orders</div><div class="acc-stat-value" id="orderCount">0</div></div>
+      <div class="acc-stat"><div class="acc-stat-label">Total Sale</div><div class="acc-stat-value" id="totalSale">Rs 0</div></div>
+      <div class="acc-stat"><div class="acc-stat-label">Target Left</div><div class="acc-stat-value" id="targetLeft">Rs {{ target_sale | format_number }}</div></div>
+      <div class="acc-stat"><div class="acc-stat-label">Total Expense</div><div class="acc-stat-value" id="totalExpense">Rs 0</div></div>
+      <div class="acc-stat"><div class="acc-stat-label">Product Cost</div><div class="acc-stat-value" id="productCost">Rs 0</div></div>
+      <div class="acc-stat"><div class="acc-stat-label">Net Profit</div><div class="acc-stat-value" id="netProfit">Rs 0</div></div>
+    </section>
+
+    <div class="acc-panels">
+      <section class="acc-panel">
+        <div class="acc-panel-head">
+          <div class="acc-panel-title">Order Cost Review</div>
+          <button class="btn btn-outline" type="button" onclick="loadAccounts()">Refresh</button>
+        </div>
+        <div class="acc-table-wrap">
+          <table class="acc-table">
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Product</th>
+                <th>Sale</th>
+                <th>Cost Match</th>
+                <th>Product Cost</th>
+                <th>Profit</th>
+              </tr>
+            </thead>
+            <tbody id="ordersBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="acc-panel">
+        <div class="acc-panel-head">
+          <div class="acc-panel-title">Expenses</div>
+        </div>
+        <form class="acc-form" id="expenseForm">
+          <input class="acc-input" id="expenseLabel" placeholder="Expense title">
+          <div class="acc-form-row">
+            <input class="acc-input" id="expenseDate" type="date">
+            <input class="acc-input" id="expenseAmount" type="number" min="0" step="1" placeholder="Amount">
+          </div>
+          <input class="acc-input" id="expenseNotes" placeholder="Notes">
+          <button class="btn btn-success" type="submit">Add Expense</button>
+        </form>
+        <div id="expenseList"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
+
+function fillExhibitions(exhibitions) {
+  const select = document.getElementById('exhibitionSelect');
+  const current = select.value;
+  select.innerHTML = '';
+  exhibitions.forEach(ex => {
+    const opt = document.createElement('option');
+    opt.value = ex.id;
+    opt.textContent = ex.name;
+    select.appendChild(opt);
+  });
+  if (current) select.value = current;
+}
+
+function renderSummary(summary) {
+  document.getElementById('orderCount').textContent = Number(summary.order_count || 0).toLocaleString();
+  document.getElementById('totalSale').textContent = money(summary.total_sale);
+  document.getElementById('targetLeft').textContent = money(summary.target_left);
+  document.getElementById('totalExpense').textContent = money(summary.total_expense);
+  document.getElementById('productCost').textContent = money(summary.product_cost);
+  document.getElementById('netProfit').textContent = money(summary.net_profit);
+}
+
+function renderOrders(rows) {
+  const body = document.getElementById('ordersBody');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6"><div class="acc-empty">No orders found for this exhibition.</div></td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => {
+    const orderProfit = Number(row.total_amount || 0) - Number(row.product_cost_total || 0);
+    const hasMatch = Number(row.matched_cost || 0) > 0;
+    return `
+      <tr>
+        <td>
+          <div class="acc-main">${row.order_number}</div>
+          <div class="acc-muted">${new Date(row.created_at).toLocaleString()}</div>
+        </td>
+        <td>
+          <div class="acc-main">${row.product_name}</div>
+          <div class="acc-muted">Qty ${row.quantity || 1} · ${row.payment_method || ''}</div>
+        </td>
+        <td>${money(row.total_amount)}</td>
+        <td>
+          <span class="acc-badge ${hasMatch ? '' : 'warn'}">${row.match_reason || 'No match'}</span>
+          <div class="acc-muted">${row.matched_cost_name || 'Open Shopify cost page to link cost'}</div>
+          <div class="acc-muted"><a href="${row.cost_link}" target="_blank">Shopify costs</a></div>
+        </td>
+        <td>${money(row.product_cost_total)}</td>
+        <td>${money(orderProfit)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderExpenses(rows) {
+  const box = document.getElementById('expenseList');
+  if (!rows.length) {
+    box.innerHTML = '<div class="acc-empty">No expenses added yet.</div>';
+    return;
+  }
+  box.innerHTML = rows.map(row => `
+    <div class="acc-table-wrap">
+      <div style="display:grid;grid-template-columns:1fr auto;gap:12px;padding:13px 18px;border-top:1px solid #edf0f7;">
+        <div>
+          <div class="acc-main">${row.label}</div>
+          <div class="acc-muted">${row.expense_date || ''}${row.notes ? ' · ' + row.notes : ''}</div>
+        </div>
+        <div class="acc-main">${money(row.amount)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadAccounts() {
+  const exhibitionId = document.getElementById('exhibitionSelect').value;
+  const res = await fetch(`/api/exhibition/accounts?exhibition_id=${encodeURIComponent(exhibitionId || '')}`);
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not load accounts.');
+  fillExhibitions(data.exhibitions || []);
+  renderSummary(data.summary || {});
+  renderOrders(data.orders || []);
+  renderExpenses(data.expenses || []);
+}
+
+document.getElementById('expenseForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const exhibitionId = document.getElementById('exhibitionSelect').value;
+  if (!exhibitionId) return showToast('Select an exhibition first.');
+  const payload = {
+    exhibition_id: exhibitionId,
+    label: document.getElementById('expenseLabel').value.trim(),
+    amount: document.getElementById('expenseAmount').value,
+    expense_date: document.getElementById('expenseDate').value,
+    notes: document.getElementById('expenseNotes').value.trim()
+  };
+  const res = await fetch('/api/exhibition/expenses', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not add expense.');
+  event.target.reset();
+  showToast('Expense added.');
+  loadAccounts();
+});
+
+fetch('/api/exhibition/accounts')
+  .then(res => res.json())
+  .then(data => {
+    if (!data.ok) throw new Error(data.error || 'Could not load accounts.');
+    fillExhibitions(data.exhibitions || []);
+    renderSummary(data.summary || {});
+    renderOrders(data.orders || []);
+    renderExpenses(data.expenses || []);
+  })
+  .catch(err => showToast(err.message));
+</script>
+{% endblock %}

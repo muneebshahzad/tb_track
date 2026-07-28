@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ order.order_number }} Invoice</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef1f7; font-family: Arial, sans-serif; color: #111; }
+    .toolbar { position: sticky; top: 0; padding: 12px; background: #fff; border-bottom: 1px solid #d8dce8; display: flex; gap: 8px; justify-content: center; }
+    .btn { border: 0; border-radius: 7px; background: #111; color: #fff; padding: 9px 14px; font-weight: 700; cursor: pointer; text-decoration: none; font-size: 13px; }
+    .paper { width: 80mm; margin: 18px auto; background: #fff; padding: 4mm; box-shadow: 0 8px 24px rgba(20,25,45,0.18); }
+    .center { text-align: center; }
+    .brand { font-size: 22px; font-weight: 900; letter-spacing: 0.02em; }
+    .small { font-size: 11px; line-height: 1.35; }
+    .muted { color: #555; }
+    .line { border-top: 1px dashed #111; margin: 10px 0; }
+    .row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; line-height: 1.45; }
+    .row strong { font-weight: 900; }
+    .item { font-size: 13px; font-weight: 900; line-height: 1.35; margin: 8px 0 5px; }
+    .total { font-size: 15px; font-weight: 900; }
+    @page { size: 80mm auto; margin: 0; }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .paper { margin: 0; width: 80mm; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button class="btn" onclick="window.print()">Print Invoice</button>
+    <a class="btn" href="/exhibition">Back</a>
+  </div>
+  <main class="paper">
+    <div class="center">
+      <div class="brand">Tick Bags</div>
+      <div class="small">Exhibition Order Invoice</div>
+      <div class="small muted">{{ order.exhibition_name or 'Exhibition' }}</div>
+      {% if order.exhibition_location %}<div class="small muted">{{ order.exhibition_location }}</div>{% endif %}
+    </div>
+
+    <div class="line"></div>
+    <div class="row"><span>Invoice</span><strong>{{ order.order_number }}</strong></div>
+    <div class="row"><span>Date</span><strong>{{ order.created_at.strftime('%d %b %Y %I:%M %p') if order.created_at else '' }}</strong></div>
+    {% if order.customer_name %}<div class="row"><span>Customer</span><strong>{{ order.customer_name }}</strong></div>{% endif %}
+    {% if order.customer_phone %}<div class="row"><span>Phone</span><strong>{{ order.customer_phone }}</strong></div>{% endif %}
+
+    <div class="line"></div>
+    <div class="item">{{ order.product_name }}</div>
+    <div class="row"><span>Qty</span><strong>{{ order.quantity }}</strong></div>
+    <div class="row"><span>Unit Price</span><strong>Rs {{ order.unit_price | format_number }}</strong></div>
+    <div class="row"><span>Discount</span><strong>Rs {{ order.discount | format_number }}</strong></div>
+    <div class="row"><span>Delivery</span><strong>{{ order.delivery_method }}</strong></div>
+    <div class="row"><span>Delivery Charges</span><strong>Rs {{ order.delivery_charges | format_number }}</strong></div>
+
+    <div class="line"></div>
+    <div class="row total"><span>Total</span><strong>Rs {{ order.total_amount | format_number }}</strong></div>
+    <div class="row"><span>Paid</span><strong>Rs {{ order.paid_amount | format_number }}</strong></div>
+    <div class="row"><span>Balance</span><strong>Rs {{ (order.total_amount - order.paid_amount) | format_number }}</strong></div>
+    <div class="row"><span>Payment</span><strong>{{ order.payment_method }} · {{ order.payment_split }}</strong></div>
+
+    <div class="line"></div>
+    <div class="center small">Thank you for shopping with Tick Bags.</div>
+  </main>
+  <script>
+    setTimeout(() => window.print(), 450);
+  </script>
+</body>
+</html>

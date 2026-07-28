@@ -21,6 +21,7 @@ from flask import Flask
 import shopify
 import requests
 import json
+from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse
 import re
 from xml.sax.saxutils import escape as xml_escape
@@ -47,10 +48,17 @@ import ssl
 import certifi
 
 from db import (
+    create_exhibition,
+    create_exhibition_expense,
+    create_exhibition_order,
     delete_order_status,
     get_app_setting,
+    get_exhibition_order,
     get_product_cost_lookup,
     init_db,
+    list_exhibition_expenses,
+    list_exhibition_orders,
+    list_exhibitions,
     list_product_costs,
     load_order_statuses,
     set_app_setting,
@@ -2865,6 +2873,165 @@ def get_cost_catalog_for_source(source: str):
     return []
 
 
+EXHIBITION_TARGET_SALE = 2_000_000
+EXHIBITION_DELIVERY_PICKUPS = {'Pickup from Expo', 'Pickup from Warehouse'}
+EXHIBITION_PAYMENT_SPLITS = {'100% Paid', '50% Paid', 'Custom Amount'}
+EXHIBITION_PAYMENT_METHODS = {'Cash', 'Bank'}
+EXHIBITION_DELIVERY_METHODS = {'Pickup from Expo', 'Home Delivery', 'Pickup from Warehouse'}
+
+
+def exhibition_row_cost(row: dict, beans_price=None) -> float:
+    beans_rate = money_float(beans_price if beans_price is not None else get_shopify_beans_price())
+    cost = (
+        money_float(row.get('beans_kg')) * beans_rate
+        + money_float(row.get('fabric_cost')) * money_float(row.get('yard_qty'))
+        + money_float(row.get('fusium_cost'))
+        + money_float(row.get('making_cost'))
+        + money_float(row.get('overhead_cost'))
+    )
+    return round(cost, 2)
+
+
+def exhibition_serialize_date(value):
+    if not value:
+        return ''
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return str(value)
+
+
+def exhibition_serialize_row(row: dict) -> dict:
+    result = {}
+    for key, value in dict(row or {}).items():
+        if isinstance(value, Decimal):
+            result[key] = money_float(value)
+        elif hasattr(value, 'isoformat'):
+            result[key] = value.isoformat()
+        else:
+            result[key] = value
+    return result
+
+
+def build_exhibition_product_catalog():
+    beans_price = get_shopify_beans_price()
+    rows = get_cost_catalog_for_source(COST_SOURCE_SHOPIFY)
+    products = []
+    for row in rows:
+        cost = exhibition_row_cost(row, beans_price)
+        variant_id = str(row.get('source_variant_id') or row.get('variant_key') or '')
+        products.append({
+            'variant_key': row.get('variant_key') or variant_id,
+            'shopify_product_id': str(row.get('source_product_id') or ''),
+            'shopify_variant_id': variant_id,
+            'sku': row.get('sku') or '',
+            'barcode': row.get('barcode') or '',
+            'name': row.get('primary_name') or row.get('product_title') or 'Untitled product',
+            'product_title': row.get('product_title') or row.get('primary_name') or '',
+            'variant_title': row.get('variant_title') or '',
+            'price': money_float(row.get('product_price')),
+            'image': row.get('image') or '',
+            'cost': cost,
+            'cost_saved': cost > 0,
+        })
+    products.sort(key=lambda item: ((item.get('product_title') or item.get('name') or '').lower(), (item.get('variant_title') or '').lower()))
+    return products
+
+
+def build_exhibition_cost_lookup():
+    beans_price = get_shopify_beans_price()
+    rows = get_cost_catalog_for_source(COST_SOURCE_SHOPIFY)
+    lookup = {
+        'variant': {},
+        'identifier': {},
+        'name': {},
+        'rows': [],
+    }
+    for row in rows:
+        enriched = dict(row)
+        enriched['exhibition_cost'] = exhibition_row_cost(row, beans_price)
+        enriched['match_label'] = enriched.get('primary_name') or enriched.get('product_title') or ''
+        lookup['rows'].append(enriched)
+        for key in (
+            row.get('source_variant_id'),
+            row.get('variant_key'),
+        ):
+            key = str(key or '').strip()
+            if key:
+                lookup['variant'][key] = enriched
+        for raw in (row.get('sku'), row.get('barcode')):
+            for key in catalog_identifier_keys(raw):
+                lookup['identifier'].setdefault(key, enriched)
+        for raw in (row.get('primary_name'), row.get('product_title'), row.get('secondary_name')):
+            for key in catalog_match_keys(raw):
+                lookup['name'].setdefault(key, enriched)
+    return lookup
+
+
+def match_exhibition_order_cost(order: dict, lookup: dict) -> dict:
+    variant_id = str(order.get('shopify_variant_id') or '').strip()
+    if variant_id and variant_id in lookup['variant']:
+        row = lookup['variant'][variant_id]
+        return {'row': row, 'reason': 'Variant match', 'score': 1.0}
+
+    for key in catalog_identifier_keys(order.get('sku')):
+        if key in lookup['identifier']:
+            row = lookup['identifier'][key]
+            return {'row': row, 'reason': 'SKU match', 'score': 0.98}
+
+    order_keys = catalog_match_keys(order.get('product_name'))
+    for key in order_keys:
+        if key in lookup['name']:
+            row = lookup['name'][key]
+            return {'row': row, 'reason': 'Name match', 'score': 0.95}
+
+    best = None
+    best_score = 0.0
+    order_name = order_keys[0] if order_keys else normalize_catalog_match(order.get('product_name'))
+    if order_name:
+        for row in lookup['rows']:
+            row_keys = catalog_match_keys(row.get('primary_name')) or [normalize_catalog_match(row.get('primary_name'))]
+            for row_key in row_keys:
+                if not row_key:
+                    continue
+                score = SequenceMatcher(None, order_name, row_key).ratio()
+                if order_name in row_key or row_key in order_name:
+                    score = max(score, 0.82)
+                if score > best_score:
+                    best = row
+                    best_score = score
+    if best and best_score >= 0.62:
+        return {'row': best, 'reason': 'Suggested name match', 'score': round(best_score, 2)}
+    return {'row': None, 'reason': 'No cost match', 'score': 0.0}
+
+
+def calculate_exhibition_order_amounts(quantity, unit_price, discount, delivery_method, delivery_charges, payment_split, custom_paid_amount):
+    qty = max(int(quantity or 1), 1)
+    price = money_float(unit_price)
+    discount_value = max(money_float(discount), 0)
+    delivery = 0.0 if delivery_method in EXHIBITION_DELIVERY_PICKUPS else max(money_float(delivery_charges), 0)
+    total = max((price * qty) - discount_value + delivery, 0)
+    split = payment_split if payment_split in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
+    if split == '50% Paid':
+        paid = round(total * 0.5, 2)
+    elif split == 'Custom Amount':
+        paid = min(max(money_float(custom_paid_amount), 0), total)
+    else:
+        paid = total
+    return {
+        'quantity': qty,
+        'unit_price': price,
+        'discount': discount_value,
+        'delivery_charges': delivery,
+        'total_amount': round(total, 2),
+        'paid_amount': round(paid, 2),
+        'custom_paid_amount': round(money_float(custom_paid_amount), 2) if split == 'Custom Amount' else 0.0,
+    }
+
+
+def make_exhibition_order_number():
+    return f"EXH-{dt.datetime.now().strftime('%y%m%d%H%M%S')}-{os.urandom(2).hex().upper()}"
+
+
 def build_daraz_profit_records(start_date: str = '', end_date: str = ''):
     summaries = fetch_daraz_order_summaries(DARAZ_PROFIT_STATUSES)
     start_day = parse_iso_day(start_date)
@@ -3805,6 +3972,172 @@ def normalize_shipper_advice_items(payload):
 @app.route('/payments')
 def payments_page():
     return render_template('payments.html')
+
+
+@app.route('/exhibition')
+def exhibition_page():
+    return render_template('exhibition.html')
+
+
+@app.route('/exhibition/accounts')
+def exhibition_accounts_page():
+    return render_template('exhibition_accounts.html', target_sale=EXHIBITION_TARGET_SALE)
+
+
+@app.route('/exhibition/invoice/<int:order_id>')
+def exhibition_invoice_page(order_id):
+    order = get_exhibition_order(order_id)
+    if not order:
+        return "Invoice not found", 404
+    return render_template('exhibition_invoice.html', order=order)
+
+
+@app.route('/api/exhibition/bootstrap')
+def exhibition_bootstrap_api():
+    try:
+        exhibitions = [exhibition_serialize_row(row) for row in list_exhibitions()]
+        products = build_exhibition_product_catalog()
+        recent_orders = [exhibition_serialize_row(row) for row in list_exhibition_orders(limit=25)]
+        return jsonify({
+            'ok': True,
+            'exhibitions': exhibitions,
+            'products': products,
+            'recent_orders': recent_orders,
+            'delivery_methods': sorted(EXHIBITION_DELIVERY_METHODS),
+            'payment_methods': sorted(EXHIBITION_PAYMENT_METHODS),
+            'payment_splits': ['100% Paid', '50% Paid', 'Custom Amount'],
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/exhibition/exhibitions', methods=['POST'])
+def exhibition_create_exhibition_api():
+    payload = request.get_json(silent=True) or request.form or {}
+    row = create_exhibition(
+        name=payload.get('name'),
+        location=payload.get('location') or '',
+        starts_on=payload.get('starts_on') or None,
+        ends_on=payload.get('ends_on') or None,
+        notes=payload.get('notes') or '',
+    )
+    if not row:
+        return jsonify({'ok': False, 'error': 'Exhibition name is required.'}), 400
+    return jsonify({'ok': True, 'exhibition': exhibition_serialize_row(row)})
+
+
+@app.route('/api/exhibition/orders', methods=['POST'])
+def exhibition_create_order_api():
+    payload = request.get_json(silent=True) or {}
+    product_name = str(payload.get('product_name') or '').strip()
+    if not product_name:
+        return jsonify({'ok': False, 'error': 'Product name is required.'}), 400
+    delivery_method = payload.get('delivery_method') if payload.get('delivery_method') in EXHIBITION_DELIVERY_METHODS else 'Pickup from Expo'
+    payment_method = payload.get('payment_method') if payload.get('payment_method') in EXHIBITION_PAYMENT_METHODS else 'Cash'
+    payment_split = payload.get('payment_split') if payload.get('payment_split') in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
+    amounts = calculate_exhibition_order_amounts(
+        payload.get('quantity') or 1,
+        payload.get('unit_price') or payload.get('price') or 0,
+        payload.get('discount') or 0,
+        delivery_method,
+        payload.get('delivery_charges') or 0,
+        payment_split,
+        payload.get('custom_paid_amount') or 0,
+    )
+    order = create_exhibition_order(
+        exhibition_id=payload.get('exhibition_id') or None,
+        order_number=make_exhibition_order_number(),
+        customer_name=payload.get('customer_name') or '',
+        customer_phone=payload.get('customer_phone') or '',
+        product_name=product_name,
+        shopify_product_id=payload.get('shopify_product_id') or '',
+        shopify_variant_id=payload.get('shopify_variant_id') or '',
+        sku=payload.get('sku') or '',
+        quantity=amounts['quantity'],
+        unit_price=amounts['unit_price'],
+        discount=amounts['discount'],
+        delivery_method=delivery_method,
+        delivery_charges=amounts['delivery_charges'],
+        payment_method=payment_method,
+        payment_split=payment_split,
+        custom_paid_amount=amounts['custom_paid_amount'],
+        total_amount=amounts['total_amount'],
+        paid_amount=amounts['paid_amount'],
+    )
+    if not order:
+        return jsonify({'ok': False, 'error': 'Could not create exhibition order.'}), 500
+    order_id = order.get('id')
+    return jsonify({
+        'ok': True,
+        'order': exhibition_serialize_row(order),
+        'invoice_url': url_for('exhibition_invoice_page', order_id=order_id),
+    })
+
+
+@app.route('/api/exhibition/accounts')
+def exhibition_accounts_api():
+    exhibition_id = request.args.get('exhibition_id') or None
+    orders = list_exhibition_orders(exhibition_id=exhibition_id)
+    expenses = list_exhibition_expenses(exhibition_id=exhibition_id)
+    lookup = build_exhibition_cost_lookup()
+    order_rows = []
+    total_sale = Decimal('0')
+    total_paid = Decimal('0')
+    total_product_cost = Decimal('0')
+    for order in orders:
+        match = match_exhibition_order_cost(order, lookup)
+        matched_row = match.get('row')
+        qty = int(order.get('quantity') or 1)
+        unit_cost = Decimal(str(matched_row.get('exhibition_cost') if matched_row else 0))
+        product_cost_total = unit_cost * Decimal(qty)
+        total_product_cost += product_cost_total
+        total_sale += money_decimal(order.get('total_amount'))
+        total_paid += money_decimal(order.get('paid_amount'))
+        serialized = exhibition_serialize_row(order)
+        serialized.update({
+            'matched_cost_name': matched_row.get('match_label') if matched_row else '',
+            'matched_cost': money_float(unit_cost),
+            'product_cost_total': money_float(product_cost_total),
+            'match_reason': match.get('reason'),
+            'match_score': match.get('score'),
+            'cost_link': f"/shopify-product-costs?search={quote(str(order.get('product_name') or ''))}",
+        })
+        order_rows.append(serialized)
+
+    total_expense = sum((money_decimal(row.get('amount')) for row in expenses), Decimal('0'))
+    net_profit = total_sale - total_product_cost - total_expense
+    target_left = Decimal(str(EXHIBITION_TARGET_SALE)) - total_sale
+    return jsonify({
+        'ok': True,
+        'exhibitions': [exhibition_serialize_row(row) for row in list_exhibitions()],
+        'orders': order_rows,
+        'expenses': [exhibition_serialize_row(row) for row in expenses],
+        'summary': {
+            'order_count': len(orders),
+            'total_sale': money_float(total_sale),
+            'total_paid': money_float(total_paid),
+            'target_left': money_float(target_left),
+            'total_expense': money_float(total_expense),
+            'product_cost': money_float(total_product_cost),
+            'net_profit': money_float(net_profit),
+            'target_sale': EXHIBITION_TARGET_SALE,
+        },
+    })
+
+
+@app.route('/api/exhibition/expenses', methods=['POST'])
+def exhibition_create_expense_api():
+    payload = request.get_json(silent=True) or {}
+    row = create_exhibition_expense(
+        exhibition_id=payload.get('exhibition_id'),
+        label=payload.get('label'),
+        amount=payload.get('amount') or 0,
+        expense_date=payload.get('expense_date') or None,
+        notes=payload.get('notes') or '',
+    )
+    if not row:
+        return jsonify({'ok': False, 'error': 'Exhibition and expense label are required.'}), 400
+    return jsonify({'ok': True, 'expense': exhibition_serialize_row(row)})
 
 
 @app.route('/product-costs')

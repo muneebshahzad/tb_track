@@ -163,6 +163,7 @@
           <div class="ex-metric"><div class="ex-metric-label">Paid</div><div class="ex-metric-value" id="paidValue">Rs 0</div></div>
         </div>
         <div class="ex-create-row">
+          <button class="btn btn-outline" id="cancelEditBtn" type="button" onclick="cancelEdit()" style="display:none;margin-right:8px;">Cancel Edit</button>
           <button class="btn btn-success" id="createOrderBtn" type="submit">Create Order</button>
         </div>
       </form>
@@ -181,6 +182,8 @@
 <script>
 let products = [];
 let selectedProduct = null;
+let recentOrders = [];
+let editingOrderId = null;
 const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
 const pickupMethods = new Set(['Pickup from Expo', 'Pickup from Warehouse']);
 
@@ -219,6 +222,7 @@ function fillProducts(items) {
 }
 
 function renderRecentOrders(rows) {
+  recentOrders = rows || [];
   const box = document.getElementById('recentOrders');
   if (!rows.length) {
     box.innerHTML = '<div class="ex-row"><div class="ex-muted">No exhibition orders yet.</div></div>';
@@ -232,7 +236,11 @@ function renderRecentOrders(rows) {
       </div>
       <div class="ex-total">
         ${money(row.total_amount)}
-        <div><a class="btn btn-outline" href="/exhibition/invoice/${row.id}" target="_blank" style="margin-top:6px;">Invoice</a></div>
+        <div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;">
+          <button class="btn btn-outline" type="button" onclick="startEditOrder(${row.id})">Edit</button>
+          <a class="btn btn-outline" href="/exhibition/invoice/${row.id}" target="_blank">Reprint</a>
+          <button class="btn btn-danger" type="button" onclick="deleteOrder(${row.id})">Delete</button>
+        </div>
       </div>
     </div>
   `).join('');
@@ -285,6 +293,72 @@ function pickProduct() {
   updateTotals();
 }
 
+function findProductForOrder(order) {
+  const variantId = String(order.shopify_variant_id || '');
+  const sku = String(order.sku || '');
+  return products.find(product => String(product.shopify_variant_id || '') === variantId)
+    || products.find(product => sku && String(product.sku || '') === sku)
+    || null;
+}
+
+function setOrderFormMode(order) {
+  editingOrderId = order ? order.id : null;
+  document.querySelector('.ex-panel-title').textContent = order ? `Edit ${order.order_number}` : 'Add Order';
+  document.getElementById('createOrderBtn').textContent = order ? 'Update Order' : 'Create Order';
+  document.getElementById('cancelEditBtn').style.display = order ? 'inline-flex' : 'none';
+}
+
+function startEditOrder(orderId) {
+  const order = recentOrders.find(item => Number(item.id) === Number(orderId));
+  if (!order) return showToast('Order not found in recent list.');
+  selectedProduct = findProductForOrder(order);
+  document.getElementById('exhibitionSelect').value = order.exhibition_id || '';
+  document.getElementById('customerName').value = order.customer_name || '';
+  document.getElementById('customerPhone').value = order.customer_phone || '';
+  document.getElementById('productName').value = order.product_name || '';
+  document.getElementById('productPicker').value = selectedProduct ? `${selectedProduct.name} | ${selectedProduct.sku || selectedProduct.shopify_variant_id || ''}` : '';
+  document.getElementById('unitPrice').value = Math.round(Number(order.unit_price || 0));
+  document.getElementById('quantity').value = order.quantity || 1;
+  document.getElementById('discount').value = Math.round(Number(order.discount || 0));
+  document.getElementById('deliveryMethod').value = order.delivery_method || 'Pickup from Expo';
+  document.getElementById('deliveryCharges').value = Math.round(Number(order.delivery_charges || 0));
+  document.getElementById('deliveryAddress').value = order.delivery_address || '';
+  document.getElementById('paymentMethod').value = order.payment_method || 'Cash';
+  document.getElementById('paymentSplit').value = order.payment_split || '100% Paid';
+  document.getElementById('customPaidAmount').value = Math.round(Number(order.custom_paid_amount || order.paid_amount || 0));
+  if (selectedProduct) {
+    document.getElementById('productPreviewWrap').style.display = 'block';
+    document.getElementById('productImage').src = selectedProduct.image || '';
+    document.getElementById('productPreviewName').textContent = selectedProduct.name || '';
+    document.getElementById('productPreviewMeta').textContent = `SKU ${selectedProduct.sku || 'N/A'} · Cost ${money(selectedProduct.cost)}`;
+  } else {
+    document.getElementById('productPreviewWrap').style.display = 'none';
+  }
+  setOrderFormMode(order);
+  updateTotals();
+  document.querySelector('.ex-wrap').scrollTo({top: 0, behavior: 'smooth'});
+}
+
+function cancelEdit() {
+  document.getElementById('orderForm').reset();
+  selectedProduct = null;
+  document.getElementById('productPreviewWrap').style.display = 'none';
+  setOrderFormMode(null);
+  updateTotals();
+}
+
+async function deleteOrder(orderId) {
+  const order = recentOrders.find(item => Number(item.id) === Number(orderId));
+  const label = order ? `${order.order_number} · ${order.product_name}` : 'this order';
+  if (!confirm(`Delete ${label}?`)) return;
+  const res = await fetch(`/api/exhibition/orders/${orderId}`, {method: 'DELETE'});
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not delete order.');
+  if (Number(editingOrderId) === Number(orderId)) cancelEdit();
+  showToast('Order deleted.');
+  await loadBootstrap();
+}
+
 function updateTotals() {
   const qty = Math.max(Number(document.getElementById('quantity').value || 1), 1);
   const price = Number(document.getElementById('unitPrice').value || 0);
@@ -322,8 +396,9 @@ document.getElementById('productPicker').addEventListener('change', pickProduct)
 document.getElementById('orderForm').addEventListener('submit', async event => {
   event.preventDefault();
   const button = document.getElementById('createOrderBtn');
+  const wasEditing = Boolean(editingOrderId);
   button.disabled = true;
-  button.textContent = 'Creating...';
+  button.textContent = wasEditing ? 'Updating...' : 'Creating...';
   const payload = {
     exhibition_id: document.getElementById('exhibitionSelect').value,
     customer_name: document.getElementById('customerName').value.trim(),
@@ -343,24 +418,21 @@ document.getElementById('orderForm').addEventListener('submit', async event => {
     custom_paid_amount: document.getElementById('customPaidAmount').value
   };
   try {
-    const res = await fetch('/api/exhibition/orders', {
-      method: 'POST',
+    const res = await fetch(wasEditing ? `/api/exhibition/orders/${editingOrderId}` : '/api/exhibition/orders', {
+      method: wasEditing ? 'PUT' : 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
     });
     const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Could not create order.');
+    if (!data.ok) throw new Error(data.error || 'Could not save order.');
     window.open(data.invoice_url, '_blank');
-    document.getElementById('orderForm').reset();
-    selectedProduct = null;
-    document.getElementById('productPreviewWrap').style.display = 'none';
-    updateTotals();
+    cancelEdit();
     await loadBootstrap();
   } catch (err) {
     showToast(err.message);
   } finally {
     button.disabled = false;
-    button.textContent = 'Create Order';
+    button.textContent = editingOrderId ? 'Update Order' : 'Create Order';
   }
 });
 

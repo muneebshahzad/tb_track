@@ -51,6 +51,7 @@ from db import (
     create_exhibition,
     create_exhibition_expense,
     create_exhibition_order,
+    delete_exhibition_order,
     delete_order_status,
     get_app_setting,
     get_exhibition_order,
@@ -62,6 +63,7 @@ from db import (
     list_product_costs,
     load_order_statuses,
     set_app_setting,
+    update_exhibition_order,
     upsert_order_status,
     upsert_product_cost,
 )
@@ -3032,6 +3034,47 @@ def make_exhibition_order_number():
     return f"EXH-{dt.datetime.now().strftime('%y%m%d%H%M%S')}-{os.urandom(2).hex().upper()}"
 
 
+def normalize_exhibition_order_payload(payload: dict):
+    product_name = str(payload.get('product_name') or '').strip()
+    if not product_name:
+        return None, ('Product name is required.', 400)
+    delivery_method = payload.get('delivery_method') if payload.get('delivery_method') in EXHIBITION_DELIVERY_METHODS else 'Pickup from Expo'
+    delivery_address = str(payload.get('delivery_address') or '').strip()
+    if delivery_method == 'Home Delivery' and not delivery_address:
+        return None, ('Delivery address is required for home delivery.', 400)
+    payment_method = payload.get('payment_method') if payload.get('payment_method') in EXHIBITION_PAYMENT_METHODS else 'Cash'
+    payment_split = payload.get('payment_split') if payload.get('payment_split') in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
+    amounts = calculate_exhibition_order_amounts(
+        payload.get('quantity') or 1,
+        payload.get('unit_price') or payload.get('price') or 0,
+        payload.get('discount') or 0,
+        delivery_method,
+        payload.get('delivery_charges') or 0,
+        payment_split,
+        payload.get('custom_paid_amount') or 0,
+    )
+    return {
+        'exhibition_id': payload.get('exhibition_id') or None,
+        'customer_name': payload.get('customer_name') or '',
+        'customer_phone': payload.get('customer_phone') or '',
+        'product_name': product_name,
+        'shopify_product_id': payload.get('shopify_product_id') or '',
+        'shopify_variant_id': payload.get('shopify_variant_id') or '',
+        'sku': payload.get('sku') or '',
+        'quantity': amounts['quantity'],
+        'unit_price': amounts['unit_price'],
+        'discount': amounts['discount'],
+        'delivery_method': delivery_method,
+        'delivery_address': delivery_address if delivery_method == 'Home Delivery' else '',
+        'delivery_charges': amounts['delivery_charges'],
+        'payment_method': payment_method,
+        'payment_split': payment_split,
+        'custom_paid_amount': amounts['custom_paid_amount'],
+        'total_amount': amounts['total_amount'],
+        'paid_amount': amounts['paid_amount'],
+    }, None
+
+
 def build_daraz_profit_records(start_date: str = '', end_date: str = ''):
     summaries = fetch_daraz_order_summaries(DARAZ_PROFIT_STATUSES)
     start_day = parse_iso_day(start_date)
@@ -4029,44 +4072,13 @@ def exhibition_create_exhibition_api():
 @app.route('/api/exhibition/orders', methods=['POST'])
 def exhibition_create_order_api():
     payload = request.get_json(silent=True) or {}
-    product_name = str(payload.get('product_name') or '').strip()
-    if not product_name:
-        return jsonify({'ok': False, 'error': 'Product name is required.'}), 400
-    delivery_method = payload.get('delivery_method') if payload.get('delivery_method') in EXHIBITION_DELIVERY_METHODS else 'Pickup from Expo'
-    delivery_address = str(payload.get('delivery_address') or '').strip()
-    if delivery_method == 'Home Delivery' and not delivery_address:
-        return jsonify({'ok': False, 'error': 'Delivery address is required for home delivery.'}), 400
-    payment_method = payload.get('payment_method') if payload.get('payment_method') in EXHIBITION_PAYMENT_METHODS else 'Cash'
-    payment_split = payload.get('payment_split') if payload.get('payment_split') in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
-    amounts = calculate_exhibition_order_amounts(
-        payload.get('quantity') or 1,
-        payload.get('unit_price') or payload.get('price') or 0,
-        payload.get('discount') or 0,
-        delivery_method,
-        payload.get('delivery_charges') or 0,
-        payment_split,
-        payload.get('custom_paid_amount') or 0,
-    )
+    normalized, error = normalize_exhibition_order_payload(payload)
+    if error:
+        message, status_code = error
+        return jsonify({'ok': False, 'error': message}), status_code
     order = create_exhibition_order(
-        exhibition_id=payload.get('exhibition_id') or None,
         order_number=make_exhibition_order_number(),
-        customer_name=payload.get('customer_name') or '',
-        customer_phone=payload.get('customer_phone') or '',
-        product_name=product_name,
-        shopify_product_id=payload.get('shopify_product_id') or '',
-        shopify_variant_id=payload.get('shopify_variant_id') or '',
-        sku=payload.get('sku') or '',
-        quantity=amounts['quantity'],
-        unit_price=amounts['unit_price'],
-        discount=amounts['discount'],
-        delivery_method=delivery_method,
-        delivery_address=delivery_address if delivery_method == 'Home Delivery' else '',
-        delivery_charges=amounts['delivery_charges'],
-        payment_method=payment_method,
-        payment_split=payment_split,
-        custom_paid_amount=amounts['custom_paid_amount'],
-        total_amount=amounts['total_amount'],
-        paid_amount=amounts['paid_amount'],
+        **normalized,
     )
     if not order:
         return jsonify({'ok': False, 'error': 'Could not create exhibition order.'}), 500
@@ -4076,6 +4088,32 @@ def exhibition_create_order_api():
         'order': exhibition_serialize_row(order),
         'invoice_url': url_for('exhibition_invoice_page', order_id=order_id),
     })
+
+
+@app.route('/api/exhibition/orders/<int:order_id>', methods=['PUT'])
+def exhibition_update_order_api(order_id):
+    if not get_exhibition_order(order_id):
+        return jsonify({'ok': False, 'error': 'Order not found.'}), 404
+    payload = request.get_json(silent=True) or {}
+    normalized, error = normalize_exhibition_order_payload(payload)
+    if error:
+        message, status_code = error
+        return jsonify({'ok': False, 'error': message}), status_code
+    order = update_exhibition_order(order_id=order_id, **normalized)
+    if not order:
+        return jsonify({'ok': False, 'error': 'Could not update exhibition order.'}), 500
+    return jsonify({
+        'ok': True,
+        'order': exhibition_serialize_row(order),
+        'invoice_url': url_for('exhibition_invoice_page', order_id=order_id),
+    })
+
+
+@app.route('/api/exhibition/orders/<int:order_id>', methods=['DELETE'])
+def exhibition_delete_order_api(order_id):
+    if not delete_exhibition_order(order_id):
+        return jsonify({'ok': False, 'error': 'Order not found or could not be deleted.'}), 404
+    return jsonify({'ok': True})
 
 
 @app.route('/api/exhibition/accounts')

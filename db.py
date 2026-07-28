@@ -761,6 +761,100 @@ def create_exhibition_order(
         return None
 
 
+def update_exhibition_order(
+    order_id,
+    exhibition_id,
+    customer_name: str,
+    customer_phone: str,
+    product_name: str,
+    shopify_product_id: str = "",
+    shopify_variant_id: str = "",
+    sku: str = "",
+    quantity=1,
+    unit_price=0,
+    discount=0,
+    delivery_method: str = "Pickup from Expo",
+    delivery_address: str = "",
+    delivery_charges=0,
+    payment_method: str = "Cash",
+    payment_split: str = "100% Paid",
+    custom_paid_amount=0,
+    total_amount=0,
+    paid_amount=0,
+) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    UPDATE exhibition_orders
+                    SET exhibition_id = %s,
+                        customer_name = %s,
+                        customer_phone = %s,
+                        product_name = %s,
+                        shopify_product_id = %s,
+                        shopify_variant_id = %s,
+                        sku = %s,
+                        quantity = %s,
+                        unit_price = %s,
+                        discount = %s,
+                        delivery_method = %s,
+                        delivery_address = %s,
+                        delivery_charges = %s,
+                        payment_method = %s,
+                        payment_split = %s,
+                        custom_paid_amount = %s,
+                        total_amount = %s,
+                        paid_amount = %s
+                    WHERE id = %s
+                    RETURNING *
+                """, (
+                    exhibition_id or None,
+                    customer_name or "",
+                    customer_phone or "",
+                    product_name,
+                    shopify_product_id or "",
+                    shopify_variant_id or "",
+                    sku or "",
+                    int(quantity or 1),
+                    unit_price,
+                    discount,
+                    delivery_method or "Pickup from Expo",
+                    delivery_address or "",
+                    delivery_charges,
+                    payment_method or "Cash",
+                    payment_split or "100% Paid",
+                    custom_paid_amount,
+                    total_amount,
+                    paid_amount,
+                    order_id,
+                ))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_exhibition_order error: {e}")
+        return None
+
+
+def delete_exhibition_order(order_id) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("DELETE FROM exhibition_orders WHERE id = %s", (order_id,))
+                deleted = cur.rowcount > 0
+            conn.commit()
+        _set_last_db_error("")
+        return deleted
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB delete_exhibition_order error: {e}")
+        return False
+
+
 def list_exhibition_expenses(exhibition_id=None) -> list[dict]:
     try:
         with get_conn() as conn:

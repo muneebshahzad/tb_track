@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, ROUND_HALF_UP
 from email.mime.text import MIMEText
-from flask import render_template, request, jsonify, redirect, url_for, session, send_from_directory
+from flask import render_template, request, jsonify, redirect, url_for, session, send_from_directory, Response
 import datetime as dt
 from datetime import datetime
 
@@ -3034,6 +3034,76 @@ def make_exhibition_order_number():
     return f"EXH-{dt.datetime.now().strftime('%y%m%d%H%M%S')}-{os.urandom(2).hex().upper()}"
 
 
+def build_exhibition_invoice_payload(order: dict) -> dict:
+    created_at = order.get('created_at')
+    if hasattr(created_at, 'strftime'):
+        created_display = created_at.strftime('%d %b %Y %I:%M %p')
+    else:
+        created_display = str(created_at or '')
+    total_amount = money_decimal(order.get('total_amount'))
+    paid_amount = money_decimal(order.get('paid_amount'))
+    return {
+        'order_number': order.get('order_number') or '',
+        'exhibition_name': order.get('exhibition_name') or 'Exhibition',
+        'exhibition_location': order.get('exhibition_location') or '',
+        'created_display': created_display,
+        'customer_name': order.get('customer_name') or '',
+        'customer_phone': order.get('customer_phone') or '',
+        'product_name': order.get('product_name') or '',
+        'quantity': int(order.get('quantity') or 1),
+        'unit_price': money_format(order.get('unit_price')),
+        'discount': money_format(order.get('discount')),
+        'delivery_method': order.get('delivery_method') or '',
+        'delivery_address': order.get('delivery_address') or '',
+        'delivery_charges': money_format(order.get('delivery_charges')),
+        'total_amount': money_format(total_amount),
+        'paid_amount': money_format(paid_amount),
+        'balance': money_format(total_amount - paid_amount),
+        'payment_label': f"{order.get('payment_method') or ''} · {order.get('payment_split') or ''}".strip(' ·'),
+    }
+
+
+def build_exhibition_plain_receipt(invoice: dict) -> str:
+    lines = [
+        'TICK BAGS',
+        'Exhibition Order Invoice',
+        invoice.get('exhibition_name') or 'Exhibition',
+    ]
+    if invoice.get('exhibition_location'):
+        lines.append(invoice['exhibition_location'])
+    lines.extend([
+        '-' * 32,
+        f"Invoice: {invoice.get('order_number', '')}",
+        f"Date: {invoice.get('created_display', '')}",
+    ])
+    if invoice.get('customer_name'):
+        lines.append(f"Customer: {invoice['customer_name']}")
+    if invoice.get('customer_phone'):
+        lines.append(f"Phone: {invoice['customer_phone']}")
+    lines.extend([
+        '-' * 32,
+        invoice.get('product_name') or '',
+        f"Qty: {invoice.get('quantity', 1)}",
+        f"Unit Price: {invoice.get('unit_price', '')}",
+        f"Discount: {invoice.get('discount', '')}",
+        f"Delivery: {invoice.get('delivery_method', '')}",
+    ])
+    if invoice.get('delivery_address'):
+        lines.append(f"Address: {invoice['delivery_address']}")
+    lines.extend([
+        f"Delivery Charges: {invoice.get('delivery_charges', '')}",
+        '-' * 32,
+        f"Total: {invoice.get('total_amount', '')}",
+        f"Paid: {invoice.get('paid_amount', '')}",
+        f"Balance: {invoice.get('balance', '')}",
+        f"Payment: {invoice.get('payment_label', '')}",
+        '-' * 32,
+        'Thank you for shopping with Tick Bags.',
+        '',
+    ])
+    return '\n'.join(lines)
+
+
 def normalize_exhibition_order_payload(payload: dict):
     product_name = str(payload.get('product_name') or '').strip()
     if not product_name:
@@ -4032,33 +4102,18 @@ def exhibition_invoice_page(order_id):
     order = get_exhibition_order(order_id)
     if not order:
         return "Invoice not found", 404
-    created_at = order.get('created_at')
-    if hasattr(created_at, 'strftime'):
-        created_display = created_at.strftime('%d %b %Y %I:%M %p')
-    else:
-        created_display = str(created_at or '')
-    total_amount = money_decimal(order.get('total_amount'))
-    paid_amount = money_decimal(order.get('paid_amount'))
-    invoice = {
-        'order_number': order.get('order_number') or '',
-        'exhibition_name': order.get('exhibition_name') or 'Exhibition',
-        'exhibition_location': order.get('exhibition_location') or '',
-        'created_display': created_display,
-        'customer_name': order.get('customer_name') or '',
-        'customer_phone': order.get('customer_phone') or '',
-        'product_name': order.get('product_name') or '',
-        'quantity': int(order.get('quantity') or 1),
-        'unit_price': money_format(order.get('unit_price')),
-        'discount': money_format(order.get('discount')),
-        'delivery_method': order.get('delivery_method') or '',
-        'delivery_address': order.get('delivery_address') or '',
-        'delivery_charges': money_format(order.get('delivery_charges')),
-        'total_amount': money_format(total_amount),
-        'paid_amount': money_format(paid_amount),
-        'balance': money_format(total_amount - paid_amount),
-        'payment_label': f"{order.get('payment_method') or ''} · {order.get('payment_split') or ''}".strip(' ·'),
-    }
+    invoice = build_exhibition_invoice_payload(order)
     return render_template('exhibition_invoice.html', invoice=invoice)
+
+
+@app.route('/exhibition/invoice/<int:order_id>/plain')
+def exhibition_plain_invoice_page(order_id):
+    order = get_exhibition_order(order_id)
+    if not order:
+        return "Invoice not found", 404
+    invoice = build_exhibition_invoice_payload(order)
+    receipt = build_exhibition_plain_receipt(invoice)
+    return Response(receipt, mimetype='text/plain; charset=utf-8')
 
 
 @app.route('/api/exhibition/bootstrap')

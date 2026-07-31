@@ -48,9 +48,12 @@
     {% if invoice.customer_phone %}<div class="row"><span>Phone</span><strong>{{ invoice.customer_phone }}</strong></div>{% endif %}
 
     <div class="line"></div>
-    <div class="item">{{ invoice.product_name }}</div>
-    <div class="row"><span>Qty</span><strong>{{ invoice.quantity }}</strong></div>
-    <div class="row"><span>Unit Price</span><strong>{{ invoice.unit_price }}</strong></div>
+    {% for item in invoice["items"] %}
+    <div class="item">{{ item.product_name }}</div>
+    <div class="row"><span>Qty</span><strong>{{ item.quantity }}</strong></div>
+    <div class="row"><span>Unit Price</span><strong>{{ item.unit_price }}</strong></div>
+    <div class="row"><span>Line Total</span><strong>{{ item.line_total }}</strong></div>
+    {% endfor %}
     <div class="row"><span>Discount</span><strong>{{ invoice.discount }}</strong></div>
     <div class="row"><span>Delivery</span><strong>{{ invoice.delivery_method }}</strong></div>
     {% if invoice.delivery_address %}<div class="row"><span>Address</span><strong>{{ invoice.delivery_address }}</strong></div>{% endif %}

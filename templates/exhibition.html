@@ -32,6 +32,14 @@
   .ex-product-preview img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; background: #eef1f8; flex-shrink: 0; }
   .ex-product-name { font-size: 14px; font-weight: 800; color: #30313d; }
   .ex-product-meta { font-size: 12px; color: #858796; margin-top: 3px; }
+  .ex-items { grid-column: 1 / -1; border: 1px solid #e3e6f0; border-radius: 8px; overflow: hidden; }
+  .ex-items-head { padding: 10px 12px; background: #f8f9fc; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #e3e6f0; }
+  .ex-items-title { font-size: 12px; font-weight: 900; color: #30313d; }
+  .ex-item-line { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 11px 12px; border-bottom: 1px solid #edf0f7; }
+  .ex-item-line:last-child { border-bottom: none; }
+  .ex-item-title { font-size: 13px; font-weight: 800; color: #30313d; }
+  .ex-item-meta { font-size: 12px; color: #858796; margin-top: 2px; }
+  .ex-item-total { font-size: 13px; font-weight: 900; color: #30313d; white-space: nowrap; }
   .ex-create-row { padding: 0 18px 18px; display: flex; justify-content: flex-end; }
   .ex-mini-form { display: none; padding: 0 18px 18px; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
   .ex-mini-form.open { display: grid; }
@@ -99,15 +107,7 @@
           </div>
           <div class="ex-field full">
             <label class="ex-label" for="productName">Product Name</label>
-            <input class="ex-input" id="productName" required>
-          </div>
-          <div class="ex-field">
-            <label class="ex-label" for="customerName">Customer Name</label>
-            <input class="ex-input" id="customerName" placeholder="Optional">
-          </div>
-          <div class="ex-field">
-            <label class="ex-label" for="customerPhone">Customer Phone</label>
-            <input class="ex-input" id="customerPhone" placeholder="Optional">
+            <input class="ex-input" id="productName">
           </div>
           <div class="ex-field">
             <label class="ex-label" for="unitPrice">Price</label>
@@ -116,6 +116,26 @@
           <div class="ex-field">
             <label class="ex-label" for="quantity">Quantity</label>
             <input class="ex-input" id="quantity" type="number" min="1" step="1" value="1">
+          </div>
+          <div class="ex-field full">
+            <button class="btn btn-primary" type="button" onclick="addItemToOrder()">Add Product</button>
+          </div>
+          <div class="ex-items">
+            <div class="ex-items-head">
+              <div class="ex-items-title">Invoice Products</div>
+              <button class="btn btn-outline" type="button" onclick="clearOrderItems()">Clear</button>
+            </div>
+            <div id="orderItemsList">
+              <div class="ex-row"><div class="ex-muted">No products added yet.</div></div>
+            </div>
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="customerName">Customer Name</label>
+            <input class="ex-input" id="customerName" placeholder="Optional">
+          </div>
+          <div class="ex-field">
+            <label class="ex-label" for="customerPhone">Customer Phone</label>
+            <input class="ex-input" id="customerPhone" placeholder="Optional">
           </div>
           <div class="ex-field">
             <label class="ex-label" for="discount">Discount</label>
@@ -182,10 +202,12 @@
 <script>
 let products = [];
 let selectedProduct = null;
+let orderItems = [];
 let recentOrders = [];
 let editingOrderId = null;
 const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
 const pickupMethods = new Set(['Pickup from Expo', 'Pickup from Warehouse']);
+const escapeHtml = value => String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
 function toggleExhibitionForm() {
   document.getElementById('exhibitionForm').classList.toggle('open');
@@ -293,6 +315,69 @@ function pickProduct() {
   updateTotals();
 }
 
+function getDraftItem() {
+  const name = document.getElementById('productName').value.trim();
+  if (!name) return null;
+  const quantity = Math.max(Number(document.getElementById('quantity').value || 1), 1);
+  const unitPrice = Math.max(Number(document.getElementById('unitPrice').value || 0), 0);
+  return {
+    product_name: name,
+    shopify_product_id: selectedProduct ? selectedProduct.shopify_product_id : '',
+    shopify_variant_id: selectedProduct ? selectedProduct.shopify_variant_id : '',
+    sku: selectedProduct ? selectedProduct.sku : '',
+    quantity,
+    unit_price: unitPrice,
+    line_total: quantity * unitPrice
+  };
+}
+
+function clearProductDraft() {
+  selectedProduct = null;
+  document.getElementById('productPicker').value = '';
+  document.getElementById('productName').value = '';
+  document.getElementById('unitPrice').value = 0;
+  document.getElementById('quantity').value = 1;
+  document.getElementById('productPreviewWrap').style.display = 'none';
+}
+
+function renderOrderItems() {
+  const box = document.getElementById('orderItemsList');
+  if (!orderItems.length) {
+    box.innerHTML = '<div class="ex-row"><div class="ex-muted">No products added yet.</div></div>';
+    updateTotals();
+    return;
+  }
+  box.innerHTML = orderItems.map((item, index) => `
+    <div class="ex-item-line">
+      <div>
+        <div class="ex-item-title">${escapeHtml(item.product_name)}</div>
+        <div class="ex-item-meta">Qty ${item.quantity} x ${money(item.unit_price)}${item.sku ? ' · SKU ' + escapeHtml(item.sku) : ''}</div>
+      </div>
+      <div class="ex-item-total">${money(item.line_total)}</div>
+      <button class="btn btn-danger" type="button" onclick="removeOrderItem(${index})">Remove</button>
+    </div>
+  `).join('');
+  updateTotals();
+}
+
+function addItemToOrder() {
+  const item = getDraftItem();
+  if (!item) return showToast('Choose or type a product first.');
+  orderItems.push(item);
+  clearProductDraft();
+  renderOrderItems();
+}
+
+function removeOrderItem(index) {
+  orderItems.splice(index, 1);
+  renderOrderItems();
+}
+
+function clearOrderItems() {
+  orderItems = [];
+  renderOrderItems();
+}
+
 function findProductForOrder(order) {
   const variantId = String(order.shopify_variant_id || '');
   const sku = String(order.sku || '');
@@ -311,14 +396,28 @@ function setOrderFormMode(order) {
 function startEditOrder(orderId) {
   const order = recentOrders.find(item => Number(item.id) === Number(orderId));
   if (!order) return showToast('Order not found in recent list.');
-  selectedProduct = findProductForOrder(order);
+  orderItems = Array.isArray(order.items) && order.items.length ? order.items.map(item => ({
+    product_name: item.product_name || item.name || '',
+    shopify_product_id: item.shopify_product_id || '',
+    shopify_variant_id: item.shopify_variant_id || '',
+    sku: item.sku || '',
+    quantity: Math.max(Number(item.quantity || 1), 1),
+    unit_price: Number(item.unit_price || item.price || 0),
+    line_total: Number(item.line_total || ((item.unit_price || item.price || 0) * (item.quantity || 1)))
+  })) : [{
+    product_name: order.product_name || '',
+    shopify_product_id: order.shopify_product_id || '',
+    shopify_variant_id: order.shopify_variant_id || '',
+    sku: order.sku || '',
+    quantity: Math.max(Number(order.quantity || 1), 1),
+    unit_price: Number(order.unit_price || 0),
+    line_total: Number(order.unit_price || 0) * Math.max(Number(order.quantity || 1), 1)
+  }];
+  selectedProduct = null;
   document.getElementById('exhibitionSelect').value = order.exhibition_id || '';
   document.getElementById('customerName').value = order.customer_name || '';
   document.getElementById('customerPhone').value = order.customer_phone || '';
-  document.getElementById('productName').value = order.product_name || '';
-  document.getElementById('productPicker').value = selectedProduct ? `${selectedProduct.name} | ${selectedProduct.sku || selectedProduct.shopify_variant_id || ''}` : '';
-  document.getElementById('unitPrice').value = Math.round(Number(order.unit_price || 0));
-  document.getElementById('quantity').value = order.quantity || 1;
+  clearProductDraft();
   document.getElementById('discount').value = Math.round(Number(order.discount || 0));
   document.getElementById('deliveryMethod').value = order.delivery_method || 'Pickup from Expo';
   document.getElementById('deliveryCharges').value = Math.round(Number(order.delivery_charges || 0));
@@ -326,25 +425,18 @@ function startEditOrder(orderId) {
   document.getElementById('paymentMethod').value = order.payment_method || 'Cash';
   document.getElementById('paymentSplit').value = order.payment_split || '100% Paid';
   document.getElementById('customPaidAmount').value = Math.round(Number(order.custom_paid_amount || order.paid_amount || 0));
-  if (selectedProduct) {
-    document.getElementById('productPreviewWrap').style.display = 'block';
-    document.getElementById('productImage').src = selectedProduct.image || '';
-    document.getElementById('productPreviewName').textContent = selectedProduct.name || '';
-    document.getElementById('productPreviewMeta').textContent = `SKU ${selectedProduct.sku || 'N/A'} · Cost ${money(selectedProduct.cost)}`;
-  } else {
-    document.getElementById('productPreviewWrap').style.display = 'none';
-  }
   setOrderFormMode(order);
-  updateTotals();
+  renderOrderItems();
   document.querySelector('.ex-wrap').scrollTo({top: 0, behavior: 'smooth'});
 }
 
 function cancelEdit() {
   document.getElementById('orderForm').reset();
   selectedProduct = null;
+  orderItems = [];
   document.getElementById('productPreviewWrap').style.display = 'none';
   setOrderFormMode(null);
-  updateTotals();
+  renderOrderItems();
 }
 
 async function deleteOrder(orderId) {
@@ -360,8 +452,7 @@ async function deleteOrder(orderId) {
 }
 
 function updateTotals() {
-  const qty = Math.max(Number(document.getElementById('quantity').value || 1), 1);
-  const price = Number(document.getElementById('unitPrice').value || 0);
+  const subtotal = orderItems.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
   const discount = Math.max(Number(document.getElementById('discount').value || 0), 0);
   const method = document.getElementById('deliveryMethod').value;
   const deliveryInput = document.getElementById('deliveryCharges');
@@ -376,13 +467,13 @@ function updateTotals() {
   document.getElementById('deliveryAddressWrap').style.display = method === 'Home Delivery' ? 'flex' : 'none';
   addressInput.required = method === 'Home Delivery';
   const delivery = pickupMethods.has(method) ? 0 : Number(deliveryInput.value || 0);
-  const total = Math.max((qty * price) - discount + delivery, 0);
+  const total = Math.max(subtotal - discount + delivery, 0);
   const split = document.getElementById('paymentSplit').value;
   document.getElementById('customPaidWrap').style.display = split === 'Custom Amount' ? 'flex' : 'none';
   let paid = total;
   if (split === '50% Paid') paid = total * 0.5;
   if (split === 'Custom Amount') paid = Math.min(Math.max(Number(document.getElementById('customPaidAmount').value || 0), 0), total);
-  document.getElementById('subtotalValue').textContent = money(qty * price);
+  document.getElementById('subtotalValue').textContent = money(subtotal);
   document.getElementById('totalValue').textContent = money(total);
   document.getElementById('paidValue').textContent = money(paid);
 }
@@ -395,6 +486,15 @@ document.getElementById('productPicker').addEventListener('change', pickProduct)
 
 document.getElementById('orderForm').addEventListener('submit', async event => {
   event.preventDefault();
+  if (!orderItems.length) {
+    const draftItem = getDraftItem();
+    if (draftItem) {
+      orderItems.push(draftItem);
+      clearProductDraft();
+      renderOrderItems();
+    }
+  }
+  if (!orderItems.length) return showToast('Add at least one product to the order.');
   const button = document.getElementById('createOrderBtn');
   const wasEditing = Boolean(editingOrderId);
   button.disabled = true;
@@ -403,12 +503,7 @@ document.getElementById('orderForm').addEventListener('submit', async event => {
     exhibition_id: document.getElementById('exhibitionSelect').value,
     customer_name: document.getElementById('customerName').value.trim(),
     customer_phone: document.getElementById('customerPhone').value.trim(),
-    product_name: document.getElementById('productName').value.trim(),
-    shopify_product_id: selectedProduct ? selectedProduct.shopify_product_id : '',
-    shopify_variant_id: selectedProduct ? selectedProduct.shopify_variant_id : '',
-    sku: selectedProduct ? selectedProduct.sku : '',
-    quantity: document.getElementById('quantity').value,
-    unit_price: document.getElementById('unitPrice').value,
+    items: orderItems,
     discount: document.getElementById('discount').value,
     delivery_method: document.getElementById('deliveryMethod').value,
     delivery_address: document.getElementById('deliveryAddress').value.trim(),
@@ -440,6 +535,6 @@ loadBootstrap().catch(err => {
   document.getElementById('loadState').textContent = 'Could not load data';
   showToast(err.message);
 });
-updateTotals();
+renderOrderItems();
 </script>
 {% endblock %}

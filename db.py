@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import date, datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -92,6 +93,7 @@ def _ensure_exhibition_tables(cur):
             shopify_product_id TEXT NOT NULL DEFAULT '',
             shopify_variant_id TEXT NOT NULL DEFAULT '',
             sku TEXT NOT NULL DEFAULT '',
+            items JSONB NOT NULL DEFAULT '[]'::jsonb,
             quantity INTEGER NOT NULL DEFAULT 1,
             unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
             discount NUMERIC(12, 2) NOT NULL DEFAULT 0,
@@ -109,6 +111,10 @@ def _ensure_exhibition_tables(cur):
     cur.execute("""
         ALTER TABLE exhibition_orders
         ADD COLUMN IF NOT EXISTS delivery_address TEXT NOT NULL DEFAULT ''
+    """)
+    cur.execute("""
+        ALTER TABLE exhibition_orders
+        ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb
     """)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_exhibition_orders_exhibition
@@ -705,6 +711,7 @@ def create_exhibition_order(
     shopify_product_id: str = "",
     shopify_variant_id: str = "",
     sku: str = "",
+    items=None,
     quantity=1,
     unit_price=0,
     discount=0,
@@ -725,10 +732,10 @@ def create_exhibition_order(
                     INSERT INTO exhibition_orders (
                         exhibition_id, order_number, customer_name, customer_phone,
                         product_name, shopify_product_id, shopify_variant_id, sku,
-                        quantity, unit_price, discount, delivery_method, delivery_address, delivery_charges,
+                        items, quantity, unit_price, discount, delivery_method, delivery_address, delivery_charges,
                         payment_method, payment_split, custom_paid_amount, total_amount, paid_amount
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING *
                 """, (
                     exhibition_id or None,
@@ -739,6 +746,7 @@ def create_exhibition_order(
                     shopify_product_id or "",
                     shopify_variant_id or "",
                     sku or "",
+                    json.dumps(items or []),
                     int(quantity or 1),
                     unit_price,
                     discount,
@@ -770,6 +778,7 @@ def update_exhibition_order(
     shopify_product_id: str = "",
     shopify_variant_id: str = "",
     sku: str = "",
+    items=None,
     quantity=1,
     unit_price=0,
     discount=0,
@@ -795,6 +804,7 @@ def update_exhibition_order(
                         shopify_product_id = %s,
                         shopify_variant_id = %s,
                         sku = %s,
+                        items = %s::jsonb,
                         quantity = %s,
                         unit_price = %s,
                         discount = %s,
@@ -816,6 +826,7 @@ def update_exhibition_order(
                     shopify_product_id or "",
                     shopify_variant_id or "",
                     sku or "",
+                    json.dumps(items or []),
                     int(quantity or 1),
                     unit_price,
                     discount,

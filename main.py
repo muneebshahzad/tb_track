@@ -3030,6 +3030,62 @@ def calculate_exhibition_order_amounts(quantity, unit_price, discount, delivery_
     }
 
 
+def normalize_exhibition_order_items(payload: dict) -> list[dict]:
+    raw_items = payload.get('items')
+    if not isinstance(raw_items, list) or not raw_items:
+        raw_items = [{
+            'product_name': payload.get('product_name'),
+            'shopify_product_id': payload.get('shopify_product_id'),
+            'shopify_variant_id': payload.get('shopify_variant_id'),
+            'sku': payload.get('sku'),
+            'quantity': payload.get('quantity') or 1,
+            'unit_price': payload.get('unit_price') or payload.get('price') or 0,
+        }]
+
+    items = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get('product_name') or raw.get('name') or '').strip()
+        if not name:
+            continue
+        qty = max(int(money_float(raw.get('quantity') or 1)), 1)
+        unit_price = money_float(raw.get('unit_price') or raw.get('price') or 0)
+        line_total = round(qty * unit_price, 2)
+        items.append({
+            'product_name': name,
+            'shopify_product_id': str(raw.get('shopify_product_id') or ''),
+            'shopify_variant_id': str(raw.get('shopify_variant_id') or ''),
+            'sku': str(raw.get('sku') or ''),
+            'quantity': qty,
+            'unit_price': unit_price,
+            'line_total': line_total,
+        })
+    return items
+
+
+def calculate_exhibition_multi_item_amounts(items, discount, delivery_method, delivery_charges, payment_split, custom_paid_amount):
+    subtotal = sum(money_float(item.get('line_total')) for item in items)
+    discount_value = max(money_float(discount), 0)
+    delivery = 0.0 if delivery_method in EXHIBITION_DELIVERY_PICKUPS else max(money_float(delivery_charges), 0)
+    total = max(subtotal - discount_value + delivery, 0)
+    split = payment_split if payment_split in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
+    if split == '50% Paid':
+        paid = round(total * 0.5, 2)
+    elif split == 'Custom Amount':
+        paid = min(max(money_float(custom_paid_amount), 0), total)
+    else:
+        paid = total
+    return {
+        'subtotal': round(subtotal, 2),
+        'discount': discount_value,
+        'delivery_charges': delivery,
+        'total_amount': round(total, 2),
+        'paid_amount': round(paid, 2),
+        'custom_paid_amount': round(money_float(custom_paid_amount), 2) if split == 'Custom Amount' else 0.0,
+    }
+
+
 def make_exhibition_order_number():
     return f"EXH-{dt.datetime.now().strftime('%y%m%d%H%M%S')}-{os.urandom(2).hex().upper()}"
 
@@ -3042,6 +3098,25 @@ def build_exhibition_invoice_payload(order: dict) -> dict:
         created_display = str(created_at or '')
     total_amount = money_decimal(order.get('total_amount'))
     paid_amount = money_decimal(order.get('paid_amount'))
+    items = order.get('items') if isinstance(order.get('items'), list) else []
+    if not items:
+        items = [{
+            'product_name': order.get('product_name') or '',
+            'quantity': int(order.get('quantity') or 1),
+            'unit_price': money_float(order.get('unit_price')),
+            'line_total': money_float(order.get('unit_price')) * int(order.get('quantity') or 1),
+        }]
+    invoice_items = []
+    for item in items:
+        qty = int(item.get('quantity') or 1)
+        unit_price = money_float(item.get('unit_price'))
+        line_total = money_float(item.get('line_total') or (unit_price * qty))
+        invoice_items.append({
+            'product_name': item.get('product_name') or '',
+            'quantity': qty,
+            'unit_price': money_format(unit_price),
+            'line_total': money_format(line_total),
+        })
     return {
         'order_number': order.get('order_number') or '',
         'exhibition_name': order.get('exhibition_name') or 'Exhibition',
@@ -3049,6 +3124,7 @@ def build_exhibition_invoice_payload(order: dict) -> dict:
         'created_display': created_display,
         'customer_name': order.get('customer_name') or '',
         'customer_phone': order.get('customer_phone') or '',
+        'items': invoice_items,
         'product_name': order.get('product_name') or '',
         'quantity': int(order.get('quantity') or 1),
         'unit_price': money_format(order.get('unit_price')),
@@ -3082,9 +3158,14 @@ def build_exhibition_plain_receipt(invoice: dict) -> str:
         lines.append(f"Phone: {invoice['customer_phone']}")
     lines.extend([
         '-' * 32,
-        invoice.get('product_name') or '',
-        f"Qty: {invoice.get('quantity', 1)}",
-        f"Unit Price: {invoice.get('unit_price', '')}",
+    ])
+    for item in invoice.get('items') or []:
+        lines.extend([
+            item.get('product_name') or '',
+            f"Qty: {item.get('quantity', 1)} x {item.get('unit_price', '')}",
+            f"Line Total: {item.get('line_total', '')}",
+        ])
+    lines.extend([
         f"Discount: {invoice.get('discount', '')}",
         f"Delivery: {invoice.get('delivery_method', '')}",
     ])
@@ -3104,35 +3185,55 @@ def build_exhibition_plain_receipt(invoice: dict) -> str:
     return '\n'.join(lines)
 
 
+def get_exhibition_order_items(order: dict) -> list[dict]:
+    items = order.get('items') if isinstance(order.get('items'), list) else []
+    if items:
+        return items
+    return [{
+        'product_name': order.get('product_name') or '',
+        'shopify_product_id': order.get('shopify_product_id') or '',
+        'shopify_variant_id': order.get('shopify_variant_id') or '',
+        'sku': order.get('sku') or '',
+        'quantity': int(order.get('quantity') or 1),
+        'unit_price': money_float(order.get('unit_price')),
+        'line_total': money_float(order.get('unit_price')) * int(order.get('quantity') or 1),
+    }]
+
+
 def normalize_exhibition_order_payload(payload: dict):
-    product_name = str(payload.get('product_name') or '').strip()
-    if not product_name:
-        return None, ('Product name is required.', 400)
+    items = normalize_exhibition_order_items(payload)
+    if not items:
+        return None, ('Add at least one product to the order.', 400)
     delivery_method = payload.get('delivery_method') if payload.get('delivery_method') in EXHIBITION_DELIVERY_METHODS else 'Pickup from Expo'
     delivery_address = str(payload.get('delivery_address') or '').strip()
     if delivery_method == 'Home Delivery' and not delivery_address:
         return None, ('Delivery address is required for home delivery.', 400)
     payment_method = payload.get('payment_method') if payload.get('payment_method') in EXHIBITION_PAYMENT_METHODS else 'Cash'
     payment_split = payload.get('payment_split') if payload.get('payment_split') in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
-    amounts = calculate_exhibition_order_amounts(
-        payload.get('quantity') or 1,
-        payload.get('unit_price') or payload.get('price') or 0,
+    amounts = calculate_exhibition_multi_item_amounts(
+        items,
         payload.get('discount') or 0,
         delivery_method,
         payload.get('delivery_charges') or 0,
         payment_split,
         payload.get('custom_paid_amount') or 0,
     )
+    first_item = items[0]
+    product_name = first_item.get('product_name') or ''
+    if len(items) > 1:
+        product_name = f"{product_name} + {len(items) - 1} more"
+    total_quantity = sum(int(item.get('quantity') or 1) for item in items)
     return {
         'exhibition_id': payload.get('exhibition_id') or None,
         'customer_name': payload.get('customer_name') or '',
         'customer_phone': payload.get('customer_phone') or '',
         'product_name': product_name,
-        'shopify_product_id': payload.get('shopify_product_id') or '',
-        'shopify_variant_id': payload.get('shopify_variant_id') or '',
-        'sku': payload.get('sku') or '',
-        'quantity': amounts['quantity'],
-        'unit_price': amounts['unit_price'],
+        'shopify_product_id': first_item.get('shopify_product_id') or '',
+        'shopify_variant_id': first_item.get('shopify_variant_id') or '',
+        'sku': first_item.get('sku') or '',
+        'items': items,
+        'quantity': total_quantity,
+        'unit_price': first_item.get('unit_price') or 0,
         'discount': amounts['discount'],
         'delivery_method': delivery_method,
         'delivery_address': delivery_address if delivery_method == 'Home Delivery' else '',
@@ -4208,21 +4309,40 @@ def exhibition_accounts_api():
     total_paid = Decimal('0')
     total_product_cost = Decimal('0')
     for order in orders:
-        match = match_exhibition_order_cost(order, lookup)
-        matched_row = match.get('row')
-        qty = int(order.get('quantity') or 1)
-        unit_cost = Decimal(str(matched_row.get('exhibition_cost') if matched_row else 0))
-        product_cost_total = unit_cost * Decimal(qty)
+        item_cost_rows = []
+        product_cost_total = Decimal('0')
+        primary_match = None
+        for item in get_exhibition_order_items(order):
+            match = match_exhibition_order_cost(item, lookup)
+            matched_row = match.get('row')
+            if primary_match is None:
+                primary_match = match
+            qty = int(item.get('quantity') or 1)
+            unit_cost = Decimal(str(matched_row.get('exhibition_cost') if matched_row else 0))
+            line_cost = unit_cost * Decimal(qty)
+            product_cost_total += line_cost
+            item_cost_rows.append({
+                'product_name': item.get('product_name') or '',
+                'quantity': qty,
+                'matched_cost_name': matched_row.get('match_label') if matched_row else '',
+                'matched_cost': money_float(unit_cost),
+                'line_cost': money_float(line_cost),
+                'match_reason': match.get('reason'),
+                'match_score': match.get('score'),
+            })
         total_product_cost += product_cost_total
         total_sale += money_decimal(order.get('total_amount'))
         total_paid += money_decimal(order.get('paid_amount'))
         serialized = exhibition_serialize_row(order)
+        primary_match = primary_match or {'row': None, 'reason': 'No cost match', 'score': 0}
+        primary_row = primary_match.get('row')
         serialized.update({
-            'matched_cost_name': matched_row.get('match_label') if matched_row else '',
-            'matched_cost': money_float(unit_cost),
+            'item_costs': item_cost_rows,
+            'matched_cost_name': primary_row.get('match_label') if primary_row else '',
+            'matched_cost': item_cost_rows[0]['matched_cost'] if item_cost_rows else 0,
             'product_cost_total': money_float(product_cost_total),
-            'match_reason': match.get('reason'),
-            'match_score': match.get('score'),
+            'match_reason': primary_match.get('reason'),
+            'match_score': primary_match.get('score'),
             'cost_link': f"/shopify-product-costs?search={quote(str(order.get('product_name') or ''))}",
         })
         order_rows.append(serialized)

@@ -64,6 +64,7 @@ from db import (
     load_order_statuses,
     set_app_setting,
     update_exhibition_order,
+    update_exhibition_order_product_cost,
     upsert_order_status,
     upsert_product_cost,
 )
@@ -4298,6 +4299,19 @@ def exhibition_delete_order_api(order_id):
     return jsonify({'ok': True})
 
 
+@app.route('/api/exhibition/orders/<int:order_id>/product-cost', methods=['PUT'])
+def exhibition_update_order_product_cost_api(order_id):
+    if not get_exhibition_order(order_id):
+        return jsonify({'ok': False, 'error': 'Order not found.'}), 404
+    payload = request.get_json(silent=True) or {}
+    raw_value = payload.get('product_cost')
+    product_cost = None if raw_value in (None, '') else max(money_float(raw_value), 0)
+    order = update_exhibition_order_product_cost(order_id, product_cost)
+    if not order:
+        return jsonify({'ok': False, 'error': 'Could not update product cost.'}), 500
+    return jsonify({'ok': True, 'order': exhibition_serialize_row(order)})
+
+
 @app.route('/api/exhibition/accounts')
 def exhibition_accounts_api():
     exhibition_id = request.args.get('exhibition_id') or None
@@ -4330,6 +4344,10 @@ def exhibition_accounts_api():
                 'match_reason': match.get('reason'),
                 'match_score': match.get('score'),
             })
+        auto_product_cost_total = product_cost_total
+        has_manual_cost = order.get('product_cost_override') is not None
+        if has_manual_cost:
+            product_cost_total = money_decimal(order.get('product_cost_override'))
         total_product_cost += product_cost_total
         total_sale += money_decimal(order.get('total_amount'))
         total_paid += money_decimal(order.get('paid_amount'))
@@ -4341,6 +4359,9 @@ def exhibition_accounts_api():
             'matched_cost_name': primary_row.get('match_label') if primary_row else '',
             'matched_cost': item_cost_rows[0]['matched_cost'] if item_cost_rows else 0,
             'product_cost_total': money_float(product_cost_total),
+            'auto_product_cost_total': money_float(auto_product_cost_total),
+            'product_cost_override': money_float(order.get('product_cost_override')) if has_manual_cost else None,
+            'has_manual_product_cost': has_manual_cost,
             'match_reason': primary_match.get('reason'),
             'match_score': primary_match.get('score'),
             'cost_link': f"/shopify-product-costs?search={quote(str(order.get('product_name') or ''))}",

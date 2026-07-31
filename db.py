@@ -105,6 +105,7 @@ def _ensure_exhibition_tables(cur):
             custom_paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
             total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
             paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            product_cost_override NUMERIC(12, 2),
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
@@ -115,6 +116,10 @@ def _ensure_exhibition_tables(cur):
     cur.execute("""
         ALTER TABLE exhibition_orders
         ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb
+    """)
+    cur.execute("""
+        ALTER TABLE exhibition_orders
+        ADD COLUMN IF NOT EXISTS product_cost_override NUMERIC(12, 2)
     """)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_exhibition_orders_exhibition
@@ -864,6 +869,27 @@ def delete_exhibition_order(order_id) -> bool:
         _set_last_db_error(str(e))
         print(f"DB delete_exhibition_order error: {e}")
         return False
+
+
+def update_exhibition_order_product_cost(order_id, product_cost_override):
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    UPDATE exhibition_orders
+                    SET product_cost_override = %s
+                    WHERE id = %s
+                    RETURNING *
+                """, (product_cost_override, order_id))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_exhibition_order_product_cost error: {e}")
+        return None
 
 
 def list_exhibition_expenses(exhibition_id=None) -> list[dict]:

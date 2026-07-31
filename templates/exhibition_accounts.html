@@ -156,11 +156,45 @@ function renderOrders(rows) {
           <div class="acc-muted">${row.matched_cost_name || 'Open Shopify cost page to link cost'}</div>
           <div class="acc-muted"><a href="${row.cost_link}" target="_blank">Shopify costs</a></div>
         </td>
-        <td>${money(row.product_cost_total)}</td>
+        <td>
+          <div class="acc-main">${money(row.product_cost_total)}</div>
+          <div class="acc-muted">${row.has_manual_product_cost ? `Manual · Auto ${money(row.auto_product_cost_total)}` : 'Auto matched'}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+            <button class="btn btn-outline" type="button" onclick="editProductCost(${row.id}, ${Number(row.product_cost_total || 0)})">Edit Cost</button>
+            ${row.has_manual_product_cost ? `<button class="btn btn-outline" type="button" onclick="resetProductCost(${row.id})">Auto</button>` : ''}
+          </div>
+        </td>
         <td>${money(orderProfit)}</td>
       </tr>
     `;
   }).join('');
+}
+
+async function saveProductCost(orderId, productCost) {
+  const res = await fetch(`/api/exhibition/orders/${orderId}/product-cost`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({product_cost: productCost})
+  });
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not update product cost.');
+  await loadAccounts();
+}
+
+function editProductCost(orderId, currentCost) {
+  const value = prompt('Enter product cost for this order. Leave blank to return to automatic cost.', Math.round(Number(currentCost || 0)));
+  if (value === null) return;
+  if (String(value).trim() === '') {
+    saveProductCost(orderId, null);
+    return;
+  }
+  const amount = Number(String(value).replace(/,/g, ''));
+  if (!Number.isFinite(amount) || amount < 0) return showToast('Enter a valid product cost.');
+  saveProductCost(orderId, amount);
+}
+
+function resetProductCost(orderId) {
+  saveProductCost(orderId, null);
 }
 
 function renderExpenses(rows) {

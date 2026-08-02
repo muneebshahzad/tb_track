@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Exhibition Orders{% endblock %}
+{% block content %}
+<style>
+  .ord-wrap { height: 100%; overflow: auto; background: #f6f7fb; }
+  .ord-topbar { min-height: 56px; background: #fff; border-bottom: 1px solid #e3e6f0; display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; gap: 16px; }
+  .ord-title { font-size: 18px; font-weight: 900; color: #30313d; }
+  .ord-subtitle { color: #858796; font-size: 13px; font-weight: 500; margin-top: 2px; }
+  .ord-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+  .ord-input, .ord-select { border: 1px solid #d9e0ef; border-radius: 8px; padding: 9px 12px; font: 600 13px 'DM Sans', sans-serif; color: #30313d; background: #fff; outline: none; }
+  .ord-input { min-width: 250px; }
+  .ord-page { padding: 18px 24px 28px; display: flex; flex-direction: column; gap: 16px; }
+  .ord-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .ord-stat { background: #fff; border: 1px solid #e0e5f2; border-radius: 10px; padding: 14px; box-shadow: 0 2px 8px rgba(23,35,71,0.05); }
+  .ord-stat-label { color: #858796; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .ord-stat-value { color: #30313d; font-size: 20px; font-weight: 900; }
+  .ord-panel { background: #fff; border: 1px solid #e0e5f2; border-radius: 10px; box-shadow: 0 2px 8px rgba(23,35,71,0.05); overflow: hidden; }
+  .ord-panel-head { padding: 15px 18px; border-bottom: 1px solid #e9edf7; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .ord-panel-title { font-size: 15px; color: #30313d; font-weight: 900; }
+  .ord-table { width: 100%; border-collapse: collapse; }
+  .ord-table th { text-align: left; background: #f8f9fc; color: #858796; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; padding: 11px 14px; border-bottom: 1px solid #e3e6f0; }
+  .ord-table td { padding: 13px 14px; border-bottom: 1px solid #edf0f7; vertical-align: top; font-size: 13px; color: #30313d; }
+  .ord-table tr:last-child td { border-bottom: none; }
+  .ord-main { font-weight: 900; color: #30313d; }
+  .ord-muted { color: #858796; margin-top: 3px; }
+  .ord-actions-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ord-empty { padding: 18px; color: #858796; font-size: 13px; }
+  @media (max-width: 980px) {
+    .ord-topbar { align-items: flex-start; flex-direction: column; }
+    .ord-actions { justify-content: flex-start; width: 100%; }
+    .ord-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ord-table { min-width: 980px; }
+    .ord-table-wrap { overflow-x: auto; }
+  }
+  @media (max-width: 640px) {
+    .ord-page { padding: 12px; }
+    .ord-stats { grid-template-columns: 1fr; }
+    .ord-input, .ord-select { width: 100%; min-width: 0; }
+  }
+</style>
+
+<div class="ord-wrap">
+  <div class="ord-topbar">
+    <div>
+      <div class="ord-title">Exhibition Orders</div>
+      <div class="ord-subtitle">All exhibition orders, payments, invoices, and edits</div>
+    </div>
+    <div class="ord-actions">
+      <select class="ord-select" id="exhibitionSelect" onchange="loadOrders()"></select>
+      <input class="ord-input" id="searchInput" placeholder="Search order, customer, product..." oninput="queueSearch()">
+      <a class="btn btn-outline" href="/exhibition/accounts">Accounts</a>
+      <a class="btn btn-primary" href="/exhibition">Add Order</a>
+    </div>
+  </div>
+
+  <div class="ord-page">
+    <section class="ord-stats">
+      <div class="ord-stat"><div class="ord-stat-label">Orders</div><div class="ord-stat-value" id="orderCount">0</div></div>
+      <div class="ord-stat"><div class="ord-stat-label">Total Sale</div><div class="ord-stat-value" id="totalSale">Rs 0</div></div>
+      <div class="ord-stat"><div class="ord-stat-label">Paid</div><div class="ord-stat-value" id="totalPaid">Rs 0</div></div>
+      <div class="ord-stat"><div class="ord-stat-label">Balance</div><div class="ord-stat-value" id="balance">Rs 0</div></div>
+    </section>
+
+    <section class="ord-panel">
+      <div class="ord-panel-head">
+        <div class="ord-panel-title">Orders</div>
+        <button class="btn btn-outline" type="button" onclick="loadOrders()">Refresh</button>
+      </div>
+      <div class="ord-table-wrap">
+        <table class="ord-table">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Exhibition</th>
+              <th>Customer</th>
+              <th>Products</th>
+              <th>Payment</th>
+              <th>Delivery</th>
+              <th>Total</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="ordersBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+let searchTimer = null;
+const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
+const escapeHtml = value => String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+
+function fillExhibitions(exhibitions) {
+  const select = document.getElementById('exhibitionSelect');
+  const current = select.value;
+  select.innerHTML = '<option value="">All exhibitions</option>';
+  (exhibitions || []).forEach(ex => {
+    const opt = document.createElement('option');
+    opt.value = ex.id;
+    opt.textContent = ex.name;
+    select.appendChild(opt);
+  });
+  if (current) select.value = current;
+}
+
+function renderSummary(summary) {
+  document.getElementById('orderCount').textContent = Number(summary.order_count || 0).toLocaleString();
+  document.getElementById('totalSale').textContent = money(summary.total_sale);
+  document.getElementById('totalPaid').textContent = money(summary.total_paid);
+  document.getElementById('balance').textContent = money(summary.balance);
+}
+
+function itemLabel(row) {
+  const items = Array.isArray(row.items) ? row.items : [];
+  if (!items.length) return escapeHtml(row.product_name || '');
+  return items.map(item => {
+    const name = escapeHtml(item.product_name || item.name || '');
+    const qty = Number(item.quantity || 1);
+    const price = money(item.unit_price || item.price || 0);
+    return `<div>${name}</div><div class="ord-muted">Qty ${qty} x ${price}</div>`;
+  }).join('<div style="height:7px;"></div>');
+}
+
+function renderOrders(rows) {
+  const body = document.getElementById('ordersBody');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8"><div class="ord-empty">No exhibition orders found.</div></td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => {
+    const balance = Number(row.total_amount || 0) - Number(row.paid_amount || 0);
+    return `
+      <tr>
+        <td>
+          <div class="ord-main">${escapeHtml(row.order_number)}</div>
+          <div class="ord-muted">${row.created_at ? new Date(row.created_at).toLocaleString() : ''}</div>
+        </td>
+        <td>${escapeHtml(row.exhibition_name || 'No exhibition')}</td>
+        <td>
+          <div class="ord-main">${escapeHtml(row.customer_name || 'Walk-in')}</div>
+          <div class="ord-muted">${escapeHtml(row.customer_phone || '')}</div>
+        </td>
+        <td>${itemLabel(row)}</td>
+        <td>
+          <div class="ord-main">${escapeHtml(row.payment_method || '')}</div>
+          <div class="ord-muted">${escapeHtml(row.payment_split || '')} · Paid ${money(row.paid_amount)}</div>
+          ${balance > 0 ? `<div class="ord-muted">Balance ${money(balance)}</div>` : ''}
+        </td>
+        <td>
+          <div class="ord-main">${escapeHtml(row.delivery_method || '')}</div>
+          <div class="ord-muted">${money(row.delivery_charges)}</div>
+        </td>
+        <td><div class="ord-main">${money(row.total_amount)}</div></td>
+        <td>
+          <div class="ord-actions-row">
+            <a class="btn btn-outline" href="/exhibition?edit_order=${row.id}">Edit</a>
+            <a class="btn btn-outline" href="/exhibition/invoice/${row.id}" target="_blank">Reprint</a>
+            <button class="btn btn-danger" type="button" onclick="deleteOrder(${row.id})">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadOrders() {
+  const params = new URLSearchParams();
+  const exhibitionId = document.getElementById('exhibitionSelect').value;
+  const search = document.getElementById('searchInput').value.trim();
+  if (exhibitionId) params.set('exhibition_id', exhibitionId);
+  if (search) params.set('search', search);
+  const res = await fetch(`/api/exhibition/orders-list?${params.toString()}`);
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not load orders.');
+  fillExhibitions(data.exhibitions || []);
+  renderSummary(data.summary || {});
+  renderOrders(data.orders || []);
+}
+
+function queueSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadOrders, 250);
+}
+
+async function deleteOrder(orderId) {
+  if (!confirm('Delete this exhibition order?')) return;
+  const res = await fetch(`/api/exhibition/orders/${orderId}`, {method: 'DELETE'});
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not delete order.');
+  showToast('Order deleted.');
+  await loadOrders();
+}
+
+loadOrders().catch(err => showToast(err.message));
+</script>
+{% endblock %}

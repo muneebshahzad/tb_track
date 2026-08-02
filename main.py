@@ -4199,6 +4199,11 @@ def exhibition_accounts_page():
     return render_template('exhibition_accounts.html', target_sale=EXHIBITION_TARGET_SALE)
 
 
+@app.route('/exhibition/orders')
+def exhibition_orders_page():
+    return render_template('exhibition_orders.html')
+
+
 @app.route('/exhibition/invoice/<int:order_id>')
 def exhibition_invoice_page(order_id):
     order = get_exhibition_order(order_id)
@@ -4273,6 +4278,14 @@ def exhibition_create_order_api():
     })
 
 
+@app.route('/api/exhibition/orders/<int:order_id>', methods=['GET'])
+def exhibition_get_order_api(order_id):
+    order = get_exhibition_order(order_id)
+    if not order:
+        return jsonify({'ok': False, 'error': 'Order not found.'}), 404
+    return jsonify({'ok': True, 'order': exhibition_serialize_row(order)})
+
+
 @app.route('/api/exhibition/orders/<int:order_id>', methods=['PUT'])
 def exhibition_update_order_api(order_id):
     if not get_exhibition_order(order_id):
@@ -4297,6 +4310,40 @@ def exhibition_delete_order_api(order_id):
     if not delete_exhibition_order(order_id):
         return jsonify({'ok': False, 'error': 'Order not found or could not be deleted.'}), 404
     return jsonify({'ok': True})
+
+
+@app.route('/api/exhibition/orders-list')
+def exhibition_orders_list_api():
+    exhibition_id = request.args.get('exhibition_id') or None
+    search = normalize_catalog_match(request.args.get('search') or '')
+    rows = []
+    for row in list_exhibition_orders(exhibition_id=exhibition_id):
+        serialized = exhibition_serialize_row(row)
+        haystack = normalize_catalog_match(
+            " ".join([
+                str(serialized.get('order_number') or ''),
+                str(serialized.get('product_name') or ''),
+                str(serialized.get('customer_name') or ''),
+                str(serialized.get('customer_phone') or ''),
+                str(serialized.get('exhibition_name') or ''),
+            ])
+        )
+        if search and search not in haystack:
+            continue
+        rows.append(serialized)
+    total_sale = sum((money_decimal(row.get('total_amount')) for row in rows), Decimal('0'))
+    total_paid = sum((money_decimal(row.get('paid_amount')) for row in rows), Decimal('0'))
+    return jsonify({
+        'ok': True,
+        'exhibitions': [exhibition_serialize_row(row) for row in list_exhibitions()],
+        'orders': rows,
+        'summary': {
+            'order_count': len(rows),
+            'total_sale': money_float(total_sale),
+            'total_paid': money_float(total_paid),
+            'balance': money_float(total_sale - total_paid),
+        },
+    })
 
 
 @app.route('/api/exhibition/orders/<int:order_id>/product-cost', methods=['PUT'])

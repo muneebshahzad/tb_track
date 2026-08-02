@@ -61,6 +61,7 @@
       <div class="ex-subtitle">Create expo orders and print thermal invoices</div>
     </div>
     <div class="ex-actions">
+      <a class="btn btn-outline" href="/exhibition/orders">Orders</a>
       <a class="btn btn-outline" href="/exhibition/accounts">Accounts</a>
       <button class="btn btn-primary" type="button" onclick="toggleExhibitionForm()">New Exhibition</button>
     </div>
@@ -205,6 +206,7 @@ let selectedProduct = null;
 let orderItems = [];
 let recentOrders = [];
 let editingOrderId = null;
+let initialEditLoaded = false;
 const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
 const pickupMethods = new Set(['Pickup from Expo', 'Pickup from Warehouse']);
 const escapeHtml = value => String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -277,6 +279,12 @@ async function loadBootstrap() {
   fillProducts(data.products || []);
   renderRecentOrders(data.recent_orders || []);
   document.getElementById('loadState').textContent = `${(data.products || []).length} Shopify variants loaded`;
+  const params = new URLSearchParams(window.location.search);
+  const editOrderId = params.get('edit_order');
+  if (editOrderId && !initialEditLoaded) {
+    initialEditLoaded = true;
+    await loadOrderForEdit(editOrderId);
+  }
 }
 
 async function createExhibition() {
@@ -449,6 +457,16 @@ async function deleteOrder(orderId) {
   if (Number(editingOrderId) === Number(orderId)) cancelEdit();
   showToast('Order deleted.');
   await loadBootstrap();
+}
+
+async function loadOrderForEdit(orderId) {
+  const res = await fetch(`/api/exhibition/orders/${orderId}`);
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not load order.');
+  if (!recentOrders.some(order => Number(order.id) === Number(orderId))) {
+    recentOrders = [data.order, ...recentOrders];
+  }
+  startEditOrder(Number(orderId));
 }
 
 function updateTotals() {

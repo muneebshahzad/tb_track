@@ -47,6 +47,12 @@
     </div>
     <div class="ord-actions">
       <select class="ord-select" id="exhibitionSelect" onchange="loadOrders()"></select>
+      <select class="ord-select" id="deliveryMethodSelect" onchange="loadOrders()">
+        <option value="">All delivery</option>
+        <option value="Home Delivery">Home Delivery</option>
+        <option value="Pickup from Expo">Pickup from Expo</option>
+        <option value="Pickup from Warehouse">Pickup from Warehouse</option>
+      </select>
       <input class="ord-input" id="searchInput" placeholder="Search order, customer, product..." oninput="queueSearch()">
       <a class="btn btn-outline" href="/exhibition/accounts">Accounts</a>
       <a class="btn btn-primary" href="/exhibition">Add Order</a>
@@ -168,8 +174,10 @@ function renderOrders(rows) {
 async function loadOrders() {
   const params = new URLSearchParams();
   const exhibitionId = document.getElementById('exhibitionSelect').value;
+  const deliveryMethod = document.getElementById('deliveryMethodSelect').value;
   const search = document.getElementById('searchInput').value.trim();
   if (exhibitionId) params.set('exhibition_id', exhibitionId);
+  if (deliveryMethod) params.set('delivery_method', deliveryMethod);
   if (search) params.set('search', search);
   const res = await fetch(`/api/exhibition/orders-list?${params.toString()}`);
   const data = await res.json();

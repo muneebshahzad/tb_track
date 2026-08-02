@@ -4316,9 +4316,12 @@ def exhibition_delete_order_api(order_id):
 def exhibition_orders_list_api():
     exhibition_id = request.args.get('exhibition_id') or None
     search = normalize_catalog_match(request.args.get('search') or '')
+    delivery_method = (request.args.get('delivery_method') or '').strip()
     rows = []
     for row in list_exhibition_orders(exhibition_id=exhibition_id):
         serialized = exhibition_serialize_row(row)
+        if delivery_method and serialized.get('delivery_method') != delivery_method:
+            continue
         haystack = normalize_catalog_match(
             " ".join([
                 str(serialized.get('order_number') or ''),
@@ -4336,6 +4339,7 @@ def exhibition_orders_list_api():
     return jsonify({
         'ok': True,
         'exhibitions': [exhibition_serialize_row(row) for row in list_exhibitions()],
+        'delivery_methods': sorted(EXHIBITION_DELIVERY_METHODS),
         'orders': rows,
         'summary': {
             'order_count': len(rows),

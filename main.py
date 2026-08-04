@@ -3260,13 +3260,13 @@ def format_shopify_exhibition_tags(exhibition_name: str = '') -> str:
 def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, last_name: str, phone: str):
     customer = shopify.Customer()
     customer.first_name = first_name
-    customer.last_name = last_name or 'Customer'
+    customer.last_name = last_name or ''
     customer.phone = phone
     customer.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
     if order.get('delivery_address'):
         customer.addresses = [{
             'first_name': first_name,
-            'last_name': last_name or 'Customer',
+            'last_name': last_name or '',
             'phone': phone,
             'address1': order.get('delivery_address') or '',
             'city': 'Pakistan',
@@ -3295,7 +3295,9 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
     if order.get('delivery_method') == 'Home Delivery' and not (order.get('delivery_address') or '').strip():
         raise ValueError('Delivery address is required for home delivery orders.')
 
-    first_name, last_name = split_customer_name(customer_name)
+    name_parts = customer_name.split()
+    first_name = name_parts[0]
+    last_name = " ".join(name_parts[1:])
     customer = create_shopify_customer_for_exhibition_order(order, first_name, last_name, phone)
 
     line_items = []
@@ -3303,17 +3305,20 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
         title = (item.get('product_name') or '').strip()
         if not title:
             continue
+        unit_price = money_float(item.get('unit_price'))
         line_items.append({
             'title': title,
-            'original_unit_price': money_float(item.get('unit_price')),
+            'price': unit_price,
+            'original_unit_price': unit_price,
             'quantity': max(int(item.get('quantity') or 1), 1),
+            'requires_shipping': order.get('delivery_method') == 'Home Delivery',
         })
     if not line_items:
         raise ValueError('At least one product is required before pushing to Shopify.')
 
     shipping_address = {
         'first_name': first_name,
-        'last_name': last_name or 'Customer',
+        'last_name': last_name or '',
         'phone': phone,
         'address1': order.get('delivery_address') or order.get('delivery_method') or 'Pickup from Expo',
         'city': 'Pakistan',

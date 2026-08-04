@@ -24,6 +24,10 @@
   .ord-main { font-weight: 900; color: #30313d; }
   .ord-muted { color: #858796; margin-top: 3px; }
   .ord-actions-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ord-check { width: 18px; height: 18px; accent-color: #4e73df; }
+  .ord-status { display: inline-flex; border-radius: 99px; padding: 3px 8px; font-size: 11px; font-weight: 900; background: #eef2ff; color: #3150b7; margin-top: 5px; }
+  .ord-status.pushed { background: #d4f5e9; color: #0f6848; }
+  .ord-status.error { background: #fce8e6; color: #8b1a10; }
   .ord-empty { padding: 18px; color: #858796; font-size: 13px; }
   @media (max-width: 980px) {
     .ord-topbar { align-items: flex-start; flex-direction: column; }
@@ -53,6 +57,12 @@
         <option value="Pickup from Expo">Pickup from Expo</option>
         <option value="Pickup from Warehouse">Pickup from Warehouse</option>
       </select>
+      <select class="ord-select" id="pushStatusSelect" onchange="loadOrders()">
+        <option value="">All Shopify</option>
+        <option value="unpushed">Unpushed</option>
+        <option value="pushed">Pushed</option>
+        <option value="error">Push Error</option>
+      </select>
       <input class="ord-input" id="searchInput" placeholder="Search order, customer, product..." oninput="queueSearch()">
       <a class="btn btn-outline" href="/exhibition/accounts">Accounts</a>
       <a class="btn btn-primary" href="/exhibition">Add Order</a>
@@ -70,13 +80,17 @@
     <section class="ord-panel">
       <div class="ord-panel-head">
         <div class="ord-panel-title">Orders</div>
-        <button class="btn btn-outline" type="button" onclick="loadOrders()">Refresh</button>
+        <div class="ord-actions-row">
+          <button class="btn btn-success" type="button" onclick="pushSelectedOrders()">Push Selected</button>
+          <button class="btn btn-outline" type="button" onclick="loadOrders()">Refresh</button>
+        </div>
       </div>
       <div class="ord-table-wrap">
         <table class="ord-table">
           <thead>
             <tr>
               <th>Order</th>
+              <th><input class="ord-check" type="checkbox" id="selectAllBox" onchange="toggleSelectAll(this.checked)"></th>
               <th>Exhibition</th>
               <th>Customer</th>
               <th>Products</th>
@@ -95,6 +109,7 @@
 
 <script>
 let searchTimer = null;
+let currentOrders = [];
 const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
 const escapeHtml = value => String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
@@ -130,19 +145,26 @@ function itemLabel(row) {
 }
 
 function renderOrders(rows) {
+  currentOrders = rows || [];
   const body = document.getElementById('ordersBody');
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="8"><div class="ord-empty">No exhibition orders found.</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="9"><div class="ord-empty">No exhibition orders found.</div></td></tr>';
     return;
   }
   body.innerHTML = rows.map(row => {
     const balance = Number(row.total_amount || 0) - Number(row.paid_amount || 0);
+    const pushStatus = String(row.shopify_push_status || 'unpushed').toLowerCase();
+    const isPushed = pushStatus === 'pushed';
     return `
       <tr>
         <td>
           <div class="ord-main">${escapeHtml(row.order_number)}</div>
           <div class="ord-muted">${row.created_at ? new Date(row.created_at).toLocaleString() : ''}</div>
+          <div class="ord-status ${escapeHtml(pushStatus)}">${escapeHtml(pushStatus)}</div>
+          ${row.shopify_order_name ? `<div class="ord-muted">Shopify ${escapeHtml(row.shopify_order_name)}</div>` : ''}
+          ${row.shopify_push_error ? `<div class="ord-muted">${escapeHtml(row.shopify_push_error)}</div>` : ''}
         </td>
+        <td><input class="ord-check order-check" type="checkbox" value="${row.id}" ${isPushed ? 'disabled' : ''}></td>
         <td>${escapeHtml(row.exhibition_name || 'No exhibition')}</td>
         <td>
           <div class="ord-main">${escapeHtml(row.customer_name || 'Walk-in')}</div>
@@ -161,6 +183,7 @@ function renderOrders(rows) {
         <td><div class="ord-main">${money(row.total_amount)}</div></td>
         <td>
           <div class="ord-actions-row">
+            ${isPushed ? '' : `<button class="btn btn-success" type="button" onclick="pushOrder(${row.id})">Push</button>`}
             <a class="btn btn-outline" href="/exhibition?edit_order=${row.id}">Edit</a>
             <a class="btn btn-outline" href="/exhibition/invoice/${row.id}" target="_blank">Reprint</a>
             <button class="btn btn-danger" type="button" onclick="deleteOrder(${row.id})">Delete</button>
@@ -175,9 +198,11 @@ async function loadOrders() {
   const params = new URLSearchParams();
   const exhibitionId = document.getElementById('exhibitionSelect').value;
   const deliveryMethod = document.getElementById('deliveryMethodSelect').value;
+  const pushStatus = document.getElementById('pushStatusSelect').value;
   const search = document.getElementById('searchInput').value.trim();
   if (exhibitionId) params.set('exhibition_id', exhibitionId);
   if (deliveryMethod) params.set('delivery_method', deliveryMethod);
+  if (pushStatus) params.set('push_status', pushStatus);
   if (search) params.set('search', search);
   const res = await fetch(`/api/exhibition/orders-list?${params.toString()}`);
   const data = await res.json();
@@ -190,6 +215,39 @@ async function loadOrders() {
 function queueSearch() {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(loadOrders, 250);
+}
+
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.order-check:not(:disabled)').forEach(box => { box.checked = checked; });
+}
+
+function selectedOrderIds() {
+  return [...document.querySelectorAll('.order-check:checked')].map(box => Number(box.value)).filter(Boolean);
+}
+
+async function pushOrder(orderId) {
+  if (!confirm('Push this exhibition order to Shopify?')) return;
+  const res = await fetch(`/api/exhibition/orders/${orderId}/push-shopify`, {method: 'POST'});
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not push order to Shopify.');
+  const warningText = (data.warnings || []).length ? ` (${data.warnings.length} warning${data.warnings.length === 1 ? '' : 's'})` : '';
+  showToast(`Pushed ${data.order_name || 'Shopify order'}${warningText}`);
+  await loadOrders();
+}
+
+async function pushSelectedOrders() {
+  const ids = selectedOrderIds();
+  if (!ids.length) return showToast('Select at least one unpushed order.');
+  if (!confirm(`Push ${ids.length} selected order${ids.length === 1 ? '' : 's'} to Shopify?`)) return;
+  const res = await fetch('/api/exhibition/orders/push-shopify', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({order_ids: ids})
+  });
+  const data = await res.json();
+  if (!data.ok) return showToast(data.error || 'Could not push selected orders.');
+  showToast(`Pushed ${data.success_count || 0}; errors ${data.error_count || 0}.`);
+  await loadOrders();
 }
 
 async function deleteOrder(orderId) {

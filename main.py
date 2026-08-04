@@ -65,6 +65,7 @@ from db import (
     set_app_setting,
     update_exhibition_order,
     update_exhibition_order_product_cost,
+    update_exhibition_order_shopify_push,
     upsert_order_status,
     upsert_product_cost,
 )
@@ -3247,6 +3248,166 @@ def normalize_exhibition_order_payload(payload: dict):
     }, None
 
 
+def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, last_name: str, phone: str):
+    customer = shopify.Customer()
+    customer.first_name = first_name
+    customer.last_name = last_name or 'Customer'
+    customer.phone = phone
+    customer.tags = 'Exhibition'
+    if order.get('delivery_address'):
+        customer.addresses = [{
+            'first_name': first_name,
+            'last_name': last_name or 'Customer',
+            'phone': phone,
+            'address1': order.get('delivery_address') or '',
+            'city': 'Pakistan',
+            'country': 'Pakistan',
+        }]
+    if not customer.save():
+        raise RuntimeError(json.dumps(getattr(customer, 'errors', {}) or {'error': 'Could not create Shopify customer'}))
+    return customer
+
+
+def push_exhibition_order_to_shopify(order: dict) -> dict:
+    if str(order.get('shopify_push_status') or '').lower() == 'pushed' and order.get('shopify_order_id'):
+        return {
+            'skipped': True,
+            'order_id': order.get('shopify_order_id'),
+            'order_name': order.get('shopify_order_name'),
+            'warnings': ['Order was already pushed to Shopify.'],
+        }
+
+    customer_name = (order.get('customer_name') or '').strip()
+    if not customer_name:
+        raise ValueError('Customer name is required before pushing to Shopify.')
+    phone = normalize_pk_phone(order.get('customer_phone'))
+    if not phone:
+        raise ValueError('Customer phone is required before pushing to Shopify.')
+    if order.get('delivery_method') == 'Home Delivery' and not (order.get('delivery_address') or '').strip():
+        raise ValueError('Delivery address is required for home delivery orders.')
+
+    first_name, last_name = split_customer_name(customer_name)
+    customer = create_shopify_customer_for_exhibition_order(order, first_name, last_name, phone)
+
+    line_items = []
+    for item in get_exhibition_order_items(order):
+        title = (item.get('product_name') or '').strip()
+        if not title:
+            continue
+        line_items.append({
+            'title': title,
+            'original_unit_price': money_float(item.get('unit_price')),
+            'quantity': max(int(item.get('quantity') or 1), 1),
+        })
+    if not line_items:
+        raise ValueError('At least one product is required before pushing to Shopify.')
+
+    shipping_address = {
+        'first_name': first_name,
+        'last_name': last_name or 'Customer',
+        'phone': phone,
+        'address1': order.get('delivery_address') or order.get('delivery_method') or 'Pickup from Expo',
+        'city': 'Pakistan',
+        'country': 'Pakistan',
+    }
+
+    note_lines = [
+        f"Exhibition order: {order.get('order_number') or order.get('id')}",
+        f"Exhibition: {order.get('exhibition_name') or ''}",
+        f"Delivery method: {order.get('delivery_method') or ''}",
+        f"Payment method: {order.get('payment_method') or ''}",
+        f"Payment split: {order.get('payment_split') or ''}",
+        f"Paid amount: {money_format(order.get('paid_amount'))}",
+    ]
+    if order.get('delivery_address'):
+        note_lines.append(f"Delivery address: {order.get('delivery_address')}")
+
+    draft_order = shopify.DraftOrder()
+    draft_order.line_items = line_items
+    draft_order.note = "\n".join(line for line in note_lines if line)
+    draft_order.tags = 'Exhibition'
+    draft_order.use_customer_default_address = False
+    draft_order.customer = {'id': getattr(customer, 'id', None)}
+    draft_order.shipping_address = shipping_address
+    draft_order.billing_address = shipping_address
+
+    discount_amount = money_float(order.get('discount'))
+    if discount_amount > 0:
+        draft_order.applied_discount = {
+            'description': 'Exhibition discount',
+            'value_type': 'fixed_amount',
+            'value': discount_amount,
+            'amount': discount_amount,
+            'title': 'Exhibition discount',
+        }
+
+    delivery_charges = money_float(order.get('delivery_charges'))
+    if delivery_charges > 0:
+        draft_order.shipping_line = {
+            'title': 'Delivery Charges',
+            'price': delivery_charges,
+            'custom': True,
+        }
+
+    if not draft_order.save():
+        raise RuntimeError(json.dumps(getattr(draft_order, 'errors', {}) or {'error': 'Could not save Shopify draft order'}))
+
+    try:
+        draft_order.complete()
+    except Exception as e:
+        errors = getattr(draft_order, 'errors', None)
+        raise RuntimeError(f"Shopify could not complete the exhibition order: {e or errors or 'Unknown completion error'}")
+
+    try:
+        refreshed_draft_order = shopify.DraftOrder.find(draft_order.id)
+    except Exception:
+        refreshed_draft_order = draft_order
+
+    order_id = getattr(refreshed_draft_order, 'order_id', None) or getattr(draft_order, 'order_id', None)
+    order_name = getattr(refreshed_draft_order, 'name', '') or getattr(draft_order, 'name', '') or ''
+    if not order_id:
+        raise RuntimeError('Shopify created the draft, but the completed order ID did not come back.')
+
+    warnings = []
+    is_fully_paid = money_decimal(order.get('paid_amount')) >= money_decimal(order.get('total_amount')) and money_decimal(order.get('total_amount')) > 0
+    if is_fully_paid:
+        try:
+            mark_shopify_order_as_paid(order_id)
+        except Exception as e:
+            warnings.append(f'Could not mark order as paid: {e}')
+
+    shopify_order = None
+    if order.get('delivery_method') == 'Pickup from Expo':
+        try:
+            shopify_order = shopify.Order.find(order_id)
+            warnings.extend(fulfill_shopify_order(shopify_order))
+        except Exception as e:
+            warnings.append(f'Could not fulfill pickup order: {e}')
+        try:
+            shopify_order = shopify_order or shopify.Order.find(order_id)
+            close_result = shopify_order.close()
+            if close_result is False:
+                warnings.append('Shopify order close returned false.')
+        except Exception as e:
+            warnings.append(f'Could not archive pickup order: {e}')
+
+    update_exhibition_order_shopify_push(
+        order.get('id'),
+        status='pushed',
+        shopify_order_id=str(order_id),
+        shopify_order_name=order_name,
+        shopify_draft_order_id=str(getattr(draft_order, 'id', '') or ''),
+        error='',
+    )
+    return {
+        'order_id': order_id,
+        'order_name': order_name,
+        'draft_order_id': getattr(draft_order, 'id', None),
+        'customer_id': getattr(customer, 'id', None),
+        'warnings': warnings,
+    }
+
+
 def build_daraz_profit_records(start_date: str = '', end_date: str = ''):
     summaries = fetch_daraz_order_summaries(DARAZ_PROFIT_STATUSES)
     start_day = parse_iso_day(start_date)
@@ -4312,15 +4473,66 @@ def exhibition_delete_order_api(order_id):
     return jsonify({'ok': True})
 
 
+@app.route('/api/exhibition/orders/<int:order_id>/push-shopify', methods=['POST'])
+def exhibition_push_order_shopify_api(order_id):
+    order = get_exhibition_order(order_id)
+    if not order:
+        return jsonify({'ok': False, 'error': 'Order not found.'}), 404
+    try:
+        result = push_exhibition_order_to_shopify(order)
+        return jsonify({'ok': True, **result})
+    except Exception as e:
+        update_exhibition_order_shopify_push(order_id, status='error', error=str(e))
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/exhibition/orders/push-shopify', methods=['POST'])
+def exhibition_bulk_push_orders_shopify_api():
+    payload = request.get_json(silent=True) or {}
+    order_ids = payload.get('order_ids') or []
+    if not isinstance(order_ids, list) or not order_ids:
+        return jsonify({'ok': False, 'error': 'Select at least one order to push.'}), 400
+    results = []
+    for raw_order_id in order_ids:
+        try:
+            order_id = int(raw_order_id)
+        except Exception:
+            continue
+        order = get_exhibition_order(order_id)
+        if not order:
+            results.append({'order_id': order_id, 'ok': False, 'error': 'Order not found.'})
+            continue
+        try:
+            result = push_exhibition_order_to_shopify(order)
+            results.append({'order_id': order_id, 'ok': True, **result})
+        except Exception as e:
+            update_exhibition_order_shopify_push(order_id, status='error', error=str(e))
+            results.append({'order_id': order_id, 'ok': False, 'error': str(e)})
+    return jsonify({
+        'ok': True,
+        'results': results,
+        'success_count': sum(1 for result in results if result.get('ok')),
+        'error_count': sum(1 for result in results if not result.get('ok')),
+    })
+
+
 @app.route('/api/exhibition/orders-list')
 def exhibition_orders_list_api():
     exhibition_id = request.args.get('exhibition_id') or None
     search = normalize_catalog_match(request.args.get('search') or '')
     delivery_method = (request.args.get('delivery_method') or '').strip()
+    push_status = (request.args.get('push_status') or '').strip().lower()
     rows = []
     for row in list_exhibition_orders(exhibition_id=exhibition_id):
         serialized = exhibition_serialize_row(row)
         if delivery_method and serialized.get('delivery_method') != delivery_method:
+            continue
+        serialized_push_status = str(serialized.get('shopify_push_status') or 'unpushed').lower()
+        if push_status == 'pushed' and serialized_push_status != 'pushed':
+            continue
+        if push_status == 'unpushed' and serialized_push_status == 'pushed':
+            continue
+        if push_status == 'error' and serialized_push_status != 'error':
             continue
         haystack = normalize_catalog_match(
             " ".join([

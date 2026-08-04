@@ -106,6 +106,12 @@ def _ensure_exhibition_tables(cur):
             total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
             paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
             product_cost_override NUMERIC(12, 2),
+            shopify_push_status TEXT NOT NULL DEFAULT 'unpushed',
+            shopify_order_id TEXT NOT NULL DEFAULT '',
+            shopify_order_name TEXT NOT NULL DEFAULT '',
+            shopify_draft_order_id TEXT NOT NULL DEFAULT '',
+            shopify_push_error TEXT NOT NULL DEFAULT '',
+            shopify_pushed_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
     """)
@@ -121,6 +127,18 @@ def _ensure_exhibition_tables(cur):
         ALTER TABLE exhibition_orders
         ADD COLUMN IF NOT EXISTS product_cost_override NUMERIC(12, 2)
     """)
+    for column, definition in (
+        ("shopify_push_status", "TEXT NOT NULL DEFAULT 'unpushed'"),
+        ("shopify_order_id", "TEXT NOT NULL DEFAULT ''"),
+        ("shopify_order_name", "TEXT NOT NULL DEFAULT ''"),
+        ("shopify_draft_order_id", "TEXT NOT NULL DEFAULT ''"),
+        ("shopify_push_error", "TEXT NOT NULL DEFAULT ''"),
+        ("shopify_pushed_at", "TIMESTAMPTZ"),
+    ):
+        cur.execute(f"""
+            ALTER TABLE exhibition_orders
+            ADD COLUMN IF NOT EXISTS {column} {definition}
+        """)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_exhibition_orders_exhibition
         ON exhibition_orders (exhibition_id, created_at DESC)
@@ -889,6 +907,47 @@ def update_exhibition_order_product_cost(order_id, product_cost_override):
     except Exception as e:
         _set_last_db_error(str(e))
         print(f"DB update_exhibition_order_product_cost error: {e}")
+        return None
+
+
+def update_exhibition_order_shopify_push(
+    order_id,
+    status: str,
+    shopify_order_id: str = "",
+    shopify_order_name: str = "",
+    shopify_draft_order_id: str = "",
+    error: str = "",
+):
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    UPDATE exhibition_orders
+                    SET shopify_push_status = %s,
+                        shopify_order_id = COALESCE(NULLIF(%s, ''), shopify_order_id),
+                        shopify_order_name = COALESCE(NULLIF(%s, ''), shopify_order_name),
+                        shopify_draft_order_id = COALESCE(NULLIF(%s, ''), shopify_draft_order_id),
+                        shopify_push_error = %s,
+                        shopify_pushed_at = CASE WHEN %s = 'pushed' THEN NOW() ELSE shopify_pushed_at END
+                    WHERE id = %s
+                    RETURNING *
+                """, (
+                    status or "unpushed",
+                    shopify_order_id or "",
+                    shopify_order_name or "",
+                    shopify_draft_order_id or "",
+                    error or "",
+                    status or "unpushed",
+                    order_id,
+                ))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_exhibition_order_shopify_push error: {e}")
         return None
 
 

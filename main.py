@@ -3257,23 +3257,39 @@ def format_shopify_exhibition_tags(exhibition_name: str = '') -> str:
     return ', '.join(tags)
 
 
+def shopify_error_message(resource, fallback='Shopify request failed.'):
+    errors = getattr(resource, 'errors', None)
+    if not errors:
+        return fallback
+    try:
+        full_messages = errors.full_messages()
+        if full_messages:
+            return "; ".join(str(message) for message in full_messages)
+    except Exception:
+        pass
+    return str(errors)
+
+
 def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, last_name: str, phone: str):
     customer = shopify.Customer()
     customer.first_name = first_name
     customer.last_name = last_name or ''
-    customer.phone = phone
+    if phone:
+        customer.phone = phone
     customer.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
     if order.get('delivery_address'):
-        customer.addresses = [{
+        address = {
             'first_name': first_name,
             'last_name': last_name or '',
-            'phone': phone,
             'address1': order.get('delivery_address') or '',
             'city': 'Pakistan',
             'country': 'Pakistan',
-        }]
+        }
+        if phone:
+            address['phone'] = phone
+        customer.addresses = [address]
     if not customer.save():
-        raise RuntimeError(json.dumps(getattr(customer, 'errors', {}) or {'error': 'Could not create Shopify customer'}))
+        raise RuntimeError(shopify_error_message(customer, 'Could not create Shopify customer.'))
     return customer
 
 
@@ -3286,14 +3302,13 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
             'warnings': ['Order was already pushed to Shopify.'],
         }
 
-    customer_name = (order.get('customer_name') or '').strip()
-    if not customer_name:
-        raise ValueError('Customer name is required before pushing to Shopify.')
+    customer_name = (order.get('customer_name') or '').strip() or 'Walk-in'
     phone = normalize_pk_phone(order.get('customer_phone'))
-    if not phone:
-        raise ValueError('Customer phone is required before pushing to Shopify.')
-    if order.get('delivery_method') == 'Home Delivery' and not (order.get('delivery_address') or '').strip():
-        raise ValueError('Delivery address is required for home delivery orders.')
+    if order.get('delivery_method') == 'Home Delivery':
+        if not phone:
+            raise ValueError('Customer phone is required for home delivery orders.')
+        if not (order.get('delivery_address') or '').strip():
+            raise ValueError('Delivery address is required for home delivery orders.')
 
     name_parts = customer_name.split()
     first_name = name_parts[0]
@@ -3319,11 +3334,12 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
     shipping_address = {
         'first_name': first_name,
         'last_name': last_name or '',
-        'phone': phone,
         'address1': order.get('delivery_address') or order.get('delivery_method') or 'Pickup from Expo',
         'city': 'Pakistan',
         'country': 'Pakistan',
     }
+    if phone:
+        shipping_address['phone'] = phone
 
     note_lines = [
         f"Exhibition order: {order.get('order_number') or order.get('id')}",
@@ -3364,7 +3380,7 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
         }
 
     if not draft_order.save():
-        raise RuntimeError(json.dumps(getattr(draft_order, 'errors', {}) or {'error': 'Could not save Shopify draft order'}))
+        raise RuntimeError(shopify_error_message(draft_order, 'Could not save Shopify draft order.'))
 
     try:
         draft_order.complete()

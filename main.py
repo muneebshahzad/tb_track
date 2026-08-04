@@ -3248,12 +3248,21 @@ def normalize_exhibition_order_payload(payload: dict):
     }, None
 
 
+def format_shopify_exhibition_tags(exhibition_name: str = '') -> str:
+    tags = ['Exhibition']
+    clean_name = re.sub(r'[,]+', ' ', str(exhibition_name or '').strip())
+    clean_name = ' '.join(clean_name.split())
+    if clean_name:
+        tags.append(clean_name)
+    return ', '.join(tags)
+
+
 def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, last_name: str, phone: str):
     customer = shopify.Customer()
     customer.first_name = first_name
     customer.last_name = last_name or 'Customer'
     customer.phone = phone
-    customer.tags = 'Exhibition'
+    customer.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
     if order.get('delivery_address'):
         customer.addresses = [{
             'first_name': first_name,
@@ -3325,7 +3334,7 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
     draft_order = shopify.DraftOrder()
     draft_order.line_items = line_items
     draft_order.note = "\n".join(line for line in note_lines if line)
-    draft_order.tags = 'Exhibition'
+    draft_order.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
     draft_order.use_customer_default_address = False
     draft_order.customer = {'id': getattr(customer, 'id', None)}
     draft_order.shipping_address = shipping_address

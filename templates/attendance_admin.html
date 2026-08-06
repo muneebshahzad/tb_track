@@ -69,6 +69,7 @@
           <th>Date</th>
           <th>Check In</th>
           <th>Check Out</th>
+          <th>Total Time</th>
           <th>GPS</th>
           <th>Status</th>
         </tr>
@@ -86,6 +87,16 @@ function fmt(value) {
 function meters(value) {
   if (value === null || value === undefined || value === '') return '-';
   return `${Math.round(Number(value))}m`;
+}
+
+function totalTime(checkIn, checkOut) {
+  if (!checkIn || !checkOut) return '-';
+  const minutes = Math.max(0, Math.round((new Date(checkOut) - new Date(checkIn)) / 60000));
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours && mins) return `${hours} ${hours === 1 ? 'hour' : 'hours'}, ${mins} min`;
+  if (hours) return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  return `${mins} min`;
 }
 
 function escapeHtml(value) {
@@ -127,6 +138,7 @@ function renderRecords(data) {
       <td>${escapeHtml(row.work_date)}</td>
       <td>${fmt(row.check_in_at)}<div class="att-muted">Accuracy ${meters(row.check_in_accuracy_meters)}</div>${row.has_check_in_photo ? `<a href="/attendance/admin/records/${row.id}/photo/check-in" target="_blank">Photo</a>` : ''}</td>
       <td>${fmt(row.check_out_at)}<div class="att-muted">Accuracy ${meters(row.check_out_accuracy_meters)}</div>${row.has_check_out_photo ? `<a href="/attendance/admin/records/${row.id}/photo/check-out" target="_blank">Photo</a>` : ''}</td>
+      <td><strong>${totalTime(row.check_in_at, row.check_out_at)}</strong></td>
       <td>${escapeHtml(row.location_name || '')}<div class="att-muted">In ${meters(row.check_in_distance_meters)} · Out ${meters(row.check_out_distance_meters)}</div></td>
       <td><span class="att-pill ${row.check_out_at ? '' : 'open'}">${row.check_out_at ? 'Closed' : 'Open'}</span></td>
     </tr>

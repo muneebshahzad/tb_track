@@ -149,10 +149,15 @@ def _ensure_exhibition_tables(cur):
             exhibition_id BIGINT REFERENCES exhibitions(id) ON DELETE CASCADE,
             label TEXT NOT NULL,
             amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            payment_method TEXT NOT NULL DEFAULT 'Cash',
             expense_date DATE DEFAULT CURRENT_DATE,
             notes TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMPTZ DEFAULT NOW()
         )
+    """)
+    cur.execute("""
+        ALTER TABLE exhibition_expenses
+        ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'Cash'
     """)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_exhibition_expenses_exhibition
@@ -1047,8 +1052,16 @@ def list_exhibition_expenses(exhibition_id=None) -> list[dict]:
         return []
 
 
-def create_exhibition_expense(exhibition_id, label: str, amount=0, expense_date=None, notes: str = "") -> dict | None:
+def create_exhibition_expense(
+    exhibition_id,
+    label: str,
+    amount=0,
+    expense_date=None,
+    notes: str = "",
+    payment_method: str = "Cash",
+) -> dict | None:
     label = str(label or "").strip()
+    payment_method = "Bank" if payment_method == "Bank" else "Cash"
     if not exhibition_id or not label:
         return None
     try:
@@ -1056,10 +1069,10 @@ def create_exhibition_expense(exhibition_id, label: str, amount=0, expense_date=
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 _ensure_exhibition_tables(cur)
                 cur.execute("""
-                    INSERT INTO exhibition_expenses (exhibition_id, label, amount, expense_date, notes)
-                    VALUES (%s, %s, %s, COALESCE(%s, CURRENT_DATE), %s)
+                    INSERT INTO exhibition_expenses (exhibition_id, label, amount, payment_method, expense_date, notes)
+                    VALUES (%s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s)
                     RETURNING *
-                """, (exhibition_id, label, amount, _date_or_none(expense_date), notes or ""))
+                """, (exhibition_id, label, amount, payment_method, _date_or_none(expense_date), notes or ""))
                 row = dict(cur.fetchone())
             conn.commit()
         _set_last_db_error("")

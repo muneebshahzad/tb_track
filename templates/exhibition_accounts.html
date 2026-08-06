@@ -9,7 +9,7 @@
   .acc-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .acc-select, .acc-input { border: 1px solid #d9e0ef; border-radius: 8px; padding: 9px 12px; font: 600 13px 'DM Sans', sans-serif; color: #30313d; background: #fff; outline: none; }
   .acc-page { padding: 18px 24px 28px; display: flex; flex-direction: column; gap: 18px; }
-  .acc-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+  .acc-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
   .acc-stat { background: #fff; border: 1px solid #e0e5f2; border-radius: 10px; padding: 14px; box-shadow: 0 2px 8px rgba(23,35,71,0.05); min-width: 0; }
   .acc-stat-label { color: #858796; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
   .acc-stat-value { color: #30313d; font-size: 20px; font-weight: 900; white-space: nowrap; }
@@ -29,7 +29,6 @@
   .acc-form-row { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
   .acc-empty { padding: 18px; color: #858796; font-size: 13px; }
   @media (max-width: 1250px) {
-    .acc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .acc-panels { grid-template-columns: 1fr; }
   }
   @media (max-width: 720px) {
@@ -61,6 +60,9 @@
       <div class="acc-stat"><div class="acc-stat-label">Total Sale</div><div class="acc-stat-value" id="totalSale">Rs 0</div></div>
       <div class="acc-stat"><div class="acc-stat-label">Target Left</div><div class="acc-stat-value" id="targetLeft">Rs {{ target_sale | format_number }}</div></div>
       <div class="acc-stat"><div class="acc-stat-label">Total Expense</div><div class="acc-stat-value" id="totalExpense">Rs 0</div></div>
+      <div class="acc-stat"><div class="acc-stat-label">Cash</div><div class="acc-stat-value" id="cashBalance">Rs 0</div></div>
+      <div class="acc-stat"><div class="acc-stat-label">Bank</div><div class="acc-stat-value" id="bankBalance">Rs 0</div></div>
+      <div class="acc-stat"><div class="acc-stat-label">Receivable</div><div class="acc-stat-value" id="receivableBalance">Rs 0</div></div>
       <div class="acc-stat"><div class="acc-stat-label">Product Cost</div><div class="acc-stat-value" id="productCost">Rs 0</div></div>
       <div class="acc-stat"><div class="acc-stat-label">Net Profit</div><div class="acc-stat-value" id="netProfit">Rs 0</div></div>
     </section>
@@ -98,6 +100,10 @@
             <input class="acc-input" id="expenseDate" type="date">
             <input class="acc-input" id="expenseAmount" type="number" min="0" step="1" placeholder="Amount">
           </div>
+          <select class="acc-select" id="expensePaymentMethod">
+            <option>Cash</option>
+            <option>Bank</option>
+          </select>
           <input class="acc-input" id="expenseNotes" placeholder="Notes">
           <button class="btn btn-success" type="submit">Add Expense</button>
         </form>
@@ -109,10 +115,11 @@
 
 <script>
 const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
+let selectedExhibitionId = '';
 
 function fillExhibitions(exhibitions) {
   const select = document.getElementById('exhibitionSelect');
-  const current = select.value;
+  const current = selectedExhibitionId || select.value;
   select.innerHTML = '';
   exhibitions.forEach(ex => {
     const opt = document.createElement('option');
@@ -120,7 +127,10 @@ function fillExhibitions(exhibitions) {
     opt.textContent = ex.name;
     select.appendChild(opt);
   });
-  if (current) select.value = current;
+  if (current && [...select.options].some(opt => opt.value === String(current))) {
+    select.value = current;
+  }
+  selectedExhibitionId = select.value;
 }
 
 function renderSummary(summary) {
@@ -128,6 +138,9 @@ function renderSummary(summary) {
   document.getElementById('totalSale').textContent = money(summary.total_sale);
   document.getElementById('targetLeft').textContent = money(summary.target_left);
   document.getElementById('totalExpense').textContent = money(summary.total_expense);
+  document.getElementById('cashBalance').textContent = money(summary.cash);
+  document.getElementById('bankBalance').textContent = money(summary.bank);
+  document.getElementById('receivableBalance').textContent = money(summary.receivable);
   document.getElementById('productCost').textContent = money(summary.product_cost);
   document.getElementById('netProfit').textContent = money(summary.net_profit);
 }
@@ -209,7 +222,7 @@ function renderExpenses(rows) {
       <div style="display:grid;grid-template-columns:1fr auto;gap:12px;padding:13px 18px;border-top:1px solid #edf0f7;">
         <div>
           <div class="acc-main">${row.label}</div>
-          <div class="acc-muted">${row.expense_date || ''}${row.notes ? ' · ' + row.notes : ''}</div>
+          <div class="acc-muted">${row.expense_date || ''} · ${row.payment_method || 'Cash'}${row.notes ? ' · ' + row.notes : ''}</div>
         </div>
         <div class="acc-main">${money(row.amount)}</div>
       </div>
@@ -218,10 +231,11 @@ function renderExpenses(rows) {
 }
 
 async function loadAccounts() {
-  const exhibitionId = document.getElementById('exhibitionSelect').value;
+  const exhibitionId = selectedExhibitionId || document.getElementById('exhibitionSelect').value;
   const res = await fetch(`/api/exhibition/accounts?exhibition_id=${encodeURIComponent(exhibitionId || '')}`);
   const data = await res.json();
   if (!data.ok) return showToast(data.error || 'Could not load accounts.');
+  selectedExhibitionId = data.selected_exhibition_id || exhibitionId || '';
   fillExhibitions(data.exhibitions || []);
   renderSummary(data.summary || {});
   renderOrders(data.orders || []);
@@ -236,6 +250,7 @@ document.getElementById('expenseForm').addEventListener('submit', async event =>
     exhibition_id: exhibitionId,
     label: document.getElementById('expenseLabel').value.trim(),
     amount: document.getElementById('expenseAmount').value,
+    payment_method: document.getElementById('expensePaymentMethod').value,
     expense_date: document.getElementById('expenseDate').value,
     notes: document.getElementById('expenseNotes').value.trim()
   };
@@ -251,10 +266,16 @@ document.getElementById('expenseForm').addEventListener('submit', async event =>
   loadAccounts();
 });
 
+document.getElementById('exhibitionSelect').addEventListener('change', event => {
+  selectedExhibitionId = event.target.value;
+  loadAccounts();
+});
+
 fetch('/api/exhibition/accounts')
   .then(res => res.json())
   .then(data => {
     if (!data.ok) throw new Error(data.error || 'Could not load accounts.');
+    selectedExhibitionId = data.selected_exhibition_id || '';
     fillExhibitions(data.exhibitions || []);
     renderSummary(data.summary || {});
     renderOrders(data.orders || []);

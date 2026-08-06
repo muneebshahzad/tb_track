@@ -207,6 +207,7 @@ let orderItems = [];
 let recentOrders = [];
 let editingOrderId = null;
 let initialEditLoaded = false;
+let selectedExhibitionId = '';
 const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
 const pickupMethods = new Set(['Pickup from Expo', 'Pickup from Warehouse']);
 const escapeHtml = value => String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -217,6 +218,7 @@ function toggleExhibitionForm() {
 
 function fillExhibitions(exhibitions) {
   const select = document.getElementById('exhibitionSelect');
+  const current = selectedExhibitionId || select.value;
   select.innerHTML = '';
   if (!exhibitions.length) {
     const opt = document.createElement('option');
@@ -231,6 +233,10 @@ function fillExhibitions(exhibitions) {
     opt.textContent = ex.name;
     select.appendChild(opt);
   });
+  if (current && [...select.options].some(opt => opt.value === String(current))) {
+    select.value = current;
+  }
+  selectedExhibitionId = select.value;
 }
 
 function fillProducts(items) {
@@ -270,11 +276,15 @@ function renderRecentOrders(rows) {
   `).join('');
 }
 
-async function loadBootstrap() {
+async function loadBootstrap(preferredExhibitionId) {
   document.getElementById('loadState').textContent = 'Loading Shopify products...';
-  const res = await fetch('/api/exhibition/bootstrap');
+  const params = new URLSearchParams();
+  const exhibitionId = preferredExhibitionId || selectedExhibitionId || document.getElementById('exhibitionSelect').value;
+  if (exhibitionId) params.set('exhibition_id', exhibitionId);
+  const res = await fetch(`/api/exhibition/bootstrap?${params.toString()}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Could not load exhibition data.');
+  selectedExhibitionId = data.selected_exhibition_id || exhibitionId || '';
   fillExhibitions(data.exhibitions || []);
   fillProducts(data.products || []);
   renderRecentOrders(data.recent_orders || []);
@@ -301,8 +311,8 @@ async function createExhibition() {
   });
   const data = await res.json();
   if (!data.ok) return showToast(data.error || 'Could not create exhibition.');
-  await loadBootstrap();
-  document.getElementById('exhibitionSelect').value = data.exhibition.id;
+  selectedExhibitionId = String(data.exhibition.id);
+  await loadBootstrap(selectedExhibitionId);
   document.getElementById('newExhibitionName').value = '';
   document.getElementById('newExhibitionLocation').value = '';
   document.getElementById('exhibitionForm').classList.remove('open');
@@ -539,6 +549,7 @@ document.getElementById('orderForm').addEventListener('submit', async event => {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not save order.');
     window.open(data.invoice_url, '_blank');
+    selectedExhibitionId = payload.exhibition_id;
     cancelEdit();
     await loadBootstrap();
   } catch (err) {
@@ -547,6 +558,11 @@ document.getElementById('orderForm').addEventListener('submit', async event => {
     button.disabled = false;
     button.textContent = editingOrderId ? 'Update Order' : 'Create Order';
   }
+});
+
+document.getElementById('exhibitionSelect').addEventListener('change', event => {
+  selectedExhibitionId = event.target.value;
+  loadBootstrap(selectedExhibitionId).catch(err => showToast(err.message));
 });
 
 loadBootstrap().catch(err => {

@@ -4762,11 +4762,13 @@ def exhibition_plain_invoice_page(order_id):
 def exhibition_bootstrap_api():
     try:
         exhibitions = [exhibition_serialize_row(row) for row in list_exhibitions()]
+        exhibition_id = request.args.get('exhibition_id') or (exhibitions[0]['id'] if exhibitions else None)
         products = build_exhibition_product_catalog()
-        recent_orders = [exhibition_serialize_row(row) for row in list_exhibition_orders(limit=25)]
+        recent_orders = [exhibition_serialize_row(row) for row in list_exhibition_orders(exhibition_id=exhibition_id, limit=25)]
         return jsonify({
             'ok': True,
             'exhibitions': exhibitions,
+            'selected_exhibition_id': exhibition_id,
             'products': products,
             'recent_orders': recent_orders,
             'delivery_methods': sorted(EXHIBITION_DELIVERY_METHODS),
@@ -4951,7 +4953,8 @@ def exhibition_update_order_product_cost_api(order_id):
 
 @app.route('/api/exhibition/accounts')
 def exhibition_accounts_api():
-    exhibition_id = request.args.get('exhibition_id') or None
+    exhibitions = [exhibition_serialize_row(row) for row in list_exhibitions()]
+    exhibition_id = request.args.get('exhibition_id') or (exhibitions[0]['id'] if exhibitions else None)
     orders = list_exhibition_orders(exhibition_id=exhibition_id)
     expenses = list_exhibition_expenses(exhibition_id=exhibition_id)
     lookup = build_exhibition_cost_lookup()
@@ -4959,6 +4962,8 @@ def exhibition_accounts_api():
     total_sale = Decimal('0')
     total_paid = Decimal('0')
     total_product_cost = Decimal('0')
+    cash_income = Decimal('0')
+    bank_income = Decimal('0')
     for order in orders:
         item_cost_rows = []
         product_cost_total = Decimal('0')
@@ -4988,6 +4993,10 @@ def exhibition_accounts_api():
         total_product_cost += product_cost_total
         total_sale += money_decimal(order.get('total_amount'))
         total_paid += money_decimal(order.get('paid_amount'))
+        if order.get('payment_method') == 'Bank':
+            bank_income += money_decimal(order.get('paid_amount'))
+        else:
+            cash_income += money_decimal(order.get('paid_amount'))
         serialized = exhibition_serialize_row(order)
         primary_match = primary_match or {'row': None, 'reason': 'No cost match', 'score': 0}
         primary_row = primary_match.get('row')
@@ -5006,11 +5015,14 @@ def exhibition_accounts_api():
         order_rows.append(serialized)
 
     total_expense = sum((money_decimal(row.get('amount')) for row in expenses), Decimal('0'))
+    cash_expense = sum((money_decimal(row.get('amount')) for row in expenses if row.get('payment_method') != 'Bank'), Decimal('0'))
+    bank_expense = sum((money_decimal(row.get('amount')) for row in expenses if row.get('payment_method') == 'Bank'), Decimal('0'))
     net_profit = total_sale - total_product_cost - total_expense
     target_left = Decimal(str(EXHIBITION_TARGET_SALE)) - total_sale
     return jsonify({
         'ok': True,
-        'exhibitions': [exhibition_serialize_row(row) for row in list_exhibitions()],
+        'exhibitions': exhibitions,
+        'selected_exhibition_id': exhibition_id,
         'orders': order_rows,
         'expenses': [exhibition_serialize_row(row) for row in expenses],
         'summary': {
@@ -5019,6 +5031,9 @@ def exhibition_accounts_api():
             'total_paid': money_float(total_paid),
             'target_left': money_float(target_left),
             'total_expense': money_float(total_expense),
+            'cash': money_float(cash_income - cash_expense),
+            'bank': money_float(bank_income - bank_expense),
+            'receivable': money_float(total_sale - total_paid),
             'product_cost': money_float(total_product_cost),
             'net_profit': money_float(net_profit),
             'target_sale': EXHIBITION_TARGET_SALE,
@@ -5035,6 +5050,7 @@ def exhibition_create_expense_api():
         amount=payload.get('amount') or 0,
         expense_date=payload.get('expense_date') or None,
         notes=payload.get('notes') or '',
+        payment_method=payload.get('payment_method') or 'Cash',
     )
     if not row:
         return jsonify({'ok': False, 'error': 'Exhibition and expense label are required.'}), 400

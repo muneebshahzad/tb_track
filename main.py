@@ -4962,6 +4962,7 @@ def exhibition_accounts_api():
     expenses = list_exhibition_expenses(exhibition_id=exhibition_id)
     lookup = build_exhibition_cost_lookup()
     order_rows = []
+    daily_rows = {}
     total_sale = Decimal('0')
     total_paid = Decimal('0')
     total_product_cost = Decimal('0')
@@ -4994,12 +4995,37 @@ def exhibition_accounts_api():
         if has_manual_cost:
             product_cost_total = money_decimal(order.get('product_cost_override'))
         total_product_cost += product_cost_total
-        total_sale += money_decimal(order.get('total_amount'))
-        total_paid += money_decimal(order.get('paid_amount'))
+        order_total = money_decimal(order.get('total_amount'))
+        order_paid = money_decimal(order.get('paid_amount'))
+        total_sale += order_total
+        total_paid += order_paid
         if order.get('payment_method') == 'Bank':
-            bank_income += money_decimal(order.get('paid_amount'))
+            bank_income += order_paid
         else:
-            cash_income += money_decimal(order.get('paid_amount'))
+            cash_income += order_paid
+        created_at = order.get('created_at')
+        day_key = created_at.strftime('%Y-%m-%d') if hasattr(created_at, 'strftime') else str(created_at or '')[:10]
+        if day_key:
+            daily = daily_rows.setdefault(day_key, {
+                'date': day_key,
+                'order_count': 0,
+                'total_sale': Decimal('0'),
+                'total_paid': Decimal('0'),
+                'cash': Decimal('0'),
+                'bank': Decimal('0'),
+                'receivable': Decimal('0'),
+                'expense': Decimal('0'),
+                'product_cost': Decimal('0'),
+            })
+            daily['order_count'] += 1
+            daily['total_sale'] += order_total
+            daily['total_paid'] += order_paid
+            daily['receivable'] += order_total - order_paid
+            daily['product_cost'] += product_cost_total
+            if order.get('payment_method') == 'Bank':
+                daily['bank'] += order_paid
+            else:
+                daily['cash'] += order_paid
         serialized = exhibition_serialize_row(order)
         primary_match = primary_match or {'row': None, 'reason': 'No cost match', 'score': 0}
         primary_row = primary_match.get('row')
@@ -5020,6 +5046,41 @@ def exhibition_accounts_api():
     total_expense = sum((money_decimal(row.get('amount')) for row in expenses), Decimal('0'))
     cash_expense = sum((money_decimal(row.get('amount')) for row in expenses if row.get('payment_method') != 'Bank'), Decimal('0'))
     bank_expense = sum((money_decimal(row.get('amount')) for row in expenses if row.get('payment_method') == 'Bank'), Decimal('0'))
+    for expense in expenses:
+        expense_date = str(expense.get('expense_date') or '')[:10]
+        if not expense_date:
+            continue
+        daily = daily_rows.setdefault(expense_date, {
+            'date': expense_date,
+            'order_count': 0,
+            'total_sale': Decimal('0'),
+            'total_paid': Decimal('0'),
+            'cash': Decimal('0'),
+            'bank': Decimal('0'),
+            'receivable': Decimal('0'),
+            'expense': Decimal('0'),
+            'product_cost': Decimal('0'),
+        })
+        expense_amount = money_decimal(expense.get('amount'))
+        daily['expense'] += expense_amount
+        if expense.get('payment_method') == 'Bank':
+            daily['bank'] -= expense_amount
+        else:
+            daily['cash'] -= expense_amount
+    daily_summaries = []
+    for row in sorted(daily_rows.values(), key=lambda item: item['date'], reverse=True):
+        daily_summaries.append({
+            'date': row['date'],
+            'order_count': row['order_count'],
+            'total_sale': money_float(row['total_sale']),
+            'total_paid': money_float(row['total_paid']),
+            'cash': money_float(row['cash']),
+            'bank': money_float(row['bank']),
+            'receivable': money_float(row['receivable']),
+            'expense': money_float(row['expense']),
+            'product_cost': money_float(row['product_cost']),
+            'net_profit': money_float(row['total_sale'] - row['product_cost'] - row['expense']),
+        })
     net_profit = total_sale - total_product_cost - total_expense
     target_left = Decimal(str(EXHIBITION_TARGET_SALE)) - total_sale
     return jsonify({
@@ -5028,6 +5089,7 @@ def exhibition_accounts_api():
         'selected_exhibition_id': exhibition_id,
         'orders': order_rows,
         'expenses': [exhibition_serialize_row(row) for row in expenses],
+        'daily_summaries': daily_summaries,
         'summary': {
             'order_count': len(orders),
             'total_sale': money_float(total_sale),

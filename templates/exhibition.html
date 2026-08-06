@@ -43,6 +43,8 @@
   .ex-create-row { padding: 0 18px 18px; display: flex; justify-content: flex-end; }
   .ex-mini-form { display: none; padding: 0 18px 18px; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
   .ex-mini-form.open { display: grid; }
+  .ex-panel.collapsed #recentOrders { display: none; }
+  .ex-panel.collapsed .ex-panel-head { border-bottom: none; }
   @media (max-width: 1100px) {
     .ex-page { grid-template-columns: 1fr; }
   }
@@ -190,10 +192,13 @@
       </form>
     </section>
 
-    <section class="ex-panel">
+    <section class="ex-panel" id="recentOrdersPanel">
       <div class="ex-panel-head">
         <div class="ex-panel-title">Recent Exhibition Orders</div>
-        <button class="btn btn-outline" type="button" onclick="loadBootstrap()">Refresh</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+          <button class="btn btn-outline" type="button" onclick="toggleRecentOrders()" id="recentOrdersToggle">Hide</button>
+          <button class="btn btn-outline" type="button" onclick="loadBootstrap()">Refresh</button>
+        </div>
       </div>
       <div id="recentOrders"></div>
     </section>
@@ -208,12 +213,24 @@ let recentOrders = [];
 let editingOrderId = null;
 let initialEditLoaded = false;
 let selectedExhibitionId = '';
+let recentOrdersFolded = localStorage.getItem('tbExhibitionRecentOrdersFolded') === '1';
 const money = value => `Rs ${Math.round(Number(value || 0)).toLocaleString()}`;
 const pickupMethods = new Set(['Pickup from Expo', 'Pickup from Warehouse']);
 const escapeHtml = value => String(value || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 
 function toggleExhibitionForm() {
   document.getElementById('exhibitionForm').classList.toggle('open');
+}
+
+function applyRecentOrdersFold() {
+  document.getElementById('recentOrdersPanel').classList.toggle('collapsed', recentOrdersFolded);
+  document.getElementById('recentOrdersToggle').textContent = recentOrdersFolded ? 'Show' : 'Hide';
+}
+
+function toggleRecentOrders() {
+  recentOrdersFolded = !recentOrdersFolded;
+  localStorage.setItem('tbExhibitionRecentOrdersFolded', recentOrdersFolded ? '1' : '0');
+  applyRecentOrdersFold();
 }
 
 function fillExhibitions(exhibitions) {
@@ -289,8 +306,8 @@ async function loadBootstrap(preferredExhibitionId) {
   fillProducts(data.products || []);
   renderRecentOrders(data.recent_orders || []);
   document.getElementById('loadState').textContent = `${(data.products || []).length} Shopify variants loaded`;
-  const params = new URLSearchParams(window.location.search);
-  const editOrderId = params.get('edit_order');
+  const pageParams = new URLSearchParams(window.location.search);
+  const editOrderId = pageParams.get('edit_order');
   if (editOrderId && !initialEditLoaded) {
     initialEditLoaded = true;
     await loadOrderForEdit(editOrderId);
@@ -569,6 +586,7 @@ loadBootstrap().catch(err => {
   document.getElementById('loadState').textContent = 'Could not load data';
   showToast(err.message);
 });
+applyRecentOrdersFold();
 renderOrderItems();
 </script>
 {% endblock %}

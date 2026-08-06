@@ -3265,6 +3265,8 @@ def build_exhibition_invoice_payload(order: dict) -> dict:
         'product_name': order.get('product_name') or '',
         'quantity': int(order.get('quantity') or 1),
         'unit_price': money_format(order.get('unit_price')),
+        'subtotal': money_format(sum(money_float(item.get('line_total')) for item in items)),
+        'discount_value': money_float(order.get('discount')),
         'discount': money_format(order.get('discount')),
         'delivery_method': order.get('delivery_method') or '',
         'delivery_address': order.get('delivery_address') or '',
@@ -3272,6 +3274,7 @@ def build_exhibition_invoice_payload(order: dict) -> dict:
         'total_amount': money_format(total_amount),
         'paid_amount': money_format(paid_amount),
         'balance': money_format(total_amount - paid_amount),
+        'payment_method': order.get('payment_method') or '',
         'payment_label': f"{order.get('payment_method') or ''} · {order.get('payment_split') or ''}".strip(' ·'),
     }
 

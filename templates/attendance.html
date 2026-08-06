@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tick Bags Attendance</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { margin:0; min-height:100vh; background:#f4f7fb; color:#303342; }
+    .top { display:flex; align-items:center; justify-content:space-between; padding:18px 20px; background:#fff; border-bottom:1px solid #dce3f1; }
+    .brand { font-size:22px; font-weight:850; }
+    .muted { color:#858b9d; }
+    .wrap { max-width:860px; margin:0 auto; padding:22px; }
+    .panel { background:#fff; border:1px solid #dce3f1; border-radius:8px; box-shadow:0 12px 32px rgba(40,48,73,.08); padding:22px; margin-bottom:18px; }
+    .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+    .stat { border:1px solid #e3e8f3; border-radius:8px; padding:14px; min-height:76px; }
+    .label { font-size:12px; font-weight:850; color:#858b9d; letter-spacing:.08em; text-transform:uppercase; }
+    .value { margin-top:8px; font-size:20px; font-weight:850; }
+    video, canvas { width:100%; max-height:360px; background:#111827; border-radius:8px; object-fit:cover; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+    button { border:1px solid #d8e0ef; border-radius:8px; padding:12px 16px; font-size:15px; font-weight:850; cursor:pointer; background:#fff; color:#303342; }
+    .primary { background:#1cc88a; color:#fff; border-color:#1cc88a; }
+    .danger { background:#e74a3b; color:#fff; border-color:#e74a3b; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .notice { padding:12px 14px; border-radius:8px; background:#e8f8fb; color:#0a5c6e; font-weight:750; margin-top:14px; }
+    .error { background:#fce8e6; color:#9f2216; }
+    form { margin:0; }
+    @media (max-width:720px) { .grid { grid-template-columns:1fr; } .top { align-items:flex-start; gap:12px; flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div>
+      <div class="brand">Tick Bags Attendance</div>
+      <div class="muted">{{ employee.full_name }} · {{ employee.username }}</div>
+    </div>
+    <form action="/attendance/logout" method="post"><button type="submit">Logout</button></form>
+  </header>
+  <main class="wrap">
+    <section class="panel">
+      <div class="grid">
+        <div class="stat"><div class="label">Status</div><div class="value" id="statusText">Loading</div></div>
+        <div class="stat"><div class="label">Check In</div><div class="value" id="checkInText">-</div></div>
+        <div class="stat"><div class="label">Check Out</div><div class="value" id="checkOutText">-</div></div>
+      </div>
+      <div class="notice" id="locationNotice">Office GPS: loading...</div>
+    </section>
+    <section class="panel">
+      <video id="camera" autoplay playsinline muted></video>
+      <canvas id="snapshot" hidden></canvas>
+      <div class="actions">
+        <button class="primary" id="checkInBtn" onclick="markAttendance('check-in')" disabled>Check In</button>
+        <button class="danger" id="checkOutBtn" onclick="markAttendance('check-out')" disabled>Check Out</button>
+        <button onclick="startCamera()">Restart Camera</button>
+        <button onclick="loadStatus()">Refresh</button>
+      </div>
+      <div class="notice" id="message">Allow camera and GPS when your phone asks.</div>
+    </section>
+  </main>
+<script>
+const state = {stream: null, locations: [], record: null};
+
+function timeText(value) {
+  if (!value) return '-';
+  return new Date(value).toLocaleString();
+}
+
+function setMessage(text, isError=false) {
+  const box = document.getElementById('message');
+  box.textContent = text;
+  box.classList.toggle('error', isError);
+}
+
+async function startCamera() {
+  try {
+    if (state.stream) state.stream.getTracks().forEach(track => track.stop());
+    state.stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'user'}, audio: false});
+    document.getElementById('camera').srcObject = state.stream;
+    setMessage('Camera ready. GPS will be checked when you submit.');
+  } catch (err) {
+    setMessage('Camera permission is required for attendance.', true);
+  }
+}
+
+function takePhoto() {
+  const video = document.getElementById('camera');
+  const canvas = document.getElementById('snapshot');
+  const width = 480;
+  const height = Math.round((video.videoHeight || 640) * width / (video.videoWidth || 480));
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(video, 0, 0, width, height);
+  return canvas.toDataURL('image/jpeg', 0.72);
+}
+
+function getGps() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('GPS is not available on this device.'));
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        accuracy_meters: pos.coords.accuracy
+      }),
+      () => reject(new Error('GPS permission is required for attendance.')),
+      {enableHighAccuracy: true, timeout: 20000, maximumAge: 0}
+    );
+  });
+}
+
+function renderStatus(data) {
+  state.record = data.today || null;
+  state.locations = data.locations || [];
+  const record = state.record;
+  const checkedIn = Boolean(record && record.check_in_at);
+  const checkedOut = Boolean(record && record.check_out_at);
+  document.getElementById('statusText').textContent = checkedOut ? 'Checked out' : (checkedIn ? 'Checked in' : 'Not checked in');
+  document.getElementById('checkInText').textContent = timeText(record && record.check_in_at);
+  document.getElementById('checkOutText').textContent = timeText(record && record.check_out_at);
+  document.getElementById('checkInBtn').disabled = checkedIn;
+  document.getElementById('checkOutBtn').disabled = !checkedIn || checkedOut;
+  const location = state.locations[0];
+  document.getElementById('locationNotice').textContent = location
+    ? `${location.name}: ${location.plus_code || ''} · allowed within ${location.radius_meters}m`
+    : 'No active attendance location is configured.';
+}
+
+async function loadStatus() {
+  const res = await fetch('/api/attendance/status');
+  if (res.status === 401) location.href = '/attendance/login';
+  const data = await res.json();
+  if (!data.ok) return setMessage(data.error || 'Could not load attendance.', true);
+  renderStatus(data);
+}
+
+async function markAttendance(action) {
+  try {
+    setMessage('Taking live photo and checking GPS...');
+    const gps = await getGps();
+    const photo = takePhoto();
+    const res = await fetch(`/api/attendance/${action}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({...gps, photo})
+    });
+    const data = await res.json();
+    if (!data.ok) return setMessage(data.error || 'Attendance failed.', true);
+    setMessage(action === 'check-in' ? 'Check-in saved.' : 'Check-out saved.');
+    await loadStatus();
+  } catch (err) {
+    setMessage(err.message || 'Attendance failed.', true);
+  }
+}
+
+startCamera();
+loadStatus();
+</script>
+</body>
+</html>

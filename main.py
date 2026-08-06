@@ -24,9 +24,11 @@ import json
 from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse
 import re
+import math
 from xml.sax.saxutils import escape as xml_escape
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from werkzeug.security import check_password_hash, generate_password_hash
 from token_manager import get_access_token, save_tokens
 from campaigns import campaigns_bp, init_campaign_dirs
 from whatsapp import send_order_confirmation, whatsapp_bp
@@ -48,15 +50,24 @@ import ssl
 import certifi
 
 from db import (
+    create_attendance_checkin,
+    create_attendance_employee,
     create_exhibition,
     create_exhibition_expense,
     create_exhibition_order,
     delete_exhibition_order,
     delete_order_status,
     get_app_setting,
+    get_attendance_employee,
+    get_attendance_employee_by_username,
+    get_attendance_record,
+    get_attendance_record_for_date,
     get_exhibition_order,
     get_product_cost_lookup,
     init_db,
+    list_attendance_employees,
+    list_attendance_locations,
+    list_attendance_records,
     list_exhibition_expenses,
     list_exhibition_orders,
     list_exhibitions,
@@ -66,6 +77,7 @@ from db import (
     update_exhibition_order,
     update_exhibition_order_product_cost,
     update_exhibition_order_shopify_push,
+    update_attendance_checkout,
     upsert_order_status,
     upsert_product_cost,
 )
@@ -89,6 +101,11 @@ EMPLOYEE_PORTAL_SESSION_KEY = 'employee_portal_authenticated'
 ADMIN_PORTAL_PASSWORD = os.getenv('ADMIN_PORTAL_PASSWORD', 'security')
 ADMIN_PORTAL_SESSION_KEY = 'admin_portal_authenticated'
 SHOPIFY_OAUTH_STATE_SESSION_KEY = 'shopify_oauth_state'
+ATTENDANCE_SESSION_KEY = 'attendance_employee_id'
+ATTENDANCE_ADMIN_PASSWORD = os.getenv('ATTENDANCE_ADMIN_PASSWORD', ADMIN_PORTAL_PASSWORD)
+ATTENDANCE_MAX_PHOTO_BYTES = int(os.getenv('ATTENDANCE_MAX_PHOTO_BYTES', str(2_500_000)))
+ATTENDANCE_MAX_GPS_ACCURACY_METERS = float(os.getenv('ATTENDANCE_MAX_GPS_ACCURACY_METERS', '200'))
+KARACHI_TZ = dt.timezone(dt.timedelta(hours=5))
 
 # ── Jinja2 helpers ────────────────────────────────────────────────────────────
 
@@ -140,6 +157,124 @@ def parse_date_filter(value):
         except ValueError:
             continue
     return dt.datetime.now()
+
+
+def serialize_datetime(value):
+    if isinstance(value, (dt.datetime, dt.date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def attendance_today():
+    return dt.datetime.now(KARACHI_TZ).date()
+
+
+def attendance_user():
+    employee_id = session.get(ATTENDANCE_SESSION_KEY)
+    if not employee_id:
+        return None
+    employee = get_attendance_employee(employee_id)
+    if not employee or not employee.get('active'):
+        session.pop(ATTENDANCE_SESSION_KEY, None)
+        return None
+    return employee
+
+
+def require_attendance_user(admin_required=False):
+    employee = attendance_user()
+    if not employee:
+        return None, (jsonify({'ok': False, 'error': 'Attendance login required.'}), 401)
+    if admin_required and employee.get('role') != 'admin':
+        return None, (jsonify({'ok': False, 'error': 'Admin access required.'}), 403)
+    return employee, None
+
+
+def ensure_default_attendance_admin():
+    if list_attendance_employees(include_inactive=True):
+        return
+    create_attendance_employee(
+        username=os.getenv('ATTENDANCE_ADMIN_USERNAME', 'admin'),
+        password_hash=generate_password_hash(ATTENDANCE_ADMIN_PASSWORD),
+        full_name=os.getenv('ATTENDANCE_ADMIN_NAME', 'Attendance Admin'),
+        role='admin',
+    )
+
+
+def haversine_meters(lat1, lon1, lat2, lon2):
+    radius = 6371000.0
+    phi1 = math.radians(float(lat1))
+    phi2 = math.radians(float(lat2))
+    delta_phi = math.radians(float(lat2) - float(lat1))
+    delta_lambda = math.radians(float(lon2) - float(lon1))
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    return radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def validate_attendance_capture(payload):
+    try:
+        latitude = float(payload.get('latitude'))
+        longitude = float(payload.get('longitude'))
+        accuracy = float(payload.get('accuracy_meters') or payload.get('accuracy') or 9999)
+    except (TypeError, ValueError):
+        return None, 'GPS location is required.'
+    photo = str(payload.get('photo') or '')
+    if not photo.startswith('data:image/'):
+        return None, 'Live camera photo is required.'
+    if len(photo.encode('utf-8')) > ATTENDANCE_MAX_PHOTO_BYTES:
+        return None, 'Photo is too large. Please retake it closer to the camera.'
+    if accuracy > ATTENDANCE_MAX_GPS_ACCURACY_METERS:
+        return None, f'GPS accuracy is too weak ({round(accuracy)}m). Please stand near the office and try again.'
+
+    locations = list_attendance_locations(active_only=True)
+    if not locations:
+        return None, 'No active attendance location is configured.'
+    closest = None
+    for location in locations:
+        distance = haversine_meters(latitude, longitude, location['latitude'], location['longitude'])
+        if closest is None or distance < closest['distance_meters']:
+            closest = {'location': location, 'distance_meters': distance}
+    radius = float(closest['location'].get('radius_meters') or 150)
+    if closest['distance_meters'] > radius:
+        return None, (
+            f"You are {round(closest['distance_meters'])}m from {closest['location']['name']}. "
+            f"Attendance can be marked within {round(radius)}m."
+        )
+    return {
+        'latitude': round(latitude, 7),
+        'longitude': round(longitude, 7),
+        'accuracy_meters': round(accuracy, 2),
+        'distance_meters': round(closest['distance_meters'], 2),
+        'location': closest['location'],
+        'photo': photo,
+    }, None
+
+
+def serialize_attendance_employee(employee):
+    if not employee:
+        return None
+    return {
+        'id': employee.get('id'),
+        'username': employee.get('username') or '',
+        'full_name': employee.get('full_name') or '',
+        'role': employee.get('role') or 'employee',
+        'active': bool(employee.get('active')),
+    }
+
+
+def serialize_attendance_record(row, include_photos=False):
+    if not row:
+        return None
+    serialized = {}
+    for key, value in dict(row).items():
+        if not include_photos and key in {'check_in_photo', 'check_out_photo'}:
+            continue
+        serialized[key] = serialize_datetime(value)
+    if not include_photos:
+        serialized['has_check_in_photo'] = bool(row.get('check_in_photo'))
+        serialized['has_check_out_photo'] = bool(row.get('check_out_photo'))
+    return serialized
 
 @app.context_processor
 def inject_now():
@@ -4380,6 +4515,215 @@ def payments_page():
     return render_template('payments.html')
 
 
+@app.route('/attendance/login', methods=['GET', 'POST'])
+def attendance_login_page():
+    next_url = request.values.get('next') or url_for('attendance_page')
+    if not str(next_url).startswith('/'):
+        next_url = url_for('attendance_page')
+    if request.method == 'POST':
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        employee = get_attendance_employee_by_username(username)
+        if employee and employee.get('active') and check_password_hash(employee.get('password_hash') or '', password):
+            session[ATTENDANCE_SESSION_KEY] = employee['id']
+            return redirect(next_url)
+        return render_template('attendance_login.html', login_error='Wrong username or password.', next_url=next_url), 401
+    return render_template('attendance_login.html', login_error='', next_url=next_url)
+
+
+@app.route('/attendance/logout', methods=['POST'])
+def attendance_logout_page():
+    session.pop(ATTENDANCE_SESSION_KEY, None)
+    return redirect(url_for('attendance_login_page'))
+
+
+@app.route('/attendance')
+def attendance_page():
+    employee = attendance_user()
+    if not employee:
+        return redirect(url_for('attendance_login_page', next=request.path))
+    return render_template('attendance.html', employee=serialize_attendance_employee(employee))
+
+
+@app.route('/attendance/admin')
+def attendance_admin_page():
+    employee = attendance_user()
+    if not employee:
+        return redirect(url_for('attendance_login_page', next=request.path))
+    if employee.get('role') != 'admin':
+        return 'Admin access required', 403
+    return render_template('attendance_admin.html', employee=serialize_attendance_employee(employee))
+
+
+@app.route('/api/attendance/status')
+def attendance_status_api():
+    employee, error = require_attendance_user()
+    if error:
+        return error
+    today_record = get_attendance_record_for_date(employee['id'], attendance_today())
+    return jsonify({
+        'ok': True,
+        'employee': serialize_attendance_employee(employee),
+        'today': serialize_attendance_record(today_record),
+        'locations': [
+            {
+                'id': row.get('id'),
+                'name': row.get('name'),
+                'plus_code': row.get('plus_code'),
+                'latitude': float(row.get('latitude')),
+                'longitude': float(row.get('longitude')),
+                'radius_meters': int(row.get('radius_meters') or 150),
+            }
+            for row in list_attendance_locations(active_only=True)
+        ],
+        'max_accuracy_meters': ATTENDANCE_MAX_GPS_ACCURACY_METERS,
+    })
+
+
+@app.route('/api/attendance/check-in', methods=['POST'])
+def attendance_check_in_api():
+    employee, error = require_attendance_user()
+    if error:
+        return error
+    existing = get_attendance_record_for_date(employee['id'], attendance_today())
+    if existing and existing.get('check_in_at'):
+        return jsonify({'ok': False, 'error': 'You have already checked in today.'}), 400
+    payload = request.get_json(silent=True) or {}
+    capture, capture_error = validate_attendance_capture(payload)
+    if capture_error:
+        return jsonify({'ok': False, 'error': capture_error}), 400
+    record = create_attendance_checkin(
+        employee_id=employee['id'],
+        location_id=capture['location']['id'],
+        latitude=capture['latitude'],
+        longitude=capture['longitude'],
+        accuracy_meters=capture['accuracy_meters'],
+        distance_meters=capture['distance_meters'],
+        photo=capture['photo'],
+        user_agent=str(request.user_agent or '')[:500],
+        ip_address=(request.headers.get('X-Forwarded-For') or request.remote_addr or '')[:120],
+        work_date=attendance_today(),
+    )
+    if not record:
+        return jsonify({'ok': False, 'error': 'Could not save check-in.'}), 500
+    return jsonify({'ok': True, 'record': serialize_attendance_record(record)})
+
+
+@app.route('/api/attendance/check-out', methods=['POST'])
+def attendance_check_out_api():
+    employee, error = require_attendance_user()
+    if error:
+        return error
+    existing = get_attendance_record_for_date(employee['id'], attendance_today())
+    if not existing or not existing.get('check_in_at'):
+        return jsonify({'ok': False, 'error': 'Check in first before checking out.'}), 400
+    if existing.get('check_out_at'):
+        return jsonify({'ok': False, 'error': 'You have already checked out today.'}), 400
+    payload = request.get_json(silent=True) or {}
+    capture, capture_error = validate_attendance_capture(payload)
+    if capture_error:
+        return jsonify({'ok': False, 'error': capture_error}), 400
+    record = update_attendance_checkout(
+        record_id=existing['id'],
+        latitude=capture['latitude'],
+        longitude=capture['longitude'],
+        accuracy_meters=capture['accuracy_meters'],
+        distance_meters=capture['distance_meters'],
+        photo=capture['photo'],
+        user_agent=str(request.user_agent or '')[:500],
+        ip_address=(request.headers.get('X-Forwarded-For') or request.remote_addr or '')[:120],
+    )
+    if not record:
+        return jsonify({'ok': False, 'error': 'Could not save check-out.'}), 500
+    return jsonify({'ok': True, 'record': serialize_attendance_record(record)})
+
+
+@app.route('/api/attendance/admin/employees', methods=['GET', 'POST'])
+def attendance_admin_employees_api():
+    _, error = require_attendance_user(admin_required=True)
+    if error:
+        return error
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get('username') or '').strip()
+        full_name = str(payload.get('full_name') or '').strip()
+        password = str(payload.get('password') or '')
+        role = 'admin' if payload.get('role') == 'admin' else 'employee'
+        if not username or not full_name or not password:
+            return jsonify({'ok': False, 'error': 'Name, username, and password are required.'}), 400
+        employee = create_attendance_employee(
+            username=username,
+            password_hash=generate_password_hash(password),
+            full_name=full_name,
+            role=role,
+        )
+        if not employee:
+            return jsonify({'ok': False, 'error': 'Could not save employee login.'}), 500
+        return jsonify({'ok': True, 'employee': serialize_attendance_employee(employee)})
+    return jsonify({
+        'ok': True,
+        'employees': [serialize_attendance_employee(row) for row in list_attendance_employees(include_inactive=True)],
+    })
+
+
+@app.route('/api/attendance/admin/records')
+def attendance_admin_records_api():
+    _, error = require_attendance_user(admin_required=True)
+    if error:
+        return error
+    rows = list_attendance_records(
+        start_date=request.args.get('start_date') or None,
+        end_date=request.args.get('end_date') or None,
+        employee_id=request.args.get('employee_id') or None,
+    )
+    open_count = sum(1 for row in rows if not row.get('check_out_at'))
+    closed_count = len(rows) - open_count
+    return jsonify({
+        'ok': True,
+        'records': [serialize_attendance_record(row) for row in rows],
+        'summary': {
+            'records': len(rows),
+            'open': open_count,
+            'closed': closed_count,
+        },
+        'employees': [serialize_attendance_employee(row) for row in list_attendance_employees(include_inactive=True)],
+        'locations': [
+            {
+                'id': row.get('id'),
+                'name': row.get('name'),
+                'plus_code': row.get('plus_code'),
+                'latitude': float(row.get('latitude')),
+                'longitude': float(row.get('longitude')),
+                'radius_meters': int(row.get('radius_meters') or 150),
+                'active': bool(row.get('active')),
+            }
+            for row in list_attendance_locations(active_only=False)
+        ],
+    })
+
+
+@app.route('/attendance/admin/records/<int:record_id>/photo/<kind>')
+def attendance_admin_record_photo_page(record_id, kind):
+    employee = attendance_user()
+    if not employee:
+        return redirect(url_for('attendance_login_page', next=request.path))
+    if employee.get('role') != 'admin':
+        return 'Admin access required', 403
+    if kind not in {'check-in', 'check-out'}:
+        return 'Photo not found', 404
+    record = get_attendance_record(record_id)
+    if not record:
+        return 'Photo not found', 404
+    key = 'check_in_photo' if kind == 'check-in' else 'check_out_photo'
+    photo = record.get(key) or ''
+    if not photo:
+        return 'Photo not found', 404
+    return f"""<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Attendance Photo</title>
+<style>body{{margin:0;background:#111827;color:#fff;font-family:system-ui;display:grid;place-items:center;min-height:100vh}}img{{max-width:100%;max-height:100vh}}</style>
+</head><body><img alt="Attendance photo" src="{photo}"></body></html>"""
+
+
 @app.route('/exhibition')
 def exhibition_page():
     return render_template('exhibition.html')
@@ -5366,6 +5710,7 @@ def load_initial_data():
 # Initialize DB at module level (fast — just creates table if not exists)
 with app.app_context():
     init_db()
+    ensure_default_attendance_admin()
 
 # Start background scheduler at module level so Gunicorn picks it up
 scheduler = BackgroundScheduler(daemon=True)

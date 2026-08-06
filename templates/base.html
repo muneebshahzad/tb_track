@@ -151,6 +151,7 @@
       <a href="/shopify-product-costs" class="sb-item {% if request.path == '/shopify-product-costs' or request.path == '/product-costs' %}active{% endif %}"><span class="sb-icon">🏷️</span><span class="sb-item-label">Shopify Product Cost</span></a>
       <a href="/daraz-product-costs" class="sb-item {% if request.path == '/daraz-product-costs' %}active{% endif %}"><span class="sb-icon">🏷️</span><span class="sb-item-label">Daraz Product Cost</span></a>
       <a href="/exhibition" class="sb-item {% if request.path.startswith('/exhibition') %}active{% endif %}"><span class="sb-icon">🧾</span><span class="sb-item-label">Exhibition</span></a>
+      <a href="/attendance/admin" class="sb-item {% if request.path.startswith('/attendance') %}active{% endif %}"><span class="sb-icon">🕒</span><span class="sb-item-label">Attendance</span></a>
       <a href="#" class="sb-item" id="refreshDataBtn" onclick="triggerRefresh(event)"><span class="sb-icon">🔄</span><span class="sb-item-label">Refresh Data</span></a>
       <a href="/payments" class="sb-item {% if request.path == '/payments' %}active{% endif %}"><span class="sb-icon">💰</span><span class="sb-item-label">Finance</span></a>
     </nav>

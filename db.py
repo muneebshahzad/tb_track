@@ -160,6 +160,75 @@ def _ensure_exhibition_tables(cur):
     """)
 
 
+def _ensure_attendance_tables(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance_employees (
+            id BIGSERIAL PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'employee',
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance_locations (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            plus_code TEXT NOT NULL DEFAULT '',
+            latitude NUMERIC(10, 7) NOT NULL,
+            longitude NUMERIC(10, 7) NOT NULL,
+            radius_meters INTEGER NOT NULL DEFAULT 150,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        INSERT INTO attendance_locations (name, plus_code, latitude, longitude, radius_meters)
+        VALUES ('Tick Bags Office', '97XX+3W Lahore, Pakistan', 31.3976875, 74.2998125, 150)
+        ON CONFLICT (name) DO NOTHING
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance_records (
+            id BIGSERIAL PRIMARY KEY,
+            employee_id BIGINT NOT NULL REFERENCES attendance_employees(id) ON DELETE CASCADE,
+            location_id BIGINT REFERENCES attendance_locations(id) ON DELETE SET NULL,
+            work_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            check_in_at TIMESTAMPTZ,
+            check_in_latitude NUMERIC(10, 7),
+            check_in_longitude NUMERIC(10, 7),
+            check_in_accuracy_meters NUMERIC(10, 2),
+            check_in_distance_meters NUMERIC(10, 2),
+            check_in_photo TEXT NOT NULL DEFAULT '',
+            check_in_user_agent TEXT NOT NULL DEFAULT '',
+            check_in_ip TEXT NOT NULL DEFAULT '',
+            check_out_at TIMESTAMPTZ,
+            check_out_latitude NUMERIC(10, 7),
+            check_out_longitude NUMERIC(10, 7),
+            check_out_accuracy_meters NUMERIC(10, 2),
+            check_out_distance_meters NUMERIC(10, 2),
+            check_out_photo TEXT NOT NULL DEFAULT '',
+            check_out_user_agent TEXT NOT NULL DEFAULT '',
+            check_out_ip TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_employee_work_date
+        ON attendance_records (employee_id, work_date)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_attendance_records_date
+        ON attendance_records (work_date DESC, employee_id)
+    """)
+
+
 def _ensure_tickbot_auto_reply_jobs_table(cur):
     cur.execute("""
         CREATE TABLE IF NOT EXISTS tickbot_auto_reply_jobs (
@@ -488,6 +557,7 @@ def init_db():
                 _ensure_app_settings_table(cur)
                 _ensure_product_costs_table(cur)
                 _ensure_exhibition_tables(cur)
+                _ensure_attendance_tables(cur)
                 _ensure_tickbot_auto_reply_jobs_table(cur)
                 _ensure_whatsapp_tables(cur)
             conn.commit()
@@ -997,6 +1067,299 @@ def create_exhibition_expense(exhibition_id, label: str, amount=0, expense_date=
     except Exception as e:
         _set_last_db_error(str(e))
         print(f"DB create_exhibition_expense error: {e}")
+        return None
+
+
+def list_attendance_employees(include_inactive: bool = False) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                where = "" if include_inactive else "WHERE active = TRUE"
+                cur.execute(f"""
+                    SELECT id, username, full_name, role, active, created_at, updated_at
+                    FROM attendance_employees
+                    {where}
+                    ORDER BY active DESC, full_name ASC, username ASC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_attendance_employees error: {e}")
+        return []
+
+
+def get_attendance_employee_by_username(username: str) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT id, username, password_hash, full_name, role, active, created_at, updated_at
+                    FROM attendance_employees
+                    WHERE LOWER(username) = LOWER(%s)
+                """, (str(username or "").strip(),))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_attendance_employee_by_username error: {e}")
+        return None
+
+
+def get_attendance_employee(employee_id) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT id, username, full_name, role, active, created_at, updated_at
+                    FROM attendance_employees
+                    WHERE id = %s
+                """, (employee_id,))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_attendance_employee error: {e}")
+        return None
+
+
+def create_attendance_employee(username: str, password_hash: str, full_name: str, role: str = "employee") -> dict | None:
+    username = str(username or "").strip()
+    full_name = str(full_name or "").strip()
+    role = "admin" if role == "admin" else "employee"
+    if not username or not password_hash or not full_name:
+        return None
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    INSERT INTO attendance_employees (username, password_hash, full_name, role)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (username) DO UPDATE
+                        SET password_hash = EXCLUDED.password_hash,
+                            full_name = EXCLUDED.full_name,
+                            role = EXCLUDED.role,
+                            active = TRUE,
+                            updated_at = NOW()
+                    RETURNING id, username, full_name, role, active, created_at, updated_at
+                """, (username, password_hash, full_name, role))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_attendance_employee error: {e}")
+        return None
+
+
+def list_attendance_locations(active_only: bool = True) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                where = "WHERE active = TRUE" if active_only else ""
+                cur.execute(f"""
+                    SELECT id, name, plus_code, latitude, longitude, radius_meters, active, created_at
+                    FROM attendance_locations
+                    {where}
+                    ORDER BY active DESC, name ASC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_attendance_locations error: {e}")
+        return []
+
+
+def get_attendance_record_for_date(employee_id, work_date=None) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT r.*, e.full_name, e.username, e.role, l.name AS location_name, l.plus_code
+                    FROM attendance_records r
+                    JOIN attendance_employees e ON e.id = r.employee_id
+                    LEFT JOIN attendance_locations l ON l.id = r.location_id
+                    WHERE r.employee_id = %s
+                      AND r.work_date = COALESCE(%s, CURRENT_DATE)
+                """, (employee_id, _date_or_none(work_date)))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_attendance_record_for_date error: {e}")
+        return None
+
+
+def create_attendance_checkin(
+    employee_id,
+    location_id,
+    latitude,
+    longitude,
+    accuracy_meters,
+    distance_meters,
+    photo: str,
+    user_agent: str,
+    ip_address: str,
+    work_date=None,
+) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    INSERT INTO attendance_records (
+                        employee_id, location_id, work_date, check_in_at,
+                        check_in_latitude, check_in_longitude, check_in_accuracy_meters,
+                        check_in_distance_meters, check_in_photo, check_in_user_agent, check_in_ip
+                    )
+                    VALUES (%s, %s, COALESCE(%s, CURRENT_DATE), NOW(), %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """, (
+                    employee_id,
+                    location_id,
+                    _date_or_none(work_date),
+                    latitude,
+                    longitude,
+                    accuracy_meters,
+                    distance_meters,
+                    photo or "",
+                    user_agent or "",
+                    ip_address or "",
+                ))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_attendance_checkin error: {e}")
+        return None
+
+
+def update_attendance_checkout(
+    record_id,
+    latitude,
+    longitude,
+    accuracy_meters,
+    distance_meters,
+    photo: str,
+    user_agent: str,
+    ip_address: str,
+) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    UPDATE attendance_records
+                    SET check_out_at = NOW(),
+                        check_out_latitude = %s,
+                        check_out_longitude = %s,
+                        check_out_accuracy_meters = %s,
+                        check_out_distance_meters = %s,
+                        check_out_photo = %s,
+                        check_out_user_agent = %s,
+                        check_out_ip = %s,
+                        status = 'closed',
+                        updated_at = NOW()
+                    WHERE id = %s
+                      AND check_out_at IS NULL
+                    RETURNING *
+                """, (
+                    latitude,
+                    longitude,
+                    accuracy_meters,
+                    distance_meters,
+                    photo or "",
+                    user_agent or "",
+                    ip_address or "",
+                    record_id,
+                ))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_attendance_checkout error: {e}")
+        return None
+
+
+def list_attendance_records(start_date=None, end_date=None, employee_id=None) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                params = []
+                clauses = []
+                if start_date:
+                    clauses.append("r.work_date >= %s")
+                    params.append(_date_or_none(start_date))
+                if end_date:
+                    clauses.append("r.work_date <= %s")
+                    params.append(_date_or_none(end_date))
+                if employee_id:
+                    clauses.append("r.employee_id = %s")
+                    params.append(employee_id)
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                cur.execute(f"""
+                    SELECT r.id, r.employee_id, r.location_id, r.work_date,
+                           r.check_in_at, r.check_in_latitude, r.check_in_longitude,
+                           r.check_in_accuracy_meters, r.check_in_distance_meters,
+                           r.check_in_photo,
+                           r.check_out_at, r.check_out_latitude, r.check_out_longitude,
+                           r.check_out_accuracy_meters, r.check_out_distance_meters,
+                           r.check_out_photo,
+                           r.status, r.notes, r.created_at, r.updated_at,
+                           e.full_name, e.username, e.role,
+                           l.name AS location_name, l.plus_code
+                    FROM attendance_records r
+                    JOIN attendance_employees e ON e.id = r.employee_id
+                    LEFT JOIN attendance_locations l ON l.id = r.location_id
+                    {where}
+                    ORDER BY r.work_date DESC, r.check_in_at DESC, r.id DESC
+                    LIMIT 500
+                """, tuple(params))
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_attendance_records error: {e}")
+        return []
+
+
+def get_attendance_record(record_id) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT r.*, e.full_name, e.username, e.role, l.name AS location_name, l.plus_code
+                    FROM attendance_records r
+                    JOIN attendance_employees e ON e.id = r.employee_id
+                    LEFT JOIN attendance_locations l ON l.id = r.location_id
+                    WHERE r.id = %s
+                """, (record_id,))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_attendance_record error: {e}")
         return None
 
 

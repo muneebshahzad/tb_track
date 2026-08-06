@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}TB Track - Attendance{% endblock %}
+{% block content %}
+<style>
+  .att-wrap { padding:28px; background:#f6f8fc; min-height:100vh; color:#303342; }
+  .att-top { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:22px; }
+  .att-title { font-size:30px; font-weight:850; margin:0; letter-spacing:0; }
+  .att-sub { color:#858b9d; font-size:17px; margin-top:4px; }
+  .att-card { background:#fff; border:1px solid #dce3f1; border-radius:8px; box-shadow:0 10px 28px rgba(40,48,73,.07); margin-bottom:18px; overflow:hidden; }
+  .att-card-head { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:18px 22px; border-bottom:1px solid #e3e8f3; }
+  .att-card-title { font-size:20px; font-weight:850; }
+  .att-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:18px; }
+  .att-stat { background:#fff; border:1px solid #dce3f1; border-radius:8px; padding:18px; min-height:92px; }
+  .att-label { color:#858b9d; font-weight:850; font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
+  .att-value { margin-top:10px; font-size:28px; font-weight:850; }
+  .att-form { display:grid; grid-template-columns:1.2fr 1fr 1fr .8fr auto; gap:10px; padding:18px 22px; align-items:end; }
+  .att-input, .att-select { border:1px solid #d8e0ef; border-radius:8px; padding:12px 14px; font-size:15px; min-width:0; }
+  .att-btn { border:1px solid #d8e0ef; border-radius:8px; padding:12px 16px; background:#fff; color:#20b8c8; font-weight:850; cursor:pointer; }
+  .att-btn.primary { background:#4e73df; border-color:#4e73df; color:#fff; }
+  .att-table { width:100%; border-collapse:collapse; }
+  .att-table th, .att-table td { padding:14px 18px; text-align:left; border-bottom:1px solid #e9edf5; vertical-align:top; }
+  .att-table th { color:#858b9d; font-size:12px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; background:#fafbfe; }
+  .att-muted { color:#858b9d; }
+  .att-pill { display:inline-flex; padding:4px 9px; border-radius:999px; background:#d4f5e9; color:#0f6848; font-weight:800; font-size:12px; }
+  .att-pill.open { background:#fff3cd; color:#8b5a00; }
+  @media (max-width:980px) { .att-grid, .att-form { grid-template-columns:1fr; } .att-top { flex-direction:column; } }
+</style>
+<div class="att-wrap">
+  <div class="att-top">
+    <div>
+      <h1 class="att-title">Attendance</h1>
+      <div class="att-sub">Employee logins, GPS check-ins, live photos, and checkout records</div>
+    </div>
+    <form action="/attendance/logout" method="post"><button class="att-btn" type="submit">Logout</button></form>
+  </div>
+
+  <div class="att-grid">
+    <div class="att-stat"><div class="att-label">Records</div><div class="att-value" id="recordCount">0</div></div>
+    <div class="att-stat"><div class="att-label">Checked In</div><div class="att-value" id="openCount">0</div></div>
+    <div class="att-stat"><div class="att-label">Checked Out</div><div class="att-value" id="closedCount">0</div></div>
+  </div>
+
+  <section class="att-card">
+    <div class="att-card-head">
+      <div class="att-card-title">Create Employee Login</div>
+      <button class="att-btn" onclick="loadAttendance()">Refresh</button>
+    </div>
+    <div class="att-form">
+      <input class="att-input" id="fullName" placeholder="Full name">
+      <input class="att-input" id="username" placeholder="Username">
+      <input class="att-input" id="password" placeholder="Password">
+      <select class="att-select" id="role"><option value="employee">Employee</option><option value="admin">Admin</option></select>
+      <button class="att-btn primary" onclick="createEmployee()">Save</button>
+    </div>
+  </section>
+
+  <section class="att-card">
+    <div class="att-card-head">
+      <div class="att-card-title">Attendance Records</div>
+      <div>
+        <input class="att-input" id="startDate" type="date" onchange="loadAttendance()">
+        <input class="att-input" id="endDate" type="date" onchange="loadAttendance()">
+      </div>
+    </div>
+    <table class="att-table">
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Date</th>
+          <th>Check In</th>
+          <th>Check Out</th>
+          <th>GPS</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="recordRows"></tbody>
+    </table>
+  </section>
+</div>
+<script>
+function fmt(value) {
+  if (!value) return '-';
+  return new Date(value).toLocaleString();
+}
+
+function meters(value) {
+  if (value === null || value === undefined || value === '') return '-';
+  return `${Math.round(Number(value))}m`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+}
+
+async function createEmployee() {
+  const payload = {
+    full_name: document.getElementById('fullName').value,
+    username: document.getElementById('username').value,
+    password: document.getElementById('password').value,
+    role: document.getElementById('role').value
+  };
+  const res = await fetch('/api/attendance/admin/employees', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!data.ok) return alert(data.error || 'Could not save employee.');
+  document.getElementById('fullName').value = '';
+  document.getElementById('username').value = '';
+  document.getElementById('password').value = '';
+  loadAttendance();
+}
+
+function renderRecords(data) {
+  document.getElementById('recordCount').textContent = data.summary.records || 0;
+  document.getElementById('openCount').textContent = data.summary.open || 0;
+  document.getElementById('closedCount').textContent = data.summary.closed || 0;
+  const body = document.getElementById('recordRows');
+  if (!data.records.length) {
+    body.innerHTML = '<tr><td colspan="6"><div class="att-muted">No attendance records found.</div></td></tr>';
+    return;
+  }
+  body.innerHTML = data.records.map(row => `
+    <tr>
+      <td><strong>${escapeHtml(row.full_name)}</strong><div class="att-muted">${escapeHtml(row.username)}</div></td>
+      <td>${escapeHtml(row.work_date)}</td>
+      <td>${fmt(row.check_in_at)}<div class="att-muted">Accuracy ${meters(row.check_in_accuracy_meters)}</div>${row.has_check_in_photo ? `<a href="/attendance/admin/records/${row.id}/photo/check-in" target="_blank">Photo</a>` : ''}</td>
+      <td>${fmt(row.check_out_at)}<div class="att-muted">Accuracy ${meters(row.check_out_accuracy_meters)}</div>${row.has_check_out_photo ? `<a href="/attendance/admin/records/${row.id}/photo/check-out" target="_blank">Photo</a>` : ''}</td>
+      <td>${escapeHtml(row.location_name || '')}<div class="att-muted">In ${meters(row.check_in_distance_meters)} · Out ${meters(row.check_out_distance_meters)}</div></td>
+      <td><span class="att-pill ${row.check_out_at ? '' : 'open'}">${row.check_out_at ? 'Closed' : 'Open'}</span></td>
+    </tr>
+  `).join('');
+}
+
+async function loadAttendance() {
+  const params = new URLSearchParams();
+  const start = document.getElementById('startDate').value;
+  const end = document.getElementById('endDate').value;
+  if (start) params.set('start_date', start);
+  if (end) params.set('end_date', end);
+  const res = await fetch(`/api/attendance/admin/records?${params.toString()}`);
+  const data = await res.json();
+  if (!data.ok) return alert(data.error || 'Could not load attendance.');
+  renderRecords(data);
+}
+
+loadAttendance();
+</script>
+{% endblock %}

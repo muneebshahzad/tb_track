@@ -109,7 +109,7 @@
           <button class="danger" id="checkOutBtn" onclick="markAttendance('check-out')" disabled>Check Out</button>
           <button onclick="startCamera()">Restart Camera</button>
           <button onclick="loadStatus()">Refresh</button>
-          <button onclick="enableAttendanceReminders()" id="reminderBtn">Enable 10 AM / 8 PM</button>
+          <button onclick="enableAttendanceReminders()" id="reminderBtn">Alarm - Enable Notifications</button>
         </div>
         <div class="notice" id="message">Allow camera and GPS when your phone asks.</div>
       </section>
@@ -139,6 +139,8 @@
 </div>
 <script>
 const REMINDER_TEXT = "Don't forget to mark your attendance";
+const ENABLE_NOTIFICATIONS_TEXT = 'Alarm - Enable Notifications';
+const NOTIFICATIONS_ON_TEXT = 'Alarm - Notifications On';
 const state = {stream: null, locations: [], record: null, recordsLoaded: false, deferredInstallPrompt: null, reminderTimers: []};
 
 function timeText(value) {
@@ -304,7 +306,7 @@ function showInstallCard(mode = 'install') {
   if (mode === 'ios') {
     title.textContent = 'Add Tick Bags Attendance to Home Screen';
     copy.textContent = 'On iPhone, notifications work after you open this from the Home Screen. Tap Share, then Add to Home Screen.';
-    installBtn.textContent = 'Enable Reminders';
+    installBtn.textContent = ENABLE_NOTIFICATIONS_TEXT;
     installBtn.onclick = enableAttendanceReminders;
   } else {
     title.textContent = 'Install Tick Bags Attendance';
@@ -342,8 +344,22 @@ async function registerAttendanceServiceWorker() {
   }
 }
 
+async function getNotificationPermissionState() {
+  if (!('Notification' in window)) return 'unsupported';
+  let permission = Notification.permission;
+  if ('permissions' in navigator && navigator.permissions?.query) {
+    try {
+      const result = await navigator.permissions.query({name: 'notifications'});
+      permission = result.state || permission;
+    } catch (err) {
+      permission = Notification.permission;
+    }
+  }
+  return permission;
+}
+
 async function showAttendanceNotification(hour) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (await getNotificationPermissionState() !== 'granted') return;
   const registration = await navigator.serviceWorker.getRegistration('/attendance-sw.js')
     || await navigator.serviceWorker.ready.catch(() => null);
   if (registration?.active) {
@@ -392,32 +408,33 @@ async function enableAttendanceReminders() {
     setMessage('Notifications are not supported on this device.', true);
     return;
   }
-  if (Notification.permission === 'denied') {
-    setWarning('Notifications are blocked for this site. Open browser settings for dashboard.tickbags.com and allow notifications, then tap this again.');
+  const currentPermission = await getNotificationPermissionState();
+  if (currentPermission === 'denied') {
+    setWarning('Chrome has not allowed notifications for this page yet. If you just changed the site setting to Allow, reload this page and tap Enable Notifications again.');
     return;
   }
-  const permission = Notification.permission === 'granted'
+  const permission = currentPermission === 'granted'
     ? 'granted'
     : await Notification.requestPermission();
   if (permission !== 'granted') {
-    setWarning('Please tap Allow on the notification popup to enable 10 AM and 8 PM reminders.');
+    setWarning('Tap Allow on the Chrome notification popup. If no popup appears, reload the page after allowing notifications from the address bar.');
     return;
   }
   localStorage.setItem('tbAttendanceRemindersEnabled', '1');
   scheduleAttendanceReminders();
   const btn = document.getElementById('reminderBtn');
-  if (btn) btn.textContent = 'Reminders On';
+  if (btn) btn.textContent = NOTIFICATIONS_ON_TEXT;
   await showAttendanceNotification('test');
   setMessage('Reminders are on for 10 AM and 8 PM.');
 }
 
 startCamera();
 loadStatus();
-registerAttendanceServiceWorker().then(() => {
-  if (localStorage.getItem('tbAttendanceRemindersEnabled') === '1' && 'Notification' in window && Notification.permission === 'granted') {
+registerAttendanceServiceWorker().then(async () => {
+  if (localStorage.getItem('tbAttendanceRemindersEnabled') === '1' && await getNotificationPermissionState() === 'granted') {
     scheduleAttendanceReminders();
     const btn = document.getElementById('reminderBtn');
-    if (btn) btn.textContent = 'Reminders On';
+    if (btn) btn.textContent = NOTIFICATIONS_ON_TEXT;
   }
 });
 

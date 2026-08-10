@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tb-attendance-portal-v2';
+const CACHE_NAME = 'tb-attendance-portal-v3';
 const CORE_URLS = [
   '/attendance',
   '/attendance-manifest.webmanifest',

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1f3f8f">
-  <title>Tick Bags Employee Portal</title>
+  <title>Tick Bags Attendance</title>
   <link rel="manifest" href="/attendance-manifest.webmanifest">
   <link rel="icon" href="/static/employee-portal-icon.svg" type="image/svg+xml">
   <style>
@@ -47,6 +47,7 @@
     button:disabled { opacity:.55; cursor:not-allowed; }
     .notice { padding:12px 14px; border-radius:8px; background:#e8f8fb; color:#0a5c6e; font-weight:750; margin-top:14px; }
     .error { background:#fce8e6; color:#9f2216; }
+    .warning { background:#fff4d8; color:#805a00; }
     .install-card { display:none; margin-bottom:12px; background:#fff; border:1px solid var(--line); border-radius:8px; padding:14px; box-shadow:0 10px 28px rgba(40,48,73,.08); }
     .install-card.show { display:block; }
     .install-title { font-weight:900; font-size:16px; }
@@ -76,14 +77,14 @@
 <div class="app-shell">
   <header class="top">
     <div>
-      <div class="brand">Employee Portal</div>
+      <div class="brand">Tick Bags Attendance</div>
       <div class="muted employee-line">{{ employee.full_name }} · {{ employee.username }}</div>
     </div>
     <form action="/attendance/logout" method="post"><button type="submit">Logout</button></form>
   </header>
   <main class="wrap">
     <section class="install-card" id="installCard">
-      <div class="install-title" id="installTitle">Install Employee Portal</div>
+      <div class="install-title" id="installTitle">Install Tick Bags Attendance</div>
       <div class="install-copy" id="installCopy">Add this to your phone for faster attendance and daily reminders at 10 AM and 8 PM.</div>
       <div class="install-actions">
         <button class="primary" type="button" onclick="installAttendanceApp()" id="installBtn">Install App</button>
@@ -108,7 +109,7 @@
           <button class="danger" id="checkOutBtn" onclick="markAttendance('check-out')" disabled>Check Out</button>
           <button onclick="startCamera()">Restart Camera</button>
           <button onclick="loadStatus()">Refresh</button>
-          <button onclick="enableAttendanceReminders()" id="reminderBtn">Enable Reminders</button>
+          <button onclick="enableAttendanceReminders()" id="reminderBtn">Enable 10 AM / 8 PM</button>
         </div>
         <div class="notice" id="message">Allow camera and GPS when your phone asks.</div>
       </section>
@@ -149,6 +150,14 @@ function setMessage(text, isError=false) {
   const box = document.getElementById('message');
   box.textContent = text;
   box.classList.toggle('error', isError);
+  box.classList.remove('warning');
+}
+
+function setWarning(text) {
+  const box = document.getElementById('message');
+  box.textContent = text;
+  box.classList.remove('error');
+  box.classList.add('warning');
 }
 
 function showView(view) {
@@ -293,12 +302,12 @@ function showInstallCard(mode = 'install') {
   const copy = document.getElementById('installCopy');
   if (!card || !installBtn || !title || !copy) return;
   if (mode === 'ios') {
-    title.textContent = 'Add Employee Portal to Home Screen';
-    copy.textContent = 'Open Share, choose Add to Home Screen, then enable reminders from this page.';
+    title.textContent = 'Add Tick Bags Attendance to Home Screen';
+    copy.textContent = 'On iPhone, notifications work after you open this from the Home Screen. Tap Share, then Add to Home Screen.';
     installBtn.textContent = 'Enable Reminders';
     installBtn.onclick = enableAttendanceReminders;
   } else {
-    title.textContent = 'Install Employee Portal';
+    title.textContent = 'Install Tick Bags Attendance';
     copy.textContent = 'Add this to your phone for faster attendance and daily reminders at 10 AM and 8 PM.';
     installBtn.textContent = 'Install App';
     installBtn.onclick = installAttendanceApp;
@@ -373,22 +382,33 @@ function scheduleAttendanceReminders() {
 }
 
 async function enableAttendanceReminders() {
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (isIos && !isStandaloneApp()) {
+    showInstallCard('ios');
+    setWarning('On iPhone, first add Tick Bags Attendance to the Home Screen. Then open it from there and enable reminders.');
+    return;
+  }
   if (!('Notification' in window)) {
     setMessage('Notifications are not supported on this device.', true);
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    setWarning('Notifications are blocked for this site. Open browser settings for dashboard.tickbags.com and allow notifications, then tap this again.');
     return;
   }
   const permission = Notification.permission === 'granted'
     ? 'granted'
     : await Notification.requestPermission();
   if (permission !== 'granted') {
-    setMessage('Notification permission is needed for 10 AM and 8 PM reminders.', true);
+    setWarning('Please tap Allow on the notification popup to enable 10 AM and 8 PM reminders.');
     return;
   }
   localStorage.setItem('tbAttendanceRemindersEnabled', '1');
   scheduleAttendanceReminders();
   const btn = document.getElementById('reminderBtn');
   if (btn) btn.textContent = 'Reminders On';
-  setMessage('Reminders enabled for 10 AM and 8 PM.');
+  await showAttendanceNotification('test');
+  setMessage('Reminders are on for 10 AM and 8 PM.');
 }
 
 startCamera();

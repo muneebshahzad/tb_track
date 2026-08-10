@@ -1,12 +1,12 @@
 {
-  "name": "Tick Bags Employee Portal",
-  "short_name": "TB Attendance",
+  "name": "Tick Bags Attendance",
+  "short_name": "Attendance",
   "start_url": "/attendance",
   "scope": "/attendance",
   "display": "standalone",
   "background_color": "#f4f7fb",
   "theme_color": "#1f3f8f",
-  "description": "Mobile employee portal for attendance tracking and monthly working hours.",
+  "description": "Tick Bags attendance tracking and monthly working hours.",
   "icons": [
     {
       "src": "/static/employee-portal-icon.svg",

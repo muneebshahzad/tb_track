@@ -276,6 +276,27 @@ def serialize_attendance_record(row, include_photos=False):
         serialized['has_check_out_photo'] = bool(row.get('check_out_photo'))
     return serialized
 
+
+def attendance_record_minutes(row):
+    if not row or not row.get('check_in_at') or not row.get('check_out_at'):
+        return 0
+    try:
+        delta = row['check_out_at'] - row['check_in_at']
+        return max(int(round(delta.total_seconds() / 60)), 0)
+    except Exception:
+        return 0
+
+
+def attendance_minutes_label(minutes):
+    minutes = max(int(minutes or 0), 0)
+    hours = minutes // 60
+    mins = minutes % 60
+    if hours and mins:
+        return f"{hours} {'hour' if hours == 1 else 'hours'}, {mins} min"
+    if hours:
+        return f"{hours} {'hour' if hours == 1 else 'hours'}"
+    return f"{mins} min"
+
 @app.context_processor
 def inject_now():
     is_admin_portal = bool(session.get(ADMIN_PORTAL_SESSION_KEY))
@@ -4580,6 +4601,51 @@ def attendance_status_api():
             for row in list_attendance_locations(active_only=True)
         ],
         'max_accuracy_meters': ATTENDANCE_MAX_GPS_ACCURACY_METERS,
+    })
+
+
+@app.route('/api/attendance/month-records')
+def attendance_month_records_api():
+    employee, error = require_attendance_user()
+    if error:
+        return error
+    today = attendance_today()
+    month_start = today.replace(day=1)
+    next_month = (month_start.replace(year=month_start.year + 1, month=1)
+                  if month_start.month == 12
+                  else month_start.replace(month=month_start.month + 1))
+    month_end = next_month - dt.timedelta(days=1)
+    rows = list_attendance_records(
+        start_date=month_start,
+        end_date=month_end,
+        employee_id=employee['id'],
+    )
+    records = []
+    total_minutes = 0
+    completed_days = 0
+    for row in rows:
+        minutes = attendance_record_minutes(row)
+        if minutes:
+            total_minutes += minutes
+            completed_days += 1
+        serialized = serialize_attendance_record(row)
+        serialized.update({
+            'total_minutes': minutes,
+            'total_time': attendance_minutes_label(minutes) if minutes else '-',
+            'is_complete': bool(row.get('check_in_at') and row.get('check_out_at')),
+        })
+        records.append(serialized)
+    return jsonify({
+        'ok': True,
+        'employee': serialize_attendance_employee(employee),
+        'month': month_start.strftime('%B %Y'),
+        'records': records,
+        'summary': {
+            'days': len(records),
+            'completed_days': completed_days,
+            'total_minutes': total_minutes,
+            'total_time': attendance_minutes_label(total_minutes),
+        },
     })
 
 

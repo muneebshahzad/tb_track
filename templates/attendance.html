@@ -3,15 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tick Bags Attendance</title>
+  <title>Tick Bags Employee Portal</title>
   <style>
     :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     body { margin:0; min-height:100vh; background:#f4f7fb; color:#303342; }
-    .top { display:flex; align-items:center; justify-content:space-between; padding:18px 20px; background:#fff; border-bottom:1px solid #dce3f1; }
+    .top { display:flex; align-items:center; justify-content:space-between; padding:18px 20px; background:#fff; border-bottom:1px solid #dce3f1; gap:12px; }
     .brand { font-size:22px; font-weight:850; }
     .muted { color:#858b9d; }
-    .wrap { max-width:860px; margin:0 auto; padding:22px; }
+    .wrap { max-width:860px; margin:0 auto; padding:18px 22px 90px; }
+    .portal-nav { max-width:860px; margin:0 auto; padding:14px 22px 0; display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .nav-btn { width:100%; border:1px solid #d8e0ef; border-radius:8px; padding:12px 14px; background:#fff; color:#303342; font-size:15px; font-weight:850; cursor:pointer; }
+    .nav-btn.active { background:#4e73df; border-color:#4e73df; color:#fff; }
     .panel { background:#fff; border:1px solid #dce3f1; border-radius:8px; box-shadow:0 12px 32px rgba(40,48,73,.08); padding:22px; margin-bottom:18px; }
+    .view[hidden] { display:none; }
     .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
     .stat { border:1px solid #e3e8f3; border-radius:8px; padding:14px; min-height:76px; }
     .label { font-size:12px; font-weight:850; color:#858b9d; letter-spacing:.08em; text-transform:uppercase; }
@@ -24,41 +28,78 @@
     button:disabled { opacity:.55; cursor:not-allowed; }
     .notice { padding:12px 14px; border-radius:8px; background:#e8f8fb; color:#0a5c6e; font-weight:750; margin-top:14px; }
     .error { background:#fce8e6; color:#9f2216; }
+    .records-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
+    .records-title { font-size:22px; font-weight:850; }
+    .records-summary { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+    .record-row { display:grid; grid-template-columns:1fr auto; gap:12px; padding:14px 0; border-top:1px solid #e9edf5; align-items:center; }
+    .record-date { font-size:16px; font-weight:850; }
+    .record-meta { color:#858b9d; font-size:13px; margin-top:3px; }
+    .record-time { font-size:17px; font-weight:900; text-align:right; white-space:nowrap; }
+    .empty { color:#858b9d; padding:14px 0; }
     form { margin:0; }
-    @media (max-width:720px) { .grid { grid-template-columns:1fr; } .top { align-items:flex-start; gap:12px; flex-direction:column; } }
+    @media (max-width:720px) {
+      .top { align-items:flex-start; flex-direction:column; padding:16px; }
+      .wrap { padding:14px 14px 90px; }
+      .portal-nav { padding:12px 14px 0; }
+      .grid { grid-template-columns:1fr; }
+      .panel { padding:16px; }
+    }
   </style>
 </head>
 <body>
   <header class="top">
     <div>
-      <div class="brand">Tick Bags Attendance</div>
+      <div class="brand">Employee Portal</div>
       <div class="muted">{{ employee.full_name }} · {{ employee.username }}</div>
     </div>
     <form action="/attendance/logout" method="post"><button type="submit">Logout</button></form>
   </header>
+  <nav class="portal-nav">
+    <button class="nav-btn active" id="attendanceTab" type="button" onclick="showView('attendance')">Attendance</button>
+    <button class="nav-btn" id="recordsTab" type="button" onclick="showView('records')">Records</button>
+  </nav>
   <main class="wrap">
-    <section class="panel">
-      <div class="grid">
-        <div class="stat"><div class="label">Status</div><div class="value" id="statusText">Loading</div></div>
-        <div class="stat"><div class="label">Check In</div><div class="value" id="checkInText">-</div></div>
-        <div class="stat"><div class="label">Check Out</div><div class="value" id="checkOutText">-</div></div>
-      </div>
-      <div class="notice" id="locationNotice">Office GPS: loading...</div>
-    </section>
-    <section class="panel">
-      <video id="camera" autoplay playsinline muted></video>
-      <canvas id="snapshot" hidden></canvas>
-      <div class="actions">
-        <button class="primary" id="checkInBtn" onclick="markAttendance('check-in')" disabled>Check In</button>
-        <button class="danger" id="checkOutBtn" onclick="markAttendance('check-out')" disabled>Check Out</button>
-        <button onclick="startCamera()">Restart Camera</button>
-        <button onclick="loadStatus()">Refresh</button>
-      </div>
-      <div class="notice" id="message">Allow camera and GPS when your phone asks.</div>
-    </section>
+    <div class="view" id="attendanceView">
+      <section class="panel">
+        <div class="grid">
+          <div class="stat"><div class="label">Status</div><div class="value" id="statusText">Loading</div></div>
+          <div class="stat"><div class="label">Check In</div><div class="value" id="checkInText">-</div></div>
+          <div class="stat"><div class="label">Check Out</div><div class="value" id="checkOutText">-</div></div>
+        </div>
+        <div class="notice" id="locationNotice">Office GPS: loading...</div>
+      </section>
+      <section class="panel">
+        <video id="camera" autoplay playsinline muted></video>
+        <canvas id="snapshot" hidden></canvas>
+        <div class="actions">
+          <button class="primary" id="checkInBtn" onclick="markAttendance('check-in')" disabled>Check In</button>
+          <button class="danger" id="checkOutBtn" onclick="markAttendance('check-out')" disabled>Check Out</button>
+          <button onclick="startCamera()">Restart Camera</button>
+          <button onclick="loadStatus()">Refresh</button>
+        </div>
+        <div class="notice" id="message">Allow camera and GPS when your phone asks.</div>
+      </section>
+    </div>
+
+    <div class="view" id="recordsView" hidden>
+      <section class="panel">
+        <div class="records-head">
+          <div>
+            <div class="records-title">Working Hours</div>
+            <div class="muted" id="recordsMonth">Current month</div>
+          </div>
+          <button type="button" onclick="loadMonthRecords()">Refresh</button>
+        </div>
+        <div class="records-summary">
+          <div class="stat"><div class="label">Days</div><div class="value" id="recordsDays">0</div></div>
+          <div class="stat"><div class="label">Total Time</div><div class="value" id="recordsTotal">0 min</div></div>
+        </div>
+        <div id="recordsList"><div class="empty">Open Records to load this month's working hours.</div></div>
+      </section>
+    </div>
   </main>
 <script>
-const state = {stream: null, locations: [], record: null};
+const state = {stream: null, locations: [], record: null, recordsLoaded: false};
 
 function timeText(value) {
   if (!value) return '-';
@@ -69,6 +110,15 @@ function setMessage(text, isError=false) {
   const box = document.getElementById('message');
   box.textContent = text;
   box.classList.toggle('error', isError);
+}
+
+function showView(view) {
+  const isRecords = view === 'records';
+  document.getElementById('attendanceView').hidden = isRecords;
+  document.getElementById('recordsView').hidden = !isRecords;
+  document.getElementById('attendanceTab').classList.toggle('active', !isRecords);
+  document.getElementById('recordsTab').classList.toggle('active', isRecords);
+  if (isRecords && !state.recordsLoaded) loadMonthRecords();
 }
 
 async function startCamera() {
@@ -131,6 +181,46 @@ async function loadStatus() {
   const data = await res.json();
   if (!data.ok) return setMessage(data.error || 'Could not load attendance.', true);
   renderStatus(data);
+}
+
+function recordTimeText(value) {
+  if (!value) return '-';
+  return new Date(value).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
+
+function renderMonthRecords(data) {
+  state.recordsLoaded = true;
+  document.getElementById('recordsMonth').textContent = data.month || 'Current month';
+  document.getElementById('recordsDays').textContent = Number(data.summary?.completed_days || 0).toLocaleString();
+  document.getElementById('recordsTotal').textContent = data.summary?.total_time || '0 min';
+  const list = document.getElementById('recordsList');
+  const records = data.records || [];
+  if (!records.length) {
+    list.innerHTML = '<div class="empty">No attendance records for this month yet.</div>';
+    return;
+  }
+  list.innerHTML = records.map(row => `
+    <div class="record-row">
+      <div>
+        <div class="record-date">${row.work_date || ''}</div>
+        <div class="record-meta">${recordTimeText(row.check_in_at)} - ${recordTimeText(row.check_out_at)}</div>
+      </div>
+      <div class="record-time">${row.total_time || '-'}</div>
+    </div>
+  `).join('');
+}
+
+async function loadMonthRecords() {
+  const list = document.getElementById('recordsList');
+  list.innerHTML = '<div class="empty">Loading records...</div>';
+  const res = await fetch('/api/attendance/month-records');
+  if (res.status === 401) location.href = '/attendance/login';
+  const data = await res.json();
+  if (!data.ok) {
+    list.innerHTML = `<div class="notice error">${data.error || 'Could not load records.'}</div>`;
+    return;
+  }
+  renderMonthRecords(data);
 }
 
 async function markAttendance(action) {

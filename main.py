@@ -4550,6 +4550,8 @@ def attendance_login_page():
         employee = get_attendance_employee_by_username(username)
         if employee and employee.get('active') and check_password_hash(employee.get('password_hash') or '', password):
             session[ATTENDANCE_SESSION_KEY] = employee['id']
+            if employee.get('role') == 'admin' and next_url == url_for('attendance_page'):
+                next_url = url_for('attendance_admin_page')
             return redirect(next_url)
         return render_template('attendance_login.html', login_error='Wrong username or password.', next_url=next_url), 401
     return render_template('attendance_login.html', login_error='', next_url=next_url)

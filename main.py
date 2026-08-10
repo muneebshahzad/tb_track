@@ -4569,6 +4569,16 @@ def attendance_page():
     return render_template('attendance.html', employee=serialize_attendance_employee(employee))
 
 
+@app.route('/attendance-manifest.webmanifest')
+def attendance_manifest():
+    return send_from_directory('static', 'attendance.webmanifest', mimetype='application/manifest+json')
+
+
+@app.route('/attendance-sw.js')
+def attendance_service_worker():
+    return send_from_directory('static', 'attendance-sw.js', mimetype='application/javascript')
+
+
 @app.route('/attendance/admin')
 def attendance_admin_page():
     employee = attendance_user()

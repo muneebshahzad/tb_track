@@ -3662,8 +3662,11 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
         else:
             raise RuntimeError(error_message)
 
+    complete_params = {}
+    if not is_fully_paid:
+        complete_params['payment_pending'] = True
     try:
-        draft_order.complete()
+        draft_order.complete(complete_params)
     except Exception as e:
         errors = getattr(draft_order, 'errors', None)
         raise RuntimeError(f"Shopify could not complete the exhibition order: {e or errors or 'Unknown completion error'}")

@@ -3429,6 +3429,11 @@ def shopify_error_message(resource, fallback='Shopify request failed.'):
     return str(errors)
 
 
+def is_shopify_phone_error(error_message: str) -> bool:
+    lowered = str(error_message or '').lower()
+    return 'phone' in lowered and ('taken' in lowered or 'invalid' in lowered)
+
+
 def shopify_resource_id(resource):
     if isinstance(resource, dict):
         return resource.get('id')
@@ -3483,7 +3488,7 @@ def find_shopify_customer_by_phone(phone: str):
     return None
 
 
-def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, last_name: str, phone: str):
+def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, last_name: str, phone: str, allow_phone_fallback: bool = True):
     existing_customer = find_shopify_customer_by_phone(phone)
     if existing_customer:
         return existing_customer
@@ -3507,12 +3512,44 @@ def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, l
         customer.addresses = [address]
     if not customer.save():
         error_message = shopify_error_message(customer, 'Could not create Shopify customer.')
-        if phone and 'phone' in error_message.lower() and 'taken' in error_message.lower():
+        if phone and is_shopify_phone_error(error_message):
             existing_customer = find_shopify_customer_by_phone(phone)
             if existing_customer:
                 return existing_customer
+            if allow_phone_fallback:
+                return create_shopify_customer_for_exhibition_order(order, first_name, last_name, '', allow_phone_fallback=False)
         raise RuntimeError(error_message)
     return customer
+
+
+def build_exhibition_shopify_draft_order(order: dict, customer, line_items: list[dict], note_lines: list[str], shipping_address: dict):
+    draft_order = shopify.DraftOrder()
+    draft_order.line_items = line_items
+    draft_order.note = "\n".join(line for line in note_lines if line)
+    draft_order.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
+    draft_order.use_customer_default_address = False
+    draft_order.customer = {'id': shopify_resource_id(customer)}
+    draft_order.shipping_address = shipping_address
+    draft_order.billing_address = shipping_address
+
+    discount_amount = money_float(order.get('discount'))
+    if discount_amount > 0:
+        draft_order.applied_discount = {
+            'description': 'Exhibition discount',
+            'value_type': 'fixed_amount',
+            'value': discount_amount,
+            'amount': discount_amount,
+            'title': 'Exhibition discount',
+        }
+
+    delivery_charges = money_float(order.get('delivery_charges'))
+    if delivery_charges > 0:
+        draft_order.shipping_line = {
+            'title': 'Delivery Charges',
+            'price': delivery_charges,
+            'custom': True,
+        }
+    return draft_order
 
 
 def push_exhibition_order_to_shopify(order: dict) -> dict:
@@ -3574,35 +3611,19 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
     if order.get('delivery_address'):
         note_lines.append(f"Delivery address: {order.get('delivery_address')}")
 
-    draft_order = shopify.DraftOrder()
-    draft_order.line_items = line_items
-    draft_order.note = "\n".join(line for line in note_lines if line)
-    draft_order.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
-    draft_order.use_customer_default_address = False
-    draft_order.customer = {'id': shopify_resource_id(customer)}
-    draft_order.shipping_address = shipping_address
-    draft_order.billing_address = shipping_address
-
-    discount_amount = money_float(order.get('discount'))
-    if discount_amount > 0:
-        draft_order.applied_discount = {
-            'description': 'Exhibition discount',
-            'value_type': 'fixed_amount',
-            'value': discount_amount,
-            'amount': discount_amount,
-            'title': 'Exhibition discount',
-        }
-
-    delivery_charges = money_float(order.get('delivery_charges'))
-    if delivery_charges > 0:
-        draft_order.shipping_line = {
-            'title': 'Delivery Charges',
-            'price': delivery_charges,
-            'custom': True,
-        }
-
+    draft_order = build_exhibition_shopify_draft_order(order, customer, line_items, note_lines, shipping_address)
     if not draft_order.save():
-        raise RuntimeError(shopify_error_message(draft_order, 'Could not save Shopify draft order.'))
+        error_message = shopify_error_message(draft_order, 'Could not save Shopify draft order.')
+        if phone and is_shopify_phone_error(error_message):
+            phone = ''
+            shipping_address = dict(shipping_address)
+            shipping_address.pop('phone', None)
+            note_lines.append('Shopify phone omitted: original exhibition phone was rejected by Shopify.')
+            draft_order = build_exhibition_shopify_draft_order(order, customer, line_items, note_lines, shipping_address)
+            if not draft_order.save():
+                raise RuntimeError(shopify_error_message(draft_order, 'Could not save Shopify draft order without phone.'))
+        else:
+            raise RuntimeError(error_message)
 
     try:
         draft_order.complete()

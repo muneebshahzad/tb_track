@@ -3429,7 +3429,65 @@ def shopify_error_message(resource, fallback='Shopify request failed.'):
     return str(errors)
 
 
+def shopify_resource_id(resource):
+    if isinstance(resource, dict):
+        return resource.get('id')
+    return getattr(resource, 'id', None)
+
+
+def shopify_customer_phone_values(customer: dict) -> set[str]:
+    values = set()
+    raw_values = [
+        customer.get('phone'),
+        (customer.get('default_address') or {}).get('phone'),
+    ]
+    for address in customer.get('addresses') or []:
+        raw_values.append((address or {}).get('phone'))
+    for raw_value in raw_values:
+        normalized = normalize_pk_phone(raw_value)
+        if normalized:
+            values.add(normalized)
+    return values
+
+
+def find_shopify_customer_by_phone(phone: str):
+    normalized_phone = normalize_pk_phone(phone)
+    if not normalized_phone:
+        return None
+
+    base_url = get_shopify_rest_base_url()
+    headers = shopify_rest_headers()
+    queries = [f'phone:{normalized_phone}', normalized_phone]
+    local_phone = normalized_phone.replace('+92', '0', 1) if normalized_phone.startswith('+92') else ''
+    if local_phone:
+        queries.append(f'phone:{local_phone}')
+        queries.append(local_phone)
+
+    for query in queries:
+        response = requests.get(
+            f"{base_url}/customers/search.json",
+            headers=headers,
+            params={'query': query, 'limit': 10},
+            timeout=30,
+        )
+        response.raise_for_status()
+        for customer in response.json().get('customers') or []:
+            if normalized_phone in shopify_customer_phone_values(customer):
+                customer_id = customer.get('id')
+                if not customer_id:
+                    continue
+                try:
+                    return shopify.Customer.find(customer_id)
+                except Exception:
+                    return {'id': customer_id}
+    return None
+
+
 def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, last_name: str, phone: str):
+    existing_customer = find_shopify_customer_by_phone(phone)
+    if existing_customer:
+        return existing_customer
+
     customer = shopify.Customer()
     customer.first_name = first_name
     customer.last_name = last_name or ''
@@ -3448,7 +3506,12 @@ def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, l
             address['phone'] = phone
         customer.addresses = [address]
     if not customer.save():
-        raise RuntimeError(shopify_error_message(customer, 'Could not create Shopify customer.'))
+        error_message = shopify_error_message(customer, 'Could not create Shopify customer.')
+        if phone and 'phone' in error_message.lower() and 'taken' in error_message.lower():
+            existing_customer = find_shopify_customer_by_phone(phone)
+            if existing_customer:
+                return existing_customer
+        raise RuntimeError(error_message)
     return customer
 
 
@@ -3516,7 +3579,7 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
     draft_order.note = "\n".join(line for line in note_lines if line)
     draft_order.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
     draft_order.use_customer_default_address = False
-    draft_order.customer = {'id': getattr(customer, 'id', None)}
+    draft_order.customer = {'id': shopify_resource_id(customer)}
     draft_order.shipping_address = shipping_address
     draft_order.billing_address = shipping_address
 
@@ -3592,7 +3655,7 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
         'order_id': order_id,
         'order_name': order_name,
         'draft_order_id': getattr(draft_order, 'id', None),
-        'customer_id': getattr(customer, 'id', None),
+        'customer_id': shopify_resource_id(customer),
         'warnings': warnings,
     }
 

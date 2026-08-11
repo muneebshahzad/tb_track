@@ -3522,7 +3522,14 @@ def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, l
     return customer
 
 
-def build_exhibition_shopify_draft_order(order: dict, customer, line_items: list[dict], note_lines: list[str], shipping_address: dict):
+def build_exhibition_shopify_draft_order(
+    order: dict,
+    customer,
+    line_items: list[dict],
+    note_lines: list[str],
+    shipping_address: dict,
+    partial_paid_discount: Decimal = Decimal('0'),
+):
     draft_order = shopify.DraftOrder()
     draft_order.line_items = line_items
     draft_order.note = "\n".join(line for line in note_lines if line)
@@ -3532,14 +3539,20 @@ def build_exhibition_shopify_draft_order(order: dict, customer, line_items: list
     draft_order.shipping_address = shipping_address
     draft_order.billing_address = shipping_address
 
-    discount_amount = money_float(order.get('discount'))
-    if discount_amount > 0:
+    exhibition_discount = money_decimal(order.get('discount'))
+    total_discount = exhibition_discount + max(partial_paid_discount, Decimal('0'))
+    if total_discount > 0:
+        discount_title = 'Exhibition discount'
+        if partial_paid_discount > 0:
+            discount_title = 'Exhibition paid amount'
+            if exhibition_discount > 0:
+                discount_title = 'Exhibition discount + paid amount'
         draft_order.applied_discount = {
-            'description': 'Exhibition discount',
+            'description': discount_title,
             'value_type': 'fixed_amount',
-            'value': discount_amount,
-            'amount': discount_amount,
-            'title': 'Exhibition discount',
+            'value': money_float(total_discount),
+            'amount': money_float(total_discount),
+            'title': discount_title,
         }
 
     delivery_charges = money_float(order.get('delivery_charges'))
@@ -3611,7 +3624,24 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
     if order.get('delivery_address'):
         note_lines.append(f"Delivery address: {order.get('delivery_address')}")
 
-    draft_order = build_exhibition_shopify_draft_order(order, customer, line_items, note_lines, shipping_address)
+    total_amount = money_decimal(order.get('total_amount'))
+    paid_amount = money_decimal(order.get('paid_amount'))
+    balance_amount = max(total_amount - paid_amount, Decimal('0'))
+    is_partially_paid = paid_amount > 0 and paid_amount < total_amount
+    is_fully_paid = paid_amount >= total_amount and total_amount > 0
+    partial_paid_discount = paid_amount if is_partially_paid else Decimal('0')
+    if is_partially_paid:
+        note_lines.append(f"Shopify total reflects remaining balance: {money_format(balance_amount)}")
+        note_lines.append(f"Paid amount added as Shopify discount: {money_format(paid_amount)}")
+
+    draft_order = build_exhibition_shopify_draft_order(
+        order,
+        customer,
+        line_items,
+        note_lines,
+        shipping_address,
+        partial_paid_discount=partial_paid_discount,
+    )
     if not draft_order.save():
         error_message = shopify_error_message(draft_order, 'Could not save Shopify draft order.')
         if phone and is_shopify_phone_error(error_message):
@@ -3619,7 +3649,14 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
             shipping_address = dict(shipping_address)
             shipping_address.pop('phone', None)
             note_lines.append('Shopify phone omitted: original exhibition phone was rejected by Shopify.')
-            draft_order = build_exhibition_shopify_draft_order(order, customer, line_items, note_lines, shipping_address)
+            draft_order = build_exhibition_shopify_draft_order(
+                order,
+                customer,
+                line_items,
+                note_lines,
+                shipping_address,
+                partial_paid_discount=partial_paid_discount,
+            )
             if not draft_order.save():
                 raise RuntimeError(shopify_error_message(draft_order, 'Could not save Shopify draft order without phone.'))
         else:
@@ -3642,7 +3679,6 @@ def push_exhibition_order_to_shopify(order: dict) -> dict:
         raise RuntimeError('Shopify created the draft, but the completed order ID did not come back.')
 
     warnings = []
-    is_fully_paid = money_decimal(order.get('paid_amount')) >= money_decimal(order.get('total_amount')) and money_decimal(order.get('total_amount')) > 0
     if is_fully_paid:
         try:
             mark_shopify_order_as_paid(order_id)

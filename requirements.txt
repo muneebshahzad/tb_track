@@ -9,3 +9,4 @@ apscheduler~=3.10.1
 pytz~=2024.1
 certifi
 openpyxl~=3.1.5
+opencv-python-headless~=4.10.0.84

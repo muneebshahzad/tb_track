@@ -27,6 +27,16 @@ import re
 import math
 from xml.sax.saxutils import escape as xml_escape
 
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from werkzeug.security import check_password_hash, generate_password_hash
 from token_manager import get_access_token, save_tokens
@@ -105,6 +115,7 @@ ATTENDANCE_SESSION_KEY = 'attendance_employee_id'
 ATTENDANCE_ADMIN_PASSWORD = os.getenv('ATTENDANCE_ADMIN_PASSWORD', ADMIN_PORTAL_PASSWORD)
 ATTENDANCE_MAX_PHOTO_BYTES = int(os.getenv('ATTENDANCE_MAX_PHOTO_BYTES', str(2_500_000)))
 ATTENDANCE_MAX_GPS_ACCURACY_METERS = float(os.getenv('ATTENDANCE_MAX_GPS_ACCURACY_METERS', '200'))
+ATTENDANCE_MIN_FACE_SIZE = int(os.getenv('ATTENDANCE_MIN_FACE_SIZE', '60'))
 KARACHI_TZ = dt.timezone(dt.timedelta(hours=5))
 
 # ── Jinja2 helpers ────────────────────────────────────────────────────────────
@@ -212,6 +223,39 @@ def haversine_meters(lat1, lon1, lat2, lon2):
     return radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def attendance_photo_has_face(photo: str):
+    if cv2 is None or np is None:
+        return False, 'Face detection is not available on the server. Please contact admin.'
+    try:
+        header, encoded = str(photo or '').split(',', 1)
+        if ';base64' not in header:
+            return False, 'Live camera photo is invalid. Please retake it.'
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except Exception:
+        return False, 'Live camera photo is invalid. Please retake it.'
+
+    image_array = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image_array is None:
+        return False, 'Live camera photo is invalid. Please retake it.'
+
+    gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+    cascade_path = os.path.join(cv2.data.haarcascades, 'haarcascade_frontalface_default.xml')
+    detector = cv2.CascadeClassifier(cascade_path)
+    if detector.empty():
+        return False, 'Face detection is not available on the server. Please contact admin.'
+
+    min_size = max(ATTENDANCE_MIN_FACE_SIZE, min(image_array.shape[:2]) // 10)
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.08,
+        minNeighbors=5,
+        minSize=(min_size, min_size),
+    )
+    if len(faces) < 1:
+        return False, 'Face is not visible in the photo. Please face the camera and retake it.'
+    return True, ''
+
+
 def validate_attendance_capture(payload):
     try:
         latitude = float(payload.get('latitude'))
@@ -224,6 +268,9 @@ def validate_attendance_capture(payload):
         return None, 'Live camera photo is required.'
     if len(photo.encode('utf-8')) > ATTENDANCE_MAX_PHOTO_BYTES:
         return None, 'Photo is too large. Please retake it closer to the camera.'
+    face_ok, face_error = attendance_photo_has_face(photo)
+    if not face_ok:
+        return None, face_error
     if accuracy > ATTENDANCE_MAX_GPS_ACCURACY_METERS:
         return None, f'GPS accuracy is too weak ({round(accuracy)}m). Please stand near the office and try again.'
 

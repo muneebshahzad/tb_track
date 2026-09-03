@@ -1216,6 +1216,31 @@ def get_attendance_record_for_date(employee_id, work_date=None) -> dict | None:
         return None
 
 
+def get_open_attendance_record_for_employee(employee_id) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT r.*, e.full_name, e.username, e.role, l.name AS location_name, l.plus_code
+                    FROM attendance_records r
+                    JOIN attendance_employees e ON e.id = r.employee_id
+                    LEFT JOIN attendance_locations l ON l.id = r.location_id
+                    WHERE r.employee_id = %s
+                      AND r.check_in_at IS NOT NULL
+                      AND r.check_out_at IS NULL
+                    ORDER BY r.check_in_at DESC, r.id DESC
+                    LIMIT 1
+                """, (employee_id,))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_open_attendance_record_for_employee error: {e}")
+        return None
+
+
 def create_attendance_checkin(
     employee_id,
     location_id,
@@ -1344,7 +1369,7 @@ def list_attendance_records(start_date=None, end_date=None, employee_id=None) ->
                     LEFT JOIN attendance_locations l ON l.id = r.location_id
                     {where}
                     ORDER BY r.work_date DESC, r.check_in_at DESC, r.id DESC
-                    LIMIT 500
+                    LIMIT 5000
                 """, tuple(params))
                 rows = [dict(row) for row in cur.fetchall()]
         _set_last_db_error("")

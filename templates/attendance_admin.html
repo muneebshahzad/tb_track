@@ -9,11 +9,12 @@
   .att-card { background:#fff; border:1px solid #dce3f1; border-radius:8px; box-shadow:0 10px 28px rgba(40,48,73,.07); margin-bottom:18px; overflow:hidden; }
   .att-card-head { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:18px 22px; border-bottom:1px solid #e3e8f3; }
   .att-card-title { font-size:20px; font-weight:850; }
-  .att-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:18px; }
+  .att-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px; }
   .att-stat { background:#fff; border:1px solid #dce3f1; border-radius:8px; padding:18px; min-height:92px; }
   .att-label { color:#858b9d; font-weight:850; font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
   .att-value { margin-top:10px; font-size:28px; font-weight:850; }
   .att-form { display:grid; grid-template-columns:1.2fr 1fr 1fr .8fr auto; gap:10px; padding:18px 22px; align-items:end; }
+  .att-filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   .att-input, .att-select { border:1px solid #d8e0ef; border-radius:8px; padding:12px 14px; font-size:15px; min-width:0; }
   .att-btn { border:1px solid #d8e0ef; border-radius:8px; padding:12px 16px; background:#fff; color:#20b8c8; font-weight:850; cursor:pointer; }
   .att-btn.primary { background:#4e73df; border-color:#4e73df; color:#fff; }
@@ -23,7 +24,9 @@
   .att-muted { color:#858b9d; }
   .att-pill { display:inline-flex; padding:4px 9px; border-radius:999px; background:#d4f5e9; color:#0f6848; font-weight:800; font-size:12px; }
   .att-pill.open { background:#fff3cd; color:#8b5a00; }
-  @media (max-width:980px) { .att-grid, .att-form { grid-template-columns:1fr; } .att-top { flex-direction:column; } }
+  @media (max-width:1180px) { .att-grid { grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:980px) { .att-form { grid-template-columns:1fr; } .att-top { flex-direction:column; } }
+  @media (max-width:640px) { .att-wrap { padding:18px 12px; } .att-grid { grid-template-columns:1fr; } .att-card-head { align-items:flex-start; flex-direction:column; } .att-filters, .att-input, .att-select, .att-btn { width:100%; } .att-table-wrap { overflow-x:auto; } }
 </style>
 <div class="att-wrap">
   <div class="att-top">
@@ -36,8 +39,13 @@
 
   <div class="att-grid">
     <div class="att-stat"><div class="att-label">Records</div><div class="att-value" id="recordCount">0</div></div>
-    <div class="att-stat"><div class="att-label">Checked In</div><div class="att-value" id="openCount">0</div></div>
-    <div class="att-stat"><div class="att-label">Checked Out</div><div class="att-value" id="closedCount">0</div></div>
+    <div class="att-stat"><div class="att-label">Employees</div><div class="att-value" id="employeeCount">0</div></div>
+    <div class="att-stat"><div class="att-label">Total Attendance</div><div class="att-value" id="totalAttendance">0 min</div></div>
+    <div class="att-stat"><div class="att-label">Avg Daily Time</div><div class="att-value" id="averageDailyTime">0 min</div></div>
+    <div class="att-stat"><div class="att-label">Leaves</div><div class="att-value" id="leaveCount">0</div></div>
+    <div class="att-stat"><div class="att-label">Short Attendance</div><div class="att-value" id="shortCount">0</div></div>
+    <div class="att-stat"><div class="att-label">Overtime</div><div class="att-value" id="overtimeCount">0</div></div>
+    <div class="att-stat"><div class="att-label">Open Shifts</div><div class="att-value" id="openCount">0</div></div>
   </div>
 
   <section class="att-card">
@@ -56,26 +64,53 @@
 
   <section class="att-card">
     <div class="att-card-head">
-      <div class="att-card-title">Attendance Records</div>
       <div>
-        <input class="att-input" id="startDate" type="date" onchange="loadAttendance()">
-        <input class="att-input" id="endDate" type="date" onchange="loadAttendance()">
+        <div class="att-card-title">Monthly Attendance Summary</div>
+        <div class="att-muted" id="monthLabel">Current month</div>
+      </div>
+      <div class="att-filters">
+        <input class="att-input" id="monthFilter" type="month" onchange="loadAttendance()">
+        <button class="att-btn" onclick="loadAttendance()">Refresh</button>
       </div>
     </div>
-    <table class="att-table">
-      <thead>
-        <tr>
-          <th>Employee</th>
-          <th>Date</th>
-          <th>Check In</th>
-          <th>Check Out</th>
-          <th>Total Time</th>
-          <th>GPS</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="recordRows"></tbody>
-    </table>
+    <div class="att-table-wrap">
+      <table class="att-table">
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Attendance</th>
+            <th>Total Time</th>
+            <th>Avg Daily Time</th>
+            <th>Leaves</th>
+            <th>Short</th>
+            <th>Overtime</th>
+          </tr>
+        </thead>
+        <tbody id="summaryRows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="att-card">
+    <div class="att-card-head">
+      <div class="att-card-title">Attendance Records</div>
+    </div>
+    <div class="att-table-wrap">
+      <table class="att-table">
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Date</th>
+            <th>Check In</th>
+            <th>Check Out</th>
+            <th>Total Time</th>
+            <th>GPS</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="recordRows"></tbody>
+      </table>
+    </div>
   </section>
 </div>
 <script>
@@ -125,11 +160,34 @@ async function createEmployee() {
 
 function renderRecords(data) {
   document.getElementById('recordCount').textContent = data.summary.records || 0;
+  document.getElementById('employeeCount').textContent = data.summary.employees || 0;
+  document.getElementById('totalAttendance').textContent = data.summary.total_time || '0 min';
+  document.getElementById('averageDailyTime').textContent = data.summary.average_daily_time || '0 min';
+  document.getElementById('leaveCount').textContent = data.summary.leaves || 0;
+  document.getElementById('shortCount').textContent = data.summary.short_attendance || 0;
+  document.getElementById('overtimeCount').textContent = data.summary.overtime_time || '0 min';
   document.getElementById('openCount').textContent = data.summary.open || 0;
-  document.getElementById('closedCount').textContent = data.summary.closed || 0;
+  document.getElementById('monthLabel').textContent = data.month_label || 'Selected month';
+  const summaryBody = document.getElementById('summaryRows');
+  const summaries = data.employee_summaries || [];
+  if (!summaries.length) {
+    summaryBody.innerHTML = '<tr><td colspan="7"><div class="att-muted">No employees found.</div></td></tr>';
+  } else {
+    summaryBody.innerHTML = summaries.map(row => `
+      <tr>
+        <td><strong>${escapeHtml(row.employee.full_name)}</strong><div class="att-muted">${escapeHtml(row.employee.username)}</div></td>
+        <td>${Number(row.attendance_days || 0)} days<div class="att-muted">${Number(row.completed_days || 0)} closed</div></td>
+        <td><strong>${escapeHtml(row.total_time || '0 min')}</strong></td>
+        <td>${escapeHtml(row.average_daily_time || '0 min')}</td>
+        <td>${Number(row.leaves || 0)}</td>
+        <td>${Number(row.short_attendance_days || 0)}</td>
+        <td>${escapeHtml(row.overtime_time || '0 min')}<div class="att-muted">${Number(row.overtime_days || 0)} days</div></td>
+      </tr>
+    `).join('');
+  }
   const body = document.getElementById('recordRows');
   if (!data.records.length) {
-    body.innerHTML = '<tr><td colspan="6"><div class="att-muted">No attendance records found.</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="7"><div class="att-muted">No attendance records found.</div></td></tr>';
     return;
   }
   body.innerHTML = data.records.map(row => `
@@ -147,16 +205,16 @@ function renderRecords(data) {
 
 async function loadAttendance() {
   const params = new URLSearchParams();
-  const start = document.getElementById('startDate').value;
-  const end = document.getElementById('endDate').value;
-  if (start) params.set('start_date', start);
-  if (end) params.set('end_date', end);
+  const month = document.getElementById('monthFilter').value;
+  if (month) params.set('month', month);
   const res = await fetch(`/api/attendance/admin/records?${params.toString()}`);
   const data = await res.json();
   if (!data.ok) return alert(data.error || 'Could not load attendance.');
   renderRecords(data);
 }
 
+const localNow = new Date();
+document.getElementById('monthFilter').value = `${localNow.getFullYear()}-${String(localNow.getMonth() + 1).padStart(2, '0')}`;
 loadAttendance();
 </script>
 {% endblock %}

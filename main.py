@@ -70,6 +70,7 @@ from db import (
     get_app_setting,
     get_attendance_employee,
     get_attendance_employee_by_username,
+    get_open_attendance_record_for_employee,
     get_attendance_record,
     get_attendance_record_for_date,
     get_exhibition_order,
@@ -116,6 +117,8 @@ ATTENDANCE_ADMIN_PASSWORD = os.getenv('ATTENDANCE_ADMIN_PASSWORD', ADMIN_PORTAL_
 ATTENDANCE_MAX_PHOTO_BYTES = int(os.getenv('ATTENDANCE_MAX_PHOTO_BYTES', str(2_500_000)))
 ATTENDANCE_MAX_GPS_ACCURACY_METERS = float(os.getenv('ATTENDANCE_MAX_GPS_ACCURACY_METERS', '200'))
 ATTENDANCE_MIN_FACE_SIZE = int(os.getenv('ATTENDANCE_MIN_FACE_SIZE', '60'))
+ATTENDANCE_STANDARD_DAY_MINUTES = int(os.getenv('ATTENDANCE_STANDARD_DAY_MINUTES', str(8 * 60)))
+ATTENDANCE_OVERNIGHT_CHECKOUT_HOUR = int(os.getenv('ATTENDANCE_OVERNIGHT_CHECKOUT_HOUR', '4'))
 KARACHI_TZ = dt.timezone(dt.timedelta(hours=5))
 
 # ── Jinja2 helpers ────────────────────────────────────────────────────────────
@@ -180,6 +183,41 @@ def serialize_datetime(value):
 
 def attendance_today():
     return dt.datetime.now(KARACHI_TZ).date()
+
+
+def attendance_now():
+    return dt.datetime.now(KARACHI_TZ)
+
+
+def parse_attendance_month(value):
+    raw = str(value or '').strip()
+    if re.fullmatch(r'\d{4}-\d{2}', raw):
+        year, month = [int(part) for part in raw.split('-')]
+        return dt.date(year, month, 1)
+    today = attendance_today()
+    return today.replace(day=1)
+
+
+def next_month_start(month_start):
+    return (
+        month_start.replace(year=month_start.year + 1, month=1)
+        if month_start.month == 12
+        else month_start.replace(month=month_start.month + 1)
+    )
+
+
+def attendance_month_bounds(value=None):
+    month_start = parse_attendance_month(value)
+    return month_start, next_month_start(month_start) - dt.timedelta(days=1)
+
+
+def attendance_record_work_date(row):
+    value = (row or {}).get('work_date')
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    return parse_iso_day(str(value or ''))
 
 
 def attendance_user():
@@ -343,6 +381,65 @@ def attendance_minutes_label(minutes):
     if hours:
         return f"{hours} {'hour' if hours == 1 else 'hours'}"
     return f"{mins} min"
+
+
+def attendance_days_in_scope(month_start, month_end):
+    today = attendance_today()
+    effective_end = min(month_end, today)
+    if effective_end < month_start:
+        return 0
+    return (effective_end - month_start).days + 1
+
+
+def build_attendance_employee_summaries(records, employees, month_start, month_end):
+    scoped_days = attendance_days_in_scope(month_start, month_end)
+    grouped = {employee.get('id'): [] for employee in employees if employee.get('active')}
+    for row in records:
+        grouped.setdefault(row.get('employee_id'), []).append(row)
+
+    summaries = []
+    for employee in employees:
+        if not employee.get('active'):
+            continue
+        employee_records = grouped.get(employee.get('id'), [])
+        attended_dates = set()
+        completed_days = 0
+        short_days = 0
+        overtime_days = 0
+        overtime_minutes = 0
+        total_minutes = 0
+        for row in employee_records:
+            minutes = attendance_record_minutes(row)
+            if row.get('check_in_at'):
+                attended_dates.add(attendance_record_work_date(row))
+            if row.get('check_in_at') and row.get('check_out_at'):
+                completed_days += 1
+                total_minutes += minutes
+                if minutes < ATTENDANCE_STANDARD_DAY_MINUTES:
+                    short_days += 1
+                if minutes > ATTENDANCE_STANDARD_DAY_MINUTES:
+                    overtime_days += 1
+                    overtime_minutes += minutes - ATTENDANCE_STANDARD_DAY_MINUTES
+
+        attendance_days = len(attended_dates)
+        leaves = max(scoped_days - attendance_days, 0)
+        average_minutes = round(total_minutes / completed_days) if completed_days else 0
+        summaries.append({
+            'employee': serialize_attendance_employee(employee),
+            'attendance_days': attendance_days,
+            'completed_days': completed_days,
+            'leaves': leaves,
+            'short_attendance_days': short_days,
+            'overtime_days': overtime_days,
+            'overtime_minutes': overtime_minutes,
+            'overtime_time': attendance_minutes_label(overtime_minutes),
+            'total_minutes': total_minutes,
+            'total_time': attendance_minutes_label(total_minutes),
+            'average_daily_minutes': average_minutes,
+            'average_daily_time': attendance_minutes_label(average_minutes),
+        })
+    summaries.sort(key=lambda row: row['employee']['full_name'].lower())
+    return summaries
 
 @app.context_processor
 def inject_now():
@@ -4767,10 +4864,11 @@ def attendance_status_api():
     if error:
         return error
     today_record = get_attendance_record_for_date(employee['id'], attendance_today())
+    open_record = get_open_attendance_record_for_employee(employee['id'])
     return jsonify({
         'ok': True,
         'employee': serialize_attendance_employee(employee),
-        'today': serialize_attendance_record(today_record),
+        'today': serialize_attendance_record(open_record or today_record),
         'locations': [
             {
                 'id': row.get('id'),
@@ -4791,12 +4889,7 @@ def attendance_month_records_api():
     employee, error = require_attendance_user()
     if error:
         return error
-    today = attendance_today()
-    month_start = today.replace(day=1)
-    next_month = (month_start.replace(year=month_start.year + 1, month=1)
-                  if month_start.month == 12
-                  else month_start.replace(month=month_start.month + 1))
-    month_end = next_month - dt.timedelta(days=1)
+    month_start, month_end = attendance_month_bounds()
     rows = list_attendance_records(
         start_date=month_start,
         end_date=month_end,
@@ -4836,6 +4929,9 @@ def attendance_check_in_api():
     employee, error = require_attendance_user()
     if error:
         return error
+    open_record = get_open_attendance_record_for_employee(employee['id'])
+    if open_record:
+        return jsonify({'ok': False, 'error': 'Check out from your open shift before checking in again.'}), 400
     existing = get_attendance_record_for_date(employee['id'], attendance_today())
     if existing and existing.get('check_in_at'):
         return jsonify({'ok': False, 'error': 'You have already checked in today.'}), 400
@@ -4865,7 +4961,17 @@ def attendance_check_out_api():
     employee, error = require_attendance_user()
     if error:
         return error
-    existing = get_attendance_record_for_date(employee['id'], attendance_today())
+    now = attendance_now()
+    today_record = get_attendance_record_for_date(employee['id'], now.date())
+    open_record = get_open_attendance_record_for_employee(employee['id'])
+    existing = today_record
+    if open_record and attendance_record_work_date(open_record) != now.date():
+        if now.hour <= ATTENDANCE_OVERNIGHT_CHECKOUT_HOUR:
+            existing = open_record
+        else:
+            return jsonify({'ok': False, 'error': 'Yesterday shift is still open. Ask admin to close it before checking in again.'}), 400
+    elif open_record:
+        existing = open_record
     if not existing or not existing.get('check_in_at'):
         return jsonify({'ok': False, 'error': 'Check in first before checking out.'}), 400
     if existing.get('check_out_at'):
@@ -4922,13 +5028,31 @@ def attendance_admin_records_api():
     _, error = require_attendance_user(admin_required=True)
     if error:
         return error
+    month_start = month_end = None
+    if request.args.get('month'):
+        month_start, month_end = attendance_month_bounds(request.args.get('month'))
     rows = list_attendance_records(
-        start_date=request.args.get('start_date') or None,
-        end_date=request.args.get('end_date') or None,
+        start_date=month_start or request.args.get('start_date') or None,
+        end_date=month_end or request.args.get('end_date') or None,
         employee_id=request.args.get('employee_id') or None,
+    )
+    employees = [serialize_attendance_employee(row) for row in list_attendance_employees(include_inactive=True)]
+    active_employees = [row for row in employees if row.get('active')]
+    scoped_days = attendance_days_in_scope(
+        month_start or parse_iso_day(request.args.get('start_date')) or attendance_today(),
+        month_end or parse_iso_day(request.args.get('end_date')) or attendance_today(),
+    )
+    employee_summaries = build_attendance_employee_summaries(
+        rows,
+        active_employees,
+        month_start or parse_iso_day(request.args.get('start_date')) or attendance_today(),
+        month_end or parse_iso_day(request.args.get('end_date')) or attendance_today(),
     )
     open_count = sum(1 for row in rows if not row.get('check_out_at'))
     closed_count = len(rows) - open_count
+    total_minutes = sum(attendance_record_minutes(row) for row in rows)
+    completed_count = sum(1 for row in rows if row.get('check_in_at') and row.get('check_out_at'))
+    average_minutes = round(total_minutes / completed_count) if completed_count else 0
     return jsonify({
         'ok': True,
         'records': [serialize_attendance_record(row) for row in rows],
@@ -4936,8 +5060,22 @@ def attendance_admin_records_api():
             'records': len(rows),
             'open': open_count,
             'closed': closed_count,
+            'employees': len(active_employees),
+            'scoped_days': scoped_days,
+            'total_minutes': total_minutes,
+            'total_time': attendance_minutes_label(total_minutes),
+            'average_daily_minutes': average_minutes,
+            'average_daily_time': attendance_minutes_label(average_minutes),
+            'leaves': sum(row['leaves'] for row in employee_summaries),
+            'short_attendance': sum(row['short_attendance_days'] for row in employee_summaries),
+            'overtime_days': sum(row['overtime_days'] for row in employee_summaries),
+            'overtime_minutes': sum(row['overtime_minutes'] for row in employee_summaries),
+            'overtime_time': attendance_minutes_label(sum(row['overtime_minutes'] for row in employee_summaries)),
         },
-        'employees': [serialize_attendance_employee(row) for row in list_attendance_employees(include_inactive=True)],
+        'month': (month_start.strftime('%Y-%m') if month_start else ''),
+        'month_label': (month_start.strftime('%B %Y') if month_start else ''),
+        'employee_summaries': employee_summaries,
+        'employees': employees,
         'locations': [
             {
                 'id': row.get('id'),

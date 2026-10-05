@@ -33,6 +33,13 @@
 
   /* ── Employee approvals ── */
   .approval-card { background: #fff7ec; border: 1px solid #f2d1a6; border-radius: 12px; overflow: hidden; }
+  .approval-head { display:flex;align-items:center;gap:8px;padding:12px 14px; }
+  .approval-head-main { display:flex;align-items:center;gap:8px;min-width:0; }
+  .approval-toggle { margin-left:auto;border:1px solid #f2d1a6;background:#fff;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;color:#8b5a00;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap; }
+  .approval-toggle:hover { background:#fff3cd; }
+  .approval-card.collapsed .approval-list { display:none; }
+  .approval-preview { padding:0 14px 12px;color:#8a6d3b;font-size:11px;line-height:1.4; }
+  .approval-card:not(.collapsed) .approval-preview { display:none; }
   .approval-list { display: flex; flex-direction: column; gap: 8px; }
   .approval-item { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 12px 14px; border-top: 1px solid rgba(20,33,61,0.08); }
   .approval-item:first-child { border-top: none; }
@@ -265,15 +272,20 @@
     </div>
 
     {% if employee_approvals %}
-    <div style="padding:10px 14px 0;display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-      <div style="width:24px;height:24px;border-radius:6px;background:#f2b632;display:flex;align-items:center;justify-content:center;font-size:12px;">🛂</div>
-      <span style="font-size:13px;font-weight:700;color:#3a3b45;">Employee Approvals</span>
-      <span class="section-count" style="background:rgba(242,182,50,0.14);color:#8b5a00;">{{ employee_approvals|length }}</span>
-    </div>
-
     <div style="padding:0 14px 12px;max-width:960px;">
-      <div class="approval-card">
-        <div class="approval-list">
+      <div class="approval-card collapsed" id="employeeApprovalCard">
+        <div class="approval-head">
+          <div class="approval-head-main">
+            <div style="width:24px;height:24px;border-radius:6px;background:#f2b632;display:flex;align-items:center;justify-content:center;font-size:12px;">🛂</div>
+            <span style="font-size:13px;font-weight:700;color:#3a3b45;">Employee Approvals</span>
+            <span class="section-count" style="background:rgba(242,182,50,0.14);color:#8b5a00;">{{ employee_approvals|length }}</span>
+          </div>
+          <button class="approval-toggle" id="employeeApprovalToggle" type="button" onclick="toggleEmployeeApprovals()" aria-expanded="false" aria-controls="employeeApprovalList">Expand</button>
+        </div>
+        <div class="approval-preview">
+          {{ employee_approvals|length }} employee request{{ '' if employee_approvals|length == 1 else 's' }} waiting for approval.
+        </div>
+        <div class="approval-list" id="employeeApprovalList">
           {% for approval in employee_approvals %}
           <div class="approval-item">
             <div class="approval-thumb">
@@ -923,6 +935,15 @@ function approveEmployeeRequest(orderId, trackingNumber, requestedStatus) {
     showToast('Failed: ' + (d.error || 'Approval failed'));
   })
   .catch(() => showToast('Approval request failed'));
+}
+
+function toggleEmployeeApprovals() {
+  const card = document.getElementById('employeeApprovalCard');
+  const toggle = document.getElementById('employeeApprovalToggle');
+  if (!card || !toggle) return;
+  const collapsed = card.classList.toggle('collapsed');
+  toggle.textContent = collapsed ? 'Expand' : 'Fold';
+  toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
 // ── Bulk selection ──

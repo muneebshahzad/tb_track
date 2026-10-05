@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, ROUND_HALF_UP
 from email.mime.text import MIMEText
-from flask import render_template, request, jsonify, redirect, url_for, session, send_from_directory
+from flask import render_template, request, jsonify, redirect, url_for, session, send_from_directory, Response
 import datetime as dt
 from datetime import datetime
 
@@ -22,9 +22,24 @@ import shopify
 import requests
 from shipkartex import shipkartex
 import json
+from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse
+import re
+import math
+from xml.sax.saxutils import escape as xml_escape
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from werkzeug.security import check_password_hash, generate_password_hash
 from token_manager import get_access_token, save_tokens
 from campaigns import campaigns_bp, init_campaign_dirs
 from whatsapp import send_order_confirmation, whatsapp_bp
@@ -46,11 +61,35 @@ import ssl
 import certifi
 
 from db import (
+    create_attendance_checkin,
+    create_attendance_employee,
+    create_exhibition,
+    create_exhibition_expense,
+    create_exhibition_order,
+    delete_exhibition_order,
     delete_order_status,
+    get_app_setting,
+    get_attendance_employee,
+    get_attendance_employee_by_username,
+    get_open_attendance_record_for_employee,
+    get_attendance_record,
+    get_attendance_record_for_date,
+    get_exhibition_order,
     get_product_cost_lookup,
     init_db,
+    list_attendance_employees,
+    list_attendance_locations,
+    list_attendance_records,
+    list_exhibition_expenses,
+    list_exhibition_orders,
+    list_exhibitions,
     list_product_costs,
     load_order_statuses,
+    set_app_setting,
+    update_exhibition_order,
+    update_exhibition_order_product_cost,
+    update_exhibition_order_shopify_push,
+    update_attendance_checkout,
     upsert_order_status,
     upsert_product_cost,
 )
@@ -74,6 +113,14 @@ EMPLOYEE_PORTAL_SESSION_KEY = 'employee_portal_authenticated'
 ADMIN_PORTAL_PASSWORD = os.getenv('ADMIN_PORTAL_PASSWORD', 'security')
 ADMIN_PORTAL_SESSION_KEY = 'admin_portal_authenticated'
 SHOPIFY_OAUTH_STATE_SESSION_KEY = 'shopify_oauth_state'
+ATTENDANCE_SESSION_KEY = 'attendance_employee_id'
+ATTENDANCE_ADMIN_PASSWORD = os.getenv('ATTENDANCE_ADMIN_PASSWORD', ADMIN_PORTAL_PASSWORD)
+ATTENDANCE_MAX_PHOTO_BYTES = int(os.getenv('ATTENDANCE_MAX_PHOTO_BYTES', str(2_500_000)))
+ATTENDANCE_MAX_GPS_ACCURACY_METERS = float(os.getenv('ATTENDANCE_MAX_GPS_ACCURACY_METERS', '200'))
+ATTENDANCE_MIN_FACE_SIZE = int(os.getenv('ATTENDANCE_MIN_FACE_SIZE', '60'))
+ATTENDANCE_STANDARD_DAY_MINUTES = int(os.getenv('ATTENDANCE_STANDARD_DAY_MINUTES', str(8 * 60)))
+ATTENDANCE_OVERNIGHT_CHECKOUT_HOUR = int(os.getenv('ATTENDANCE_OVERNIGHT_CHECKOUT_HOUR', '4'))
+KARACHI_TZ = dt.timezone(dt.timedelta(hours=5))
 
 # ── Jinja2 helpers ────────────────────────────────────────────────────────────
 
@@ -125,6 +172,275 @@ def parse_date_filter(value):
         except ValueError:
             continue
     return dt.datetime.now()
+
+
+def serialize_datetime(value):
+    if isinstance(value, (dt.datetime, dt.date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def attendance_today():
+    return dt.datetime.now(KARACHI_TZ).date()
+
+
+def attendance_now():
+    return dt.datetime.now(KARACHI_TZ)
+
+
+def parse_attendance_month(value):
+    raw = str(value or '').strip()
+    if re.fullmatch(r'\d{4}-\d{2}', raw):
+        year, month = [int(part) for part in raw.split('-')]
+        return dt.date(year, month, 1)
+    today = attendance_today()
+    return today.replace(day=1)
+
+
+def next_month_start(month_start):
+    return (
+        month_start.replace(year=month_start.year + 1, month=1)
+        if month_start.month == 12
+        else month_start.replace(month=month_start.month + 1)
+    )
+
+
+def attendance_month_bounds(value=None):
+    month_start = parse_attendance_month(value)
+    return month_start, next_month_start(month_start) - dt.timedelta(days=1)
+
+
+def attendance_record_work_date(row):
+    value = (row or {}).get('work_date')
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    return parse_iso_day(str(value or ''))
+
+
+def attendance_user():
+    employee_id = session.get(ATTENDANCE_SESSION_KEY)
+    if not employee_id:
+        return None
+    employee = get_attendance_employee(employee_id)
+    if not employee or not employee.get('active'):
+        session.pop(ATTENDANCE_SESSION_KEY, None)
+        return None
+    return employee
+
+
+def require_attendance_user(admin_required=False):
+    employee = attendance_user()
+    if not employee:
+        return None, (jsonify({'ok': False, 'error': 'Attendance login required.'}), 401)
+    if admin_required and employee.get('role') != 'admin':
+        return None, (jsonify({'ok': False, 'error': 'Admin access required.'}), 403)
+    return employee, None
+
+
+def ensure_default_attendance_admin():
+    if list_attendance_employees(include_inactive=True):
+        return
+    create_attendance_employee(
+        username=os.getenv('ATTENDANCE_ADMIN_USERNAME', 'admin'),
+        password_hash=generate_password_hash(ATTENDANCE_ADMIN_PASSWORD),
+        full_name=os.getenv('ATTENDANCE_ADMIN_NAME', 'Attendance Admin'),
+        role='admin',
+    )
+
+
+def haversine_meters(lat1, lon1, lat2, lon2):
+    radius = 6371000.0
+    phi1 = math.radians(float(lat1))
+    phi2 = math.radians(float(lat2))
+    delta_phi = math.radians(float(lat2) - float(lat1))
+    delta_lambda = math.radians(float(lon2) - float(lon1))
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    return radius * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def attendance_photo_has_face(photo: str):
+    if cv2 is None or np is None:
+        return False, 'Face detection is not available on the server. Please contact admin.'
+    try:
+        header, encoded = str(photo or '').split(',', 1)
+        if ';base64' not in header:
+            return False, 'Live camera photo is invalid. Please retake it.'
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except Exception:
+        return False, 'Live camera photo is invalid. Please retake it.'
+
+    image_array = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image_array is None:
+        return False, 'Live camera photo is invalid. Please retake it.'
+
+    gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+    cascade_path = os.path.join(cv2.data.haarcascades, 'haarcascade_frontalface_default.xml')
+    detector = cv2.CascadeClassifier(cascade_path)
+    if detector.empty():
+        return False, 'Face detection is not available on the server. Please contact admin.'
+
+    min_size = max(ATTENDANCE_MIN_FACE_SIZE, min(image_array.shape[:2]) // 10)
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.08,
+        minNeighbors=5,
+        minSize=(min_size, min_size),
+    )
+    if len(faces) < 1:
+        return False, 'Face is not visible in the photo. Please face the camera and retake it.'
+    return True, ''
+
+
+def validate_attendance_capture(payload):
+    try:
+        latitude = float(payload.get('latitude'))
+        longitude = float(payload.get('longitude'))
+        accuracy = float(payload.get('accuracy_meters') or payload.get('accuracy') or 9999)
+    except (TypeError, ValueError):
+        return None, 'GPS location is required.'
+    photo = str(payload.get('photo') or '')
+    if not photo.startswith('data:image/'):
+        return None, 'Live camera photo is required.'
+    if len(photo.encode('utf-8')) > ATTENDANCE_MAX_PHOTO_BYTES:
+        return None, 'Photo is too large. Please retake it closer to the camera.'
+    face_ok, face_error = attendance_photo_has_face(photo)
+    if not face_ok:
+        return None, face_error
+    if accuracy > ATTENDANCE_MAX_GPS_ACCURACY_METERS:
+        return None, f'GPS accuracy is too weak ({round(accuracy)}m). Please stand near the office and try again.'
+
+    locations = list_attendance_locations(active_only=True)
+    if not locations:
+        return None, 'No active attendance location is configured.'
+    closest = None
+    for location in locations:
+        distance = haversine_meters(latitude, longitude, location['latitude'], location['longitude'])
+        if closest is None or distance < closest['distance_meters']:
+            closest = {'location': location, 'distance_meters': distance}
+    radius = float(closest['location'].get('radius_meters') or 150)
+    if closest['distance_meters'] > radius:
+        return None, (
+            f"You are {round(closest['distance_meters'])}m from {closest['location']['name']}. "
+            f"Attendance can be marked within {round(radius)}m."
+        )
+    return {
+        'latitude': round(latitude, 7),
+        'longitude': round(longitude, 7),
+        'accuracy_meters': round(accuracy, 2),
+        'distance_meters': round(closest['distance_meters'], 2),
+        'location': closest['location'],
+        'photo': photo,
+    }, None
+
+
+def serialize_attendance_employee(employee):
+    if not employee:
+        return None
+    return {
+        'id': employee.get('id'),
+        'username': employee.get('username') or '',
+        'full_name': employee.get('full_name') or '',
+        'role': employee.get('role') or 'employee',
+        'active': bool(employee.get('active')),
+    }
+
+
+def serialize_attendance_record(row, include_photos=False):
+    if not row:
+        return None
+    serialized = {}
+    for key, value in dict(row).items():
+        if not include_photos and key in {'check_in_photo', 'check_out_photo'}:
+            continue
+        serialized[key] = serialize_datetime(value)
+    if not include_photos:
+        serialized['has_check_in_photo'] = bool(row.get('check_in_photo'))
+        serialized['has_check_out_photo'] = bool(row.get('check_out_photo'))
+    return serialized
+
+
+def attendance_record_minutes(row):
+    if not row or not row.get('check_in_at') or not row.get('check_out_at'):
+        return 0
+    try:
+        delta = row['check_out_at'] - row['check_in_at']
+        return max(int(round(delta.total_seconds() / 60)), 0)
+    except Exception:
+        return 0
+
+
+def attendance_minutes_label(minutes):
+    minutes = max(int(minutes or 0), 0)
+    hours = minutes // 60
+    mins = minutes % 60
+    if hours and mins:
+        return f"{hours} {'hour' if hours == 1 else 'hours'}, {mins} min"
+    if hours:
+        return f"{hours} {'hour' if hours == 1 else 'hours'}"
+    return f"{mins} min"
+
+
+def attendance_days_in_scope(month_start, month_end):
+    today = attendance_today()
+    effective_end = min(month_end, today)
+    if effective_end < month_start:
+        return 0
+    return (effective_end - month_start).days + 1
+
+
+def build_attendance_employee_summaries(records, employees, month_start, month_end):
+    scoped_days = attendance_days_in_scope(month_start, month_end)
+    grouped = {employee.get('id'): [] for employee in employees if employee.get('active')}
+    for row in records:
+        grouped.setdefault(row.get('employee_id'), []).append(row)
+
+    summaries = []
+    for employee in employees:
+        if not employee.get('active'):
+            continue
+        employee_records = grouped.get(employee.get('id'), [])
+        attended_dates = set()
+        completed_days = 0
+        short_days = 0
+        overtime_days = 0
+        overtime_minutes = 0
+        total_minutes = 0
+        for row in employee_records:
+            minutes = attendance_record_minutes(row)
+            if row.get('check_in_at'):
+                attended_dates.add(attendance_record_work_date(row))
+            if row.get('check_in_at') and row.get('check_out_at'):
+                completed_days += 1
+                total_minutes += minutes
+                if minutes < ATTENDANCE_STANDARD_DAY_MINUTES:
+                    short_days += 1
+                if minutes > ATTENDANCE_STANDARD_DAY_MINUTES:
+                    overtime_days += 1
+                    overtime_minutes += minutes - ATTENDANCE_STANDARD_DAY_MINUTES
+
+        attendance_days = len(attended_dates)
+        leaves = max(scoped_days - attendance_days, 0)
+        average_minutes = round(total_minutes / completed_days) if completed_days else 0
+        summaries.append({
+            'employee': serialize_attendance_employee(employee),
+            'attendance_days': attendance_days,
+            'completed_days': completed_days,
+            'leaves': leaves,
+            'short_attendance_days': short_days,
+            'overtime_days': overtime_days,
+            'overtime_minutes': overtime_minutes,
+            'overtime_time': attendance_minutes_label(overtime_minutes),
+            'total_minutes': total_minutes,
+            'total_time': attendance_minutes_label(total_minutes),
+            'average_daily_minutes': average_minutes,
+            'average_daily_time': attendance_minutes_label(average_minutes),
+        })
+    summaries.sort(key=lambda row: row['employee']['full_name'].lower())
+    return summaries
 
 @app.context_processor
 def inject_now():
@@ -1297,9 +1613,14 @@ def get_active_shopify_products(limit=120):
                 'title': display_title,
                 'product_title': getattr(product, 'title', ''),
                 'variant_title': variant_title,
+                'product_description': getattr(product, 'body_html', '') or '',
+                'product_vendor': getattr(product, 'vendor', '') or '',
+                'product_type': getattr(product, 'product_type', '') or '',
+                'product_images': [getattr(image, 'src', '') for image in product_images if getattr(image, 'src', '')],
                 'price': float(getattr(variant, 'price', 0) or 0),
                 'image': variant_image,
                 'sku': getattr(variant, 'sku', '') or '',
+                'barcode': getattr(variant, 'barcode', '') or '',
             })
     return results
 
@@ -1962,17 +2283,19 @@ def approve_shopify_cancellation(order):
 # ── Costing / profitability helpers ──────────────────────────────────────────
 
 COST_SOURCE_DARAZ = 'daraz'
-COST_SOURCE_SHOPIFY_LAHORE = 'shopify_lahore'
-COST_SOURCE_SHOPIFY_LEOPARDS = 'shopify_leopards'
+COST_SOURCE_SHOPIFY = 'shopify'
 
 COST_SOURCE_LABELS = {
     COST_SOURCE_DARAZ: 'Daraz',
-    COST_SOURCE_SHOPIFY_LAHORE: 'Shopify Lahore',
-    COST_SOURCE_SHOPIFY_LEOPARDS: 'Shopify Leopards',
+    COST_SOURCE_SHOPIFY: 'Shopify',
 }
 
 DARAZ_PROFIT_STATUSES = ['shipped', 'delivered']
 DEFAULT_DARAZ_WINDOW_DAYS = 60
+SHOPIFY_BEANS_PRICE_SETTING_KEY = 'shopify_beans_price_v1'
+DEFAULT_SHOPIFY_BEANS_PRICE = 750.0
+SHOPIFY_DEFAULT_RETURN_COST = 671.0
+SHOPIFY_DEFAULT_ADS_COST = 1200.0
 
 
 def money_decimal(value) -> Decimal:
@@ -1992,6 +2315,203 @@ def money_format(value) -> str:
     if amount == amount.to_integral():
         return f"Rs {int(amount):,}"
     return f"Rs {amount:,.2f}"
+
+
+def get_shopify_beans_price() -> float:
+    return money_float(get_app_setting(SHOPIFY_BEANS_PRICE_SETTING_KEY, str(DEFAULT_SHOPIFY_BEANS_PRICE)))
+
+
+def save_shopify_beans_price(value) -> bool:
+    return set_app_setting(SHOPIFY_BEANS_PRICE_SETTING_KEY, str(money_float(value)))
+
+
+def default_cost_calc_fields(source: str) -> dict:
+    return {
+        'beans_kg': 0.0,
+        'fabric_cost': 0.0,
+        'yard_qty': 0.0,
+        'fusium_cost': 0.0,
+        'making_cost': 0.0,
+        'overhead_cost': 0.0,
+        'delivery_cost': 0.0,
+        'return_cost': SHOPIFY_DEFAULT_RETURN_COST if source == COST_SOURCE_SHOPIFY else 0.0,
+        'ads_cost': SHOPIFY_DEFAULT_ADS_COST if source == COST_SOURCE_SHOPIFY else 0.0,
+        'product_cost': 0.0,
+    }
+
+
+def calculate_shopify_net_cost(row: dict, beans_price=None) -> float:
+    beans_rate = money_float(beans_price if beans_price is not None else get_shopify_beans_price())
+    beans_value = money_float(row.get('beans_kg')) * beans_rate
+    fabric_value = money_float(row.get('fabric_cost')) * money_float(row.get('yard_qty'))
+    net_cost = (
+        beans_value
+        + fabric_value
+        + money_float(row.get('fusium_cost'))
+        + money_float(row.get('making_cost'))
+        + money_float(row.get('overhead_cost'))
+        + money_float(row.get('delivery_cost'))
+        + money_float(row.get('return_cost'))
+        + money_float(row.get('ads_cost'))
+    )
+    return round(net_cost, 2)
+
+
+def update_shopify_variant_price(variant_id, price):
+    if not variant_id:
+        return
+    variant = shopify.Variant.find(int(variant_id))
+    variant.price = str(money_float(price))
+    if not variant.save():
+        raise RuntimeError('Shopify price update failed.')
+
+
+def update_daraz_sku_price(item_id, sku_id, seller_sku, price):
+    item_id = str(item_id or '').strip()
+    sku_id = str(sku_id or '').strip()
+    seller_sku = str(seller_sku or '').strip()
+    if not item_id or not sku_id or not seller_sku:
+        raise RuntimeError('Daraz item id, sku id, and seller sku are required to update price.')
+
+    req = lazop.LazopRequest('/product/price_quantity/update', 'POST')
+    payload = {
+        'Request': {
+            'Product': {
+                'Skus': {
+                    'Sku': {
+                        'ItemId': item_id,
+                        'SkuId': sku_id,
+                        'SellerSku': seller_sku,
+                        'Price': f"{money_float(price):.2f}",
+                    }
+                }
+            }
+        }
+    }
+    req.add_api_param('payload', json.dumps(payload))
+    response = get_daraz_client().execute(req, get_access_token())
+    body = response.body or {}
+    if str(body.get('code') or response.code or '') not in {'', '0'}:
+        raise RuntimeError(body.get('message') or response.message or 'Daraz price update failed.')
+    return body
+
+
+def daraz_api_call(path, method='POST', payload=None):
+    req = lazop.LazopRequest(path, method)
+    if payload is not None:
+        req.add_api_param('payload', payload if isinstance(payload, str) else json.dumps(payload))
+    response = get_daraz_client().execute(req, get_access_token())
+    body = response.body or {}
+    if str(body.get('code') or response.code or '') not in {'', '0'}:
+        raise RuntimeError(body.get('message') or response.message or f'Daraz API call failed: {path}')
+    return body
+
+
+def migrate_daraz_image_url(url):
+    url = str(url or '').strip()
+    if not url:
+        return ''
+    host = urlparse(url).netloc.lower()
+    if 'slatic.net' in host or 'daraz.pk' in host or 'lazada' in host:
+        return url
+    payload = f'<Request><Image><Url>{xml_escape(url)}</Url></Image></Request>'
+    body = daraz_api_call('/image/migrate', 'POST', payload)
+    return (((body.get('data') or {}).get('image') or {}).get('url') or '').strip()
+
+
+def migrate_daraz_images(urls, limit=8):
+    migrated = []
+    seen = set()
+    for url in urls or []:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        try:
+            migrated_url = migrate_daraz_image_url(url)
+            if migrated_url and migrated_url not in migrated:
+                migrated.append(migrated_url)
+        except Exception as e:
+            print(f"Could not migrate Daraz image {url}: {e}")
+        if len(migrated) >= limit:
+            break
+    return migrated
+
+
+def daraz_sku_payload_from_shopify(row, settings, image_urls=None):
+    seller_sku = str(row.get('sku') or row.get('barcode') or row.get('variant_key') or '').strip()
+    variant_title = str(row.get('variant_title') or row.get('secondary_name') or '').strip()
+    if variant_title in {'', 'Default Title'}:
+        variant_title = 'Default'
+    sku_payload = {
+        'SellerSku': seller_sku,
+        'quantity': str(int(money_float(settings.get('quantity') or 1000))),
+        'price': f"{money_float(row.get('product_price')):.2f}",
+        'package_weight': str(settings.get('package_weight') or '2'),
+        'package_length': str(settings.get('package_length') or '20'),
+        'package_width': str(settings.get('package_width') or '20'),
+        'package_height': str(settings.get('package_height') or '20'),
+        'package_content': str(settings.get('package_content') or 'Bean bag'),
+        'color_family': variant_title,
+        'saleProp': {'color_family': variant_title},
+    }
+    images = migrate_daraz_images(image_urls or [row.get('image')])
+    if images:
+        sku_payload['Images'] = {'Image': images[:8]}
+    return sku_payload
+
+
+def create_daraz_product_from_shopify(group, settings):
+    category_id = str(settings.get('category_id') or '').strip()
+    if not category_id:
+        raise RuntimeError('Daraz category ID is required before creating new products.')
+    product_images = migrate_daraz_images(group.get('images') or [])
+    description = str(settings.get('description') or group.get('description') or group.get('label') or '').strip()
+    short_description = str(settings.get('short_description') or group.get('label') or '').strip()
+    payload = {
+        'Request': {
+            'Product': {
+                'PrimaryCategory': category_id,
+                'Images': {'Image': product_images[:8]} if product_images else {},
+                'Attributes': {
+                    'name': group.get('label') or 'Shopify product',
+                    'name_en': group.get('label') or 'Shopify product',
+                    'description': description,
+                    'short_description': short_description,
+                    'brand': str(settings.get('brand') or group.get('vendor') or 'No Brand'),
+                    'model': group.get('label') or 'Bean bag',
+                },
+                'Skus': {
+                    'Sku': [
+                        daraz_sku_payload_from_shopify(row, settings, [row.get('image')] or product_images)
+                        for row in group.get('rows') or []
+                    ]
+                },
+            }
+        }
+    }
+    return daraz_api_call('/product/create', 'POST', payload)
+
+
+def add_daraz_variant_from_shopify(row, target_group, settings):
+    if not target_group:
+        raise RuntimeError('Existing Daraz product could not be found for this Shopify variant.')
+    associated_sku = str((target_group.get('rows') or [{}])[0].get('seller_sku') or (target_group.get('rows') or [{}])[0].get('sku') or '').strip()
+    item_id = str(target_group.get('item_id') or '').strip()
+    if not item_id or not associated_sku:
+        raise RuntimeError('Existing Daraz item id and AssociatedSku are required to add variants.')
+    payload = {
+        'Request': {
+            'Product': {
+                'ItemId': item_id,
+                'AssociatedSku': associated_sku,
+                'Attributes': {},
+                'Skus': {
+                    'Sku': [daraz_sku_payload_from_shopify(row, settings, [row.get('image')])]
+                },
+            }
+        }
+    }
+    return daraz_api_call('/product/update', 'POST', payload)
 
 
 def parse_iso_day(value: str):
@@ -2022,6 +2542,14 @@ def daraz_item_key(item: dict) -> str:
         if value:
             return value
     return f"{(item.get('name') or '').strip()}|{(item.get('variation') or '').strip()}"
+
+
+def daraz_item_price(item: dict) -> float:
+    for key in ('paid_price', 'item_price', 'unit_price', 'product_price', 'price'):
+        value = money_float(item.get(key))
+        if value > 0:
+            return value
+    return 0.0
 
 
 def get_daraz_client():
@@ -2148,25 +2676,201 @@ def fetch_daraz_order_finance(order_id, order_date_str, gross_sale, access_token
     }
 
 
-def build_shopify_cost_catalog(source: str):
+def build_shopify_cost_catalog():
     rows = []
     for item in get_active_shopify_products(limit=250):
         variant_key = str(item.get('variant_id') or f"{item.get('product_id')}::{item.get('sku') or item.get('title')}")
-        rows.append({
-            'source': source,
+        row = {
+            'source': COST_SOURCE_SHOPIFY,
             'variant_key': variant_key,
             'source_product_id': str(item.get('product_id') or ''),
             'source_variant_id': str(item.get('variant_id') or ''),
+            'inventory_item_id': str(item.get('inventory_item_id') or ''),
             'sku': item.get('sku') or '',
+            'barcode': item.get('barcode') or '',
             'primary_name': item.get('title') or item.get('product_title') or 'Untitled variant',
             'secondary_name': '',
+            'product_title': item.get('product_title') or '',
+            'variant_title': item.get('variant_title') or '',
+            'product_description': item.get('product_description') or '',
+            'product_vendor': item.get('product_vendor') or '',
+            'product_type': item.get('product_type') or '',
+            'product_images': item.get('product_images') or [],
+            'product_price': money_float(item.get('price')),
             'image': item.get('image') or '',
-        })
+        }
+        row.update(default_cost_calc_fields(COST_SOURCE_SHOPIFY))
+        rows.append(row)
     rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
     return rows
 
 
-def build_daraz_cost_catalog():
+def normalize_catalog_match(value: str) -> str:
+    value = str(value or '').lower()
+    value = re.sub(r'[^a-z0-9]+', ' ', value)
+    return ' '.join(value.split())
+
+
+def catalog_match_keys(value: str) -> list[str]:
+    raw = str(value or '').strip()
+    candidates = [
+        raw,
+        re.sub(r'\([^)]*\)', ' ', raw),
+        raw.split(' - ')[0],
+        raw.split('|')[0],
+    ]
+    keys = []
+    for candidate in candidates:
+        normalized = normalize_catalog_match(candidate)
+        normalized = re.sub(r'\b(free|foot|stool|with|without|color|colour)\b', ' ', normalized)
+        normalized = ' '.join(normalized.split())
+        if normalized and normalized not in keys:
+            keys.append(normalized)
+    return keys
+
+
+def catalog_identifier_keys(value: str) -> list[str]:
+    raw = str(value or '').strip()
+    if not raw:
+        return []
+    keys = []
+
+    def add(candidate):
+        normalized = normalize_catalog_match(candidate)
+        if normalized and normalized not in keys:
+            keys.append(normalized)
+
+    add(raw)
+    compact = re.sub(r'[^a-zA-Z0-9]+', '', raw).lower()
+    if compact and compact not in keys:
+        keys.append(compact)
+
+    barcode_match = re.match(r'^(\d{8,14})[-_\s]+[a-zA-Z0-9]+$', raw)
+    if barcode_match:
+        add(barcode_match.group(1))
+
+    normalized_raw = normalize_catalog_match(raw)
+    parts = normalized_raw.split()
+    if len(parts) > 2:
+        add(' '.join(parts[:-1]))
+    if len(parts) > 3:
+        add(' '.join(parts[:-2]))
+    return keys
+
+
+def parse_daraz_special_date(value):
+    text = str(value or '').strip()
+    if not text:
+        return None
+    for fmt in ('%Y-%m-%d%H:%M', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(text[:16], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def daraz_seller_price(sku: dict) -> tuple[float, str]:
+    base_price = money_float(sku.get('price'))
+    special_price = money_float(sku.get('special_price'))
+    if special_price <= 0:
+        return base_price, 'base'
+
+    now = datetime.now()
+    starts_at = parse_daraz_special_date(sku.get('special_from_time') or sku.get('special_from_date'))
+    ends_at = parse_daraz_special_date(sku.get('special_to_time') or sku.get('special_to_date'))
+    if starts_at and now < starts_at:
+        return base_price, 'base'
+    if ends_at and now > ends_at:
+        return base_price, 'base'
+    return special_price, 'seller_special'
+
+
+def fetch_daraz_products_catalog(max_pages=20):
+    access_token = get_access_token()
+    client = get_daraz_client()
+    rows = []
+    seen = set()
+    limit = 50
+
+    for page in range(max_pages):
+        offset = page * limit
+        req = lazop.LazopRequest('/products/get', 'GET')
+        req.add_api_param('filter', 'live')
+        req.add_api_param('limit', str(limit))
+        req.add_api_param('offset', str(offset))
+        req.add_api_param('options', '1')
+        response = client.execute(req, access_token)
+        body = response.body or {}
+        data = body.get('data') or {}
+        products = data.get('products') or []
+        if not products:
+            break
+
+        for product in products:
+            attributes = product.get('attributes') or {}
+            primary_category = str(product.get('primary_category') or product.get('PrimaryCategory') or '')
+            product_name = (
+                attributes.get('name_en')
+                or attributes.get('Name_en')
+                or attributes.get('name')
+                or attributes.get('Name')
+                or f"Daraz Item {product.get('item_id') or ''}".strip()
+            )
+            product_images = product.get('images') or []
+            for sku in product.get('skus') or []:
+                seller_sku = str(sku.get('SellerSku') or sku.get('seller_sku') or '').strip()
+                shop_sku = str(sku.get('ShopSku') or sku.get('shop_sku') or '').strip()
+                sku_id = str(sku.get('SkuId') or sku.get('sku_id') or '').strip()
+                variant_key = seller_sku or shop_sku or sku_id or str(product.get('item_id') or '')
+                if not variant_key or variant_key in seen:
+                    continue
+                seen.add(variant_key)
+                seller_price, price_source = daraz_seller_price(sku)
+                images = sku.get('Images') or product_images or []
+                image = next((img for img in images if img), '') if isinstance(images, list) else ''
+                color_family = str((sku.get('saleProp') or {}).get('color_family') or sku.get('color_family') or '').strip()
+                display_name = f"{product_name} - {color_family}" if color_family and color_family.lower() not in product_name.lower() else product_name
+                row = {
+                    'source': COST_SOURCE_DARAZ,
+                    'variant_key': variant_key,
+                    'source_product_id': str(product.get('item_id') or ''),
+                    'source_variant_id': sku_id,
+                    'primary_category': primary_category,
+                    'inventory_item_id': '',
+                    'sku': seller_sku or shop_sku,
+                    'shop_sku': shop_sku,
+                    'seller_sku': seller_sku,
+                    'primary_name': display_name,
+                    'secondary_name': color_family,
+                    'product_title': product_name,
+                    'variant_title': color_family,
+                    'product_description': attributes.get('description') or attributes.get('short_description') or '',
+                    'product_images': product_images,
+                    'product_price': seller_price,
+                    'daraz_base_price': money_float(sku.get('price')),
+                    'daraz_seller_price': seller_price,
+                    'daraz_special_price': money_float(sku.get('special_price')),
+                    'daraz_live_price': 0.0,
+                    'daraz_live_price_source': '',
+                    'daraz_price_source': price_source,
+                    'daraz_special_from': str(sku.get('special_from_time') or ''),
+                    'daraz_special_to': str(sku.get('special_to_time') or sku.get('special_to_date') or ''),
+                    'daraz_status': str(sku.get('Status') or product.get('status') or ''),
+                    'daraz_stock': int(float(sku.get('quantity') or sku.get('Available') or 0)),
+                    'image': image,
+                }
+                row.update(default_cost_calc_fields(COST_SOURCE_DARAZ))
+                rows.append(row)
+
+        total_products = money_float(data.get('total_products'))
+        if len(products) < limit or (total_products and len(rows) >= total_products):
+            break
+
+    return rows
+
+
+def build_daraz_order_cost_catalog():
     orders = fetch_daraz_order_summaries(DARAZ_PROFIT_STATUSES)
     access_token = get_access_token()
     items_by_key = {}
@@ -2181,7 +2885,7 @@ def build_daraz_cost_catalog():
             variant_key = daraz_item_key(item)
             if variant_key in items_by_key:
                 continue
-            items_by_key[variant_key] = {
+            row = {
                 'source': COST_SOURCE_DARAZ,
                 'variant_key': variant_key,
                 'source_product_id': str(item.get('item_id') or item.get('product_id') or ''),
@@ -2189,23 +2893,287 @@ def build_daraz_cost_catalog():
                 'sku': str(item.get('seller_sku') or item.get('shop_sku') or item.get('lazada_sku') or item.get('sku') or '').strip(),
                 'primary_name': format_daraz_item_title(item.get('name'), item.get('variation')),
                 'secondary_name': '',
+                'product_price': daraz_item_price(item),
                 'image': item.get('product_main_image') or '',
             }
+            row.update(default_cost_calc_fields(COST_SOURCE_DARAZ))
+            items_by_key[variant_key] = row
 
     rows = list(items_by_key.values())
     rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
     return rows
 
 
+def build_shopify_match_lookup():
+    rows = with_saved_costs(COST_SOURCE_SHOPIFY, build_shopify_cost_catalog())
+    by_identifier = {}
+    by_name = {}
+    for row in rows:
+        for value in (row.get('sku'), row.get('barcode')):
+            for key in catalog_identifier_keys(value):
+                by_identifier.setdefault(key, row)
+        for name in catalog_match_keys(row.get('primary_name')):
+            by_name.setdefault(name, row)
+    return by_identifier, by_name
+
+
+def attach_shopify_matches_to_daraz(rows):
+    by_identifier, by_name = build_shopify_match_lookup()
+    for row in rows:
+        matched = None
+        reason = ''
+        for sku_value in (row.get('seller_sku'), row.get('shop_sku'), row.get('sku')):
+            for identifier_key in catalog_identifier_keys(sku_value):
+                matched = by_identifier.get(identifier_key)
+                if matched:
+                    reason = 'SKU'
+                    break
+            if matched:
+                break
+        if not matched:
+            for name_key in catalog_match_keys(row.get('primary_name')):
+                matched = by_name.get(name_key)
+                if matched:
+                    break
+            if matched:
+                reason = 'Name'
+        if matched:
+            row['matched_shopify_key'] = matched.get('variant_key') or ''
+            row['matched_shopify_name'] = matched.get('primary_name') or ''
+            row['matched_shopify_sku'] = matched.get('sku') or ''
+            row['matched_shopify_price'] = money_float(matched.get('product_price'))
+            row['match_reason'] = reason
+        else:
+            row['matched_shopify_key'] = ''
+            row['matched_shopify_name'] = ''
+            row['matched_shopify_sku'] = ''
+            row['matched_shopify_price'] = 0.0
+            row['match_reason'] = ''
+    return rows
+
+
+def build_daraz_cost_catalog():
+    try:
+        rows = fetch_daraz_products_catalog()
+    except Exception as e:
+        print(f"Could not fetch Daraz product catalog, falling back to order items: {e}")
+        rows = build_daraz_order_cost_catalog()
+    rows = attach_shopify_matches_to_daraz(rows)
+    rows.sort(key=lambda row: ((row.get('primary_name') or '').lower(), (row.get('sku') or '').lower()))
+    return rows
+
+
+def cost_product_label(row):
+    name = str(row.get('primary_name') or 'Untitled product').strip()
+    secondary = str(row.get('secondary_name') or '').strip()
+    if secondary and name.lower().endswith(f" - {secondary.lower()}"):
+        return name[:-(len(secondary) + 3)].strip()
+    if ' - ' in name:
+        return name.split(' - ')[0].strip()
+    return name
+
+
+def group_cost_rows(rows, source=''):
+    groups = {}
+    for row in rows:
+        key = str(row.get('source_product_id') or cost_product_label(row) or row.get('variant_key') or '').strip()
+        group = groups.setdefault(key, {
+            'key': key,
+            'item_id': str(row.get('source_product_id') or ''),
+            'label': cost_product_label(row),
+            'category_id': str(row.get('primary_category') or ''),
+            'vendor': row.get('product_vendor') or '',
+            'description': row.get('product_description') or '',
+            'images': [],
+            'rows': [],
+            'source': source or row.get('source') or '',
+        })
+        for image in (row.get('product_images') or [row.get('image')]):
+            if image and image not in group['images']:
+                group['images'].append(image)
+        if row.get('image') and row.get('image') not in group['images']:
+            group['images'].append(row.get('image'))
+        group['rows'].append(row)
+    return groups
+
+
+def build_daraz_lookup_groups(daraz_groups):
+    by_identifier = {}
+    by_name = {}
+    for group in daraz_groups.values():
+        for row in group.get('rows') or []:
+            for value in (row.get('seller_sku'), row.get('shop_sku'), row.get('sku'), row.get('variant_key')):
+                for key in catalog_identifier_keys(value):
+                    by_identifier.setdefault(key, group)
+        for key in catalog_match_keys(group.get('label')):
+            by_name.setdefault(key, group)
+    return by_identifier, by_name
+
+
+def find_daraz_group_for_shopify_group(shopify_group, by_identifier, by_name):
+    for row in shopify_group.get('rows') or []:
+        for value in (row.get('sku'), row.get('barcode'), row.get('variant_key')):
+            for key in catalog_identifier_keys(value):
+                if key in by_identifier:
+                    return by_identifier[key]
+    for key in catalog_match_keys(shopify_group.get('label')):
+        if key in by_name:
+            return by_name[key]
+    return None
+
+
+def daraz_has_shopify_variant(shopify_row, daraz_group):
+    if not daraz_group:
+        return False
+    shopify_keys = set()
+    for value in (shopify_row.get('sku'), shopify_row.get('barcode'), shopify_row.get('variant_key')):
+        shopify_keys.update(catalog_identifier_keys(value))
+    for row in daraz_group.get('rows') or []:
+        if row.get('matched_shopify_key') == shopify_row.get('variant_key'):
+            return True
+        for value in (row.get('seller_sku'), row.get('shop_sku'), row.get('sku'), row.get('variant_key')):
+            if shopify_keys.intersection(catalog_identifier_keys(value)):
+                return True
+    return False
+
+
+def build_daraz_sync_plan():
+    shopify_rows = with_saved_costs(COST_SOURCE_SHOPIFY, build_shopify_cost_catalog())
+    daraz_rows = with_saved_costs(COST_SOURCE_DARAZ, build_daraz_cost_catalog())
+    shopify_groups = group_cost_rows(shopify_rows, COST_SOURCE_SHOPIFY)
+    daraz_groups = group_cost_rows(daraz_rows, COST_SOURCE_DARAZ)
+    by_identifier, by_name = build_daraz_lookup_groups(daraz_groups)
+
+    price_updates = []
+    for row in daraz_rows:
+        matched_price = money_float(row.get('matched_shopify_price'))
+        if matched_price > 0 and abs(matched_price - money_float(row.get('product_price'))) >= 0.01:
+            price_updates.append({
+                'id': f"price:{row.get('variant_key')}",
+                'daraz_variant_key': row.get('variant_key'),
+                'daraz_item_id': row.get('source_product_id'),
+                'daraz_sku_id': row.get('source_variant_id'),
+                'seller_sku': row.get('seller_sku') or row.get('sku'),
+                'daraz_name': row.get('primary_name'),
+                'daraz_price': money_float(row.get('product_price')),
+                'shopify_name': row.get('matched_shopify_name'),
+                'shopify_sku': row.get('matched_shopify_sku'),
+                'shopify_price': matched_price,
+            })
+
+    missing_products = []
+    missing_variants = []
+    for group_key, group in shopify_groups.items():
+        daraz_group = find_daraz_group_for_shopify_group(group, by_identifier, by_name)
+        if not daraz_group:
+            missing_products.append({
+                'id': f"create:{group_key}",
+                'shopify_group_key': group_key,
+                'name': group.get('label'),
+                'variant_count': len(group.get('rows') or []),
+                'images': group.get('images') or [],
+                'rows': [
+                    {
+                        'variant_key': row.get('variant_key'),
+                        'name': row.get('primary_name'),
+                        'variant': row.get('variant_title') or row.get('secondary_name') or '',
+                        'sku': row.get('sku') or row.get('barcode'),
+                        'price': money_float(row.get('product_price')),
+                        'image': row.get('image') or '',
+                    }
+                    for row in group.get('rows') or []
+                ],
+            })
+            continue
+        for row in group.get('rows') or []:
+            if not daraz_has_shopify_variant(row, daraz_group):
+                missing_variants.append({
+                    'id': f"variant:{row.get('variant_key')}",
+                    'shopify_variant_key': row.get('variant_key'),
+                    'target_daraz_item_id': daraz_group.get('item_id'),
+                    'target_daraz_name': daraz_group.get('label'),
+                    'name': row.get('primary_name'),
+                    'variant': row.get('variant_title') or row.get('secondary_name') or '',
+                    'sku': row.get('sku') or row.get('barcode'),
+                    'price': money_float(row.get('product_price')),
+                    'image': row.get('image') or '',
+                })
+
+    return {
+        'price_updates': price_updates,
+        'missing_products': missing_products,
+        'missing_variants': missing_variants,
+        'summary': {
+            'price_updates': len(price_updates),
+            'missing_products': len(missing_products),
+            'missing_variants': len(missing_variants),
+        },
+    }
+
+
+def save_daraz_matched_price(row, price):
+    update_daraz_sku_price(row.get('source_product_id'), row.get('source_variant_id'), row.get('seller_sku') or row.get('sku'), price)
+    calc_fields = {field: money_float(row.get(field)) for field in (
+        'beans_kg',
+        'fabric_cost',
+        'yard_qty',
+        'fusium_cost',
+        'making_cost',
+        'overhead_cost',
+        'delivery_cost',
+        'return_cost',
+        'ads_cost',
+    )}
+    product_cost = money_float(row.get('product_cost'))
+    return upsert_product_cost(
+        source=COST_SOURCE_DARAZ,
+        variant_key=row.get('variant_key'),
+        primary_name=row.get('primary_name') or '',
+        secondary_name=row.get('secondary_name') or '',
+        sku=row.get('sku') or row.get('seller_sku') or '',
+        product_price=str(money_float(price)),
+        beans_kg=str(calc_fields['beans_kg']),
+        fabric_cost=str(calc_fields['fabric_cost']),
+        yard_qty=str(calc_fields['yard_qty']),
+        fusium_cost=str(calc_fields['fusium_cost']),
+        making_cost=str(calc_fields['making_cost']),
+        overhead_cost=str(calc_fields['overhead_cost']),
+        delivery_cost=str(calc_fields['delivery_cost']),
+        return_cost=str(calc_fields['return_cost']),
+        ads_cost=str(calc_fields['ads_cost']),
+        product_cost=str(product_cost),
+        source_product_id=row.get('source_product_id') or '',
+        source_variant_id=row.get('source_variant_id') or '',
+    )
+
+
 def with_saved_costs(source: str, rows: list):
     lookup = get_product_cost_lookup(source)
+    legacy_shopify_lookup = {}
+    if source == COST_SOURCE_SHOPIFY:
+        legacy_shopify_lookup.update(get_product_cost_lookup('shopify_lahore'))
+        legacy_shopify_lookup.update(get_product_cost_lookup('shopify_leopards'))
     hydrated = []
     for row in rows:
-        saved = lookup.get(row['variant_key'])
+        saved = lookup.get(row['variant_key']) or legacy_shopify_lookup.get(row['variant_key'])
         row_copy = dict(row)
         row_copy['product_cost'] = money_float(saved.get('product_cost')) if saved else 0.0
-        row_copy['secondary_name'] = (saved.get('secondary_name') if saved else row_copy.get('secondary_name')) or ''
-        row_copy['updated_at'] = saved.get('updated_at').isoformat() if saved and saved.get('updated_at') else ''
+        if saved:
+            row_copy['product_price'] = money_float(saved.get('product_price') or row_copy.get('product_price'))
+            row_copy['secondary_name'] = saved.get('secondary_name') or row_copy.get('secondary_name') or ''
+            for field in (
+                'beans_kg',
+                'fabric_cost',
+                'yard_qty',
+                'fusium_cost',
+                'making_cost',
+                'overhead_cost',
+                'delivery_cost',
+                'return_cost',
+                'ads_cost',
+            ):
+                row_copy[field] = money_float(saved.get(field) if saved.get(field) is not None else row_copy.get(field))
+            row_copy['updated_at'] = saved.get('updated_at').isoformat() if saved.get('updated_at') else ''
         hydrated.append(row_copy)
     return hydrated
 
@@ -2213,9 +3181,696 @@ def with_saved_costs(source: str, rows: list):
 def get_cost_catalog_for_source(source: str):
     if source == COST_SOURCE_DARAZ:
         return with_saved_costs(source, build_daraz_cost_catalog())
-    if source in (COST_SOURCE_SHOPIFY_LAHORE, COST_SOURCE_SHOPIFY_LEOPARDS):
-        return with_saved_costs(source, build_shopify_cost_catalog(source))
+    if source == COST_SOURCE_SHOPIFY:
+        return with_saved_costs(source, build_shopify_cost_catalog())
     return []
+
+
+EXHIBITION_TARGET_SALE = 2_000_000
+EXHIBITION_DELIVERY_PICKUPS = {'Pickup from Expo', 'Pickup from Warehouse'}
+EXHIBITION_PAYMENT_SPLITS = {'100% Paid', '50% Paid', 'Custom Amount'}
+EXHIBITION_PAYMENT_METHODS = {'Cash', 'Bank'}
+EXHIBITION_DELIVERY_METHODS = {'Pickup from Expo', 'Home Delivery', 'Pickup from Warehouse'}
+
+
+def exhibition_row_cost(row: dict, beans_price=None) -> float:
+    beans_rate = money_float(beans_price if beans_price is not None else get_shopify_beans_price())
+    cost = (
+        money_float(row.get('beans_kg')) * beans_rate
+        + money_float(row.get('fabric_cost')) * money_float(row.get('yard_qty'))
+        + money_float(row.get('fusium_cost'))
+        + money_float(row.get('making_cost'))
+        + money_float(row.get('overhead_cost'))
+    )
+    return round(cost, 2)
+
+
+def exhibition_serialize_date(value):
+    if not value:
+        return ''
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return str(value)
+
+
+def exhibition_serialize_row(row: dict) -> dict:
+    result = {}
+    for key, value in dict(row or {}).items():
+        if isinstance(value, Decimal):
+            result[key] = money_float(value)
+        elif hasattr(value, 'isoformat'):
+            result[key] = value.isoformat()
+        else:
+            result[key] = value
+    return result
+
+
+def build_exhibition_product_catalog():
+    beans_price = get_shopify_beans_price()
+    rows = get_cost_catalog_for_source(COST_SOURCE_SHOPIFY)
+    products = []
+    for row in rows:
+        cost = exhibition_row_cost(row, beans_price)
+        variant_id = str(row.get('source_variant_id') or row.get('variant_key') or '')
+        products.append({
+            'variant_key': row.get('variant_key') or variant_id,
+            'shopify_product_id': str(row.get('source_product_id') or ''),
+            'shopify_variant_id': variant_id,
+            'sku': row.get('sku') or '',
+            'barcode': row.get('barcode') or '',
+            'name': row.get('primary_name') or row.get('product_title') or 'Untitled product',
+            'product_title': row.get('product_title') or row.get('primary_name') or '',
+            'variant_title': row.get('variant_title') or '',
+            'price': money_float(row.get('product_price')),
+            'image': row.get('image') or '',
+            'cost': cost,
+            'cost_saved': cost > 0,
+        })
+    products.sort(key=lambda item: ((item.get('product_title') or item.get('name') or '').lower(), (item.get('variant_title') or '').lower()))
+    return products
+
+
+def build_exhibition_cost_lookup():
+    beans_price = get_shopify_beans_price()
+    rows = get_cost_catalog_for_source(COST_SOURCE_SHOPIFY)
+    lookup = {
+        'variant': {},
+        'identifier': {},
+        'name': {},
+        'rows': [],
+    }
+    for row in rows:
+        enriched = dict(row)
+        enriched['exhibition_cost'] = exhibition_row_cost(row, beans_price)
+        enriched['match_label'] = enriched.get('primary_name') or enriched.get('product_title') or ''
+        lookup['rows'].append(enriched)
+        for key in (
+            row.get('source_variant_id'),
+            row.get('variant_key'),
+        ):
+            key = str(key or '').strip()
+            if key:
+                lookup['variant'][key] = enriched
+        for raw in (row.get('sku'), row.get('barcode')):
+            for key in catalog_identifier_keys(raw):
+                lookup['identifier'].setdefault(key, enriched)
+        for raw in (row.get('primary_name'), row.get('product_title'), row.get('secondary_name')):
+            for key in catalog_match_keys(raw):
+                lookup['name'].setdefault(key, enriched)
+    return lookup
+
+
+def match_exhibition_order_cost(order: dict, lookup: dict) -> dict:
+    variant_id = str(order.get('shopify_variant_id') or '').strip()
+    if variant_id and variant_id in lookup['variant']:
+        row = lookup['variant'][variant_id]
+        return {'row': row, 'reason': 'Variant match', 'score': 1.0}
+
+    for key in catalog_identifier_keys(order.get('sku')):
+        if key in lookup['identifier']:
+            row = lookup['identifier'][key]
+            return {'row': row, 'reason': 'SKU match', 'score': 0.98}
+
+    order_keys = catalog_match_keys(order.get('product_name'))
+    for key in order_keys:
+        if key in lookup['name']:
+            row = lookup['name'][key]
+            return {'row': row, 'reason': 'Name match', 'score': 0.95}
+
+    best = None
+    best_score = 0.0
+    order_name = order_keys[0] if order_keys else normalize_catalog_match(order.get('product_name'))
+    if order_name:
+        for row in lookup['rows']:
+            row_keys = catalog_match_keys(row.get('primary_name')) or [normalize_catalog_match(row.get('primary_name'))]
+            for row_key in row_keys:
+                if not row_key:
+                    continue
+                score = SequenceMatcher(None, order_name, row_key).ratio()
+                if order_name in row_key or row_key in order_name:
+                    score = max(score, 0.82)
+                if score > best_score:
+                    best = row
+                    best_score = score
+    if best and best_score >= 0.62:
+        return {'row': best, 'reason': 'Suggested name match', 'score': round(best_score, 2)}
+    return {'row': None, 'reason': 'No cost match', 'score': 0.0}
+
+
+def calculate_exhibition_order_amounts(quantity, unit_price, discount, delivery_method, delivery_charges, payment_split, custom_paid_amount):
+    qty = max(int(quantity or 1), 1)
+    price = money_float(unit_price)
+    discount_value = max(money_float(discount), 0)
+    delivery = 0.0 if delivery_method in EXHIBITION_DELIVERY_PICKUPS else max(money_float(delivery_charges), 0)
+    total = max((price * qty) - discount_value + delivery, 0)
+    split = payment_split if payment_split in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
+    if split == '50% Paid':
+        paid = round(total * 0.5, 2)
+    elif split == 'Custom Amount':
+        paid = min(max(money_float(custom_paid_amount), 0), total)
+    else:
+        paid = total
+    return {
+        'quantity': qty,
+        'unit_price': price,
+        'discount': discount_value,
+        'delivery_charges': delivery,
+        'total_amount': round(total, 2),
+        'paid_amount': round(paid, 2),
+        'custom_paid_amount': round(money_float(custom_paid_amount), 2) if split == 'Custom Amount' else 0.0,
+    }
+
+
+def normalize_exhibition_order_items(payload: dict) -> list[dict]:
+    raw_items = payload.get('items')
+    if not isinstance(raw_items, list) or not raw_items:
+        raw_items = [{
+            'product_name': payload.get('product_name'),
+            'shopify_product_id': payload.get('shopify_product_id'),
+            'shopify_variant_id': payload.get('shopify_variant_id'),
+            'sku': payload.get('sku'),
+            'quantity': payload.get('quantity') or 1,
+            'unit_price': payload.get('unit_price') or payload.get('price') or 0,
+        }]
+
+    items = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get('product_name') or raw.get('name') or '').strip()
+        if not name:
+            continue
+        qty = max(int(money_float(raw.get('quantity') or 1)), 1)
+        unit_price = money_float(raw.get('unit_price') or raw.get('price') or 0)
+        line_total = round(qty * unit_price, 2)
+        items.append({
+            'product_name': name,
+            'shopify_product_id': str(raw.get('shopify_product_id') or ''),
+            'shopify_variant_id': str(raw.get('shopify_variant_id') or ''),
+            'sku': str(raw.get('sku') or ''),
+            'quantity': qty,
+            'unit_price': unit_price,
+            'line_total': line_total,
+        })
+    return items
+
+
+def calculate_exhibition_multi_item_amounts(items, discount, delivery_method, delivery_charges, payment_split, custom_paid_amount):
+    subtotal = sum(money_float(item.get('line_total')) for item in items)
+    discount_value = max(money_float(discount), 0)
+    delivery = 0.0 if delivery_method in EXHIBITION_DELIVERY_PICKUPS else max(money_float(delivery_charges), 0)
+    total = max(subtotal - discount_value + delivery, 0)
+    split = payment_split if payment_split in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
+    if split == '50% Paid':
+        paid = round(total * 0.5, 2)
+    elif split == 'Custom Amount':
+        paid = min(max(money_float(custom_paid_amount), 0), total)
+    else:
+        paid = total
+    return {
+        'subtotal': round(subtotal, 2),
+        'discount': discount_value,
+        'delivery_charges': delivery,
+        'total_amount': round(total, 2),
+        'paid_amount': round(paid, 2),
+        'custom_paid_amount': round(money_float(custom_paid_amount), 2) if split == 'Custom Amount' else 0.0,
+    }
+
+
+def make_exhibition_order_number():
+    return f"EXH-{dt.datetime.now().strftime('%y%m%d%H%M%S')}-{os.urandom(2).hex().upper()}"
+
+
+def build_exhibition_invoice_payload(order: dict) -> dict:
+    created_at = order.get('created_at')
+    if hasattr(created_at, 'strftime'):
+        created_display = created_at.strftime('%d %b %Y %I:%M %p')
+    else:
+        created_display = str(created_at or '')
+    total_amount = money_decimal(order.get('total_amount'))
+    paid_amount = money_decimal(order.get('paid_amount'))
+    items = order.get('items') if isinstance(order.get('items'), list) else []
+    if not items:
+        items = [{
+            'product_name': order.get('product_name') or '',
+            'quantity': int(order.get('quantity') or 1),
+            'unit_price': money_float(order.get('unit_price')),
+            'line_total': money_float(order.get('unit_price')) * int(order.get('quantity') or 1),
+        }]
+    invoice_items = []
+    for item in items:
+        qty = int(item.get('quantity') or 1)
+        unit_price = money_float(item.get('unit_price'))
+        line_total = money_float(item.get('line_total') or (unit_price * qty))
+        invoice_items.append({
+            'product_name': item.get('product_name') or '',
+            'quantity': qty,
+            'unit_price': money_format(unit_price),
+            'line_total': money_format(line_total),
+        })
+    return {
+        'order_number': order.get('order_number') or '',
+        'exhibition_name': order.get('exhibition_name') or 'Exhibition',
+        'exhibition_location': order.get('exhibition_location') or '',
+        'created_display': created_display,
+        'customer_name': order.get('customer_name') or '',
+        'customer_phone': order.get('customer_phone') or '',
+        'items': invoice_items,
+        'product_name': order.get('product_name') or '',
+        'quantity': int(order.get('quantity') or 1),
+        'unit_price': money_format(order.get('unit_price')),
+        'subtotal': money_format(sum(money_float(item.get('line_total')) for item in items)),
+        'discount_value': money_float(order.get('discount')),
+        'discount': money_format(order.get('discount')),
+        'delivery_method': order.get('delivery_method') or '',
+        'delivery_address': order.get('delivery_address') or '',
+        'delivery_charges': money_format(order.get('delivery_charges')),
+        'total_amount': money_format(total_amount),
+        'paid_amount': money_format(paid_amount),
+        'balance': money_format(total_amount - paid_amount),
+        'payment_method': order.get('payment_method') or '',
+        'payment_label': f"{order.get('payment_method') or ''} · {order.get('payment_split') or ''}".strip(' ·'),
+    }
+
+
+def build_exhibition_plain_receipt(invoice: dict) -> str:
+    lines = [
+        'TICK BAGS',
+        'Exhibition Order Invoice',
+        invoice.get('exhibition_name') or 'Exhibition',
+    ]
+    if invoice.get('exhibition_location'):
+        lines.append(invoice['exhibition_location'])
+    lines.extend([
+        '-' * 32,
+        f"Invoice: {invoice.get('order_number', '')}",
+        f"Date: {invoice.get('created_display', '')}",
+    ])
+    if invoice.get('customer_name'):
+        lines.append(f"Customer: {invoice['customer_name']}")
+    if invoice.get('customer_phone'):
+        lines.append(f"Phone: {invoice['customer_phone']}")
+    lines.extend([
+        '-' * 32,
+    ])
+    for item in invoice.get('items') or []:
+        lines.extend([
+            item.get('product_name') or '',
+            f"Qty: {item.get('quantity', 1)} x {item.get('unit_price', '')}",
+            f"Line Total: {item.get('line_total', '')}",
+        ])
+    lines.extend([
+        f"Discount: {invoice.get('discount', '')}",
+        f"Delivery: {invoice.get('delivery_method', '')}",
+    ])
+    if invoice.get('delivery_address'):
+        lines.append(f"Address: {invoice['delivery_address']}")
+    lines.extend([
+        f"Delivery Charges: {invoice.get('delivery_charges', '')}",
+        '-' * 32,
+        f"Total: {invoice.get('total_amount', '')}",
+        f"Paid: {invoice.get('paid_amount', '')}",
+        f"Balance: {invoice.get('balance', '')}",
+        f"Payment: {invoice.get('payment_label', '')}",
+        '-' * 32,
+        'Thank you for shopping with Tick Bags.',
+        '',
+    ])
+    return '\n'.join(lines)
+
+
+def get_exhibition_order_items(order: dict) -> list[dict]:
+    items = order.get('items') if isinstance(order.get('items'), list) else []
+    if items:
+        return items
+    return [{
+        'product_name': order.get('product_name') or '',
+        'shopify_product_id': order.get('shopify_product_id') or '',
+        'shopify_variant_id': order.get('shopify_variant_id') or '',
+        'sku': order.get('sku') or '',
+        'quantity': int(order.get('quantity') or 1),
+        'unit_price': money_float(order.get('unit_price')),
+        'line_total': money_float(order.get('unit_price')) * int(order.get('quantity') or 1),
+    }]
+
+
+def normalize_exhibition_order_payload(payload: dict):
+    items = normalize_exhibition_order_items(payload)
+    if not items:
+        return None, ('Add at least one product to the order.', 400)
+    delivery_method = payload.get('delivery_method') if payload.get('delivery_method') in EXHIBITION_DELIVERY_METHODS else 'Pickup from Expo'
+    delivery_address = str(payload.get('delivery_address') or '').strip()
+    if delivery_method == 'Home Delivery' and not delivery_address:
+        return None, ('Delivery address is required for home delivery.', 400)
+    payment_method = payload.get('payment_method') if payload.get('payment_method') in EXHIBITION_PAYMENT_METHODS else 'Cash'
+    payment_split = payload.get('payment_split') if payload.get('payment_split') in EXHIBITION_PAYMENT_SPLITS else '100% Paid'
+    amounts = calculate_exhibition_multi_item_amounts(
+        items,
+        payload.get('discount') or 0,
+        delivery_method,
+        payload.get('delivery_charges') or 0,
+        payment_split,
+        payload.get('custom_paid_amount') or 0,
+    )
+    first_item = items[0]
+    product_name = first_item.get('product_name') or ''
+    if len(items) > 1:
+        product_name = f"{product_name} + {len(items) - 1} more"
+    total_quantity = sum(int(item.get('quantity') or 1) for item in items)
+    return {
+        'exhibition_id': payload.get('exhibition_id') or None,
+        'customer_name': payload.get('customer_name') or '',
+        'customer_phone': payload.get('customer_phone') or '',
+        'product_name': product_name,
+        'shopify_product_id': first_item.get('shopify_product_id') or '',
+        'shopify_variant_id': first_item.get('shopify_variant_id') or '',
+        'sku': first_item.get('sku') or '',
+        'items': items,
+        'quantity': total_quantity,
+        'unit_price': first_item.get('unit_price') or 0,
+        'discount': amounts['discount'],
+        'delivery_method': delivery_method,
+        'delivery_address': delivery_address if delivery_method == 'Home Delivery' else '',
+        'delivery_charges': amounts['delivery_charges'],
+        'payment_method': payment_method,
+        'payment_split': payment_split,
+        'custom_paid_amount': amounts['custom_paid_amount'],
+        'total_amount': amounts['total_amount'],
+        'paid_amount': amounts['paid_amount'],
+    }, None
+
+
+def format_shopify_exhibition_tags(exhibition_name: str = '') -> str:
+    tags = ['Exhibition']
+    clean_name = re.sub(r'[,]+', ' ', str(exhibition_name or '').strip())
+    clean_name = ' '.join(clean_name.split())
+    if clean_name:
+        tags.append(clean_name)
+    return ', '.join(tags)
+
+
+def shopify_error_message(resource, fallback='Shopify request failed.'):
+    errors = getattr(resource, 'errors', None)
+    if not errors:
+        return fallback
+    try:
+        full_messages = errors.full_messages()
+        if full_messages:
+            return "; ".join(str(message) for message in full_messages)
+    except Exception:
+        pass
+    return str(errors)
+
+
+def is_shopify_phone_error(error_message: str) -> bool:
+    lowered = str(error_message or '').lower()
+    return 'phone' in lowered and ('taken' in lowered or 'invalid' in lowered)
+
+
+def shopify_resource_id(resource):
+    if isinstance(resource, dict):
+        return resource.get('id')
+    return getattr(resource, 'id', None)
+
+
+def shopify_customer_phone_values(customer: dict) -> set[str]:
+    values = set()
+    raw_values = [
+        customer.get('phone'),
+        (customer.get('default_address') or {}).get('phone'),
+    ]
+    for address in customer.get('addresses') or []:
+        raw_values.append((address or {}).get('phone'))
+    for raw_value in raw_values:
+        normalized = normalize_pk_phone(raw_value)
+        if normalized:
+            values.add(normalized)
+    return values
+
+
+def find_shopify_customer_by_phone(phone: str):
+    normalized_phone = normalize_pk_phone(phone)
+    if not normalized_phone:
+        return None
+
+    base_url = get_shopify_rest_base_url()
+    headers = shopify_rest_headers()
+    queries = [f'phone:{normalized_phone}', normalized_phone]
+    local_phone = normalized_phone.replace('+92', '0', 1) if normalized_phone.startswith('+92') else ''
+    if local_phone:
+        queries.append(f'phone:{local_phone}')
+        queries.append(local_phone)
+
+    for query in queries:
+        response = requests.get(
+            f"{base_url}/customers/search.json",
+            headers=headers,
+            params={'query': query, 'limit': 10},
+            timeout=30,
+        )
+        response.raise_for_status()
+        for customer in response.json().get('customers') or []:
+            if normalized_phone in shopify_customer_phone_values(customer):
+                customer_id = customer.get('id')
+                if not customer_id:
+                    continue
+                try:
+                    return shopify.Customer.find(customer_id)
+                except Exception:
+                    return {'id': customer_id}
+    return None
+
+
+def create_shopify_customer_for_exhibition_order(order: dict, first_name: str, last_name: str, phone: str, allow_phone_fallback: bool = True):
+    existing_customer = find_shopify_customer_by_phone(phone)
+    if existing_customer:
+        return existing_customer
+
+    customer = shopify.Customer()
+    customer.first_name = first_name
+    customer.last_name = last_name or ''
+    if phone:
+        customer.phone = phone
+    customer.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
+    if order.get('delivery_address'):
+        address = {
+            'first_name': first_name,
+            'last_name': last_name or '',
+            'address1': order.get('delivery_address') or '',
+            'city': 'Pakistan',
+            'country': 'Pakistan',
+        }
+        if phone:
+            address['phone'] = phone
+        customer.addresses = [address]
+    if not customer.save():
+        error_message = shopify_error_message(customer, 'Could not create Shopify customer.')
+        if phone and is_shopify_phone_error(error_message):
+            existing_customer = find_shopify_customer_by_phone(phone)
+            if existing_customer:
+                return existing_customer
+            if allow_phone_fallback:
+                return create_shopify_customer_for_exhibition_order(order, first_name, last_name, '', allow_phone_fallback=False)
+        raise RuntimeError(error_message)
+    return customer
+
+
+def build_exhibition_shopify_draft_order(
+    order: dict,
+    customer,
+    line_items: list[dict],
+    note_lines: list[str],
+    shipping_address: dict,
+    partial_paid_discount: Decimal = Decimal('0'),
+):
+    draft_order = shopify.DraftOrder()
+    draft_order.line_items = line_items
+    draft_order.note = "\n".join(line for line in note_lines if line)
+    draft_order.tags = format_shopify_exhibition_tags(order.get('exhibition_name'))
+    draft_order.use_customer_default_address = False
+    draft_order.customer = {'id': shopify_resource_id(customer)}
+    draft_order.shipping_address = shipping_address
+    draft_order.billing_address = shipping_address
+
+    exhibition_discount = money_decimal(order.get('discount'))
+    total_discount = exhibition_discount + max(partial_paid_discount, Decimal('0'))
+    if total_discount > 0:
+        discount_title = 'Exhibition discount'
+        if partial_paid_discount > 0:
+            discount_title = 'Exhibition paid amount'
+            if exhibition_discount > 0:
+                discount_title = 'Exhibition discount + paid amount'
+        draft_order.applied_discount = {
+            'description': discount_title,
+            'value_type': 'fixed_amount',
+            'value': money_float(total_discount),
+            'amount': money_float(total_discount),
+            'title': discount_title,
+        }
+
+    delivery_charges = money_float(order.get('delivery_charges'))
+    if delivery_charges > 0:
+        draft_order.shipping_line = {
+            'title': 'Delivery Charges',
+            'price': delivery_charges,
+            'custom': True,
+        }
+    return draft_order
+
+
+def push_exhibition_order_to_shopify(order: dict) -> dict:
+    if str(order.get('shopify_push_status') or '').lower() == 'pushed' and order.get('shopify_order_id'):
+        return {
+            'skipped': True,
+            'order_id': order.get('shopify_order_id'),
+            'order_name': order.get('shopify_order_name'),
+            'warnings': ['Order was already pushed to Shopify.'],
+        }
+
+    customer_name = (order.get('customer_name') or '').strip() or 'Walk-in'
+    phone = normalize_pk_phone(order.get('customer_phone'))
+    if order.get('delivery_method') == 'Home Delivery':
+        if not phone:
+            raise ValueError('Customer phone is required for home delivery orders.')
+        if not (order.get('delivery_address') or '').strip():
+            raise ValueError('Delivery address is required for home delivery orders.')
+
+    name_parts = customer_name.split()
+    first_name = name_parts[0]
+    last_name = " ".join(name_parts[1:])
+    customer = create_shopify_customer_for_exhibition_order(order, first_name, last_name, phone)
+
+    line_items = []
+    for item in get_exhibition_order_items(order):
+        title = (item.get('product_name') or '').strip()
+        if not title:
+            continue
+        unit_price = money_float(item.get('unit_price'))
+        line_items.append({
+            'title': title,
+            'price': unit_price,
+            'original_unit_price': unit_price,
+            'quantity': max(int(item.get('quantity') or 1), 1),
+            'requires_shipping': order.get('delivery_method') == 'Home Delivery',
+        })
+    if not line_items:
+        raise ValueError('At least one product is required before pushing to Shopify.')
+
+    shipping_address = {
+        'first_name': first_name,
+        'last_name': last_name or '',
+        'address1': order.get('delivery_address') or order.get('delivery_method') or 'Pickup from Expo',
+        'city': 'Pakistan',
+        'country': 'Pakistan',
+    }
+    if phone:
+        shipping_address['phone'] = phone
+
+    note_lines = [
+        f"Exhibition order: {order.get('order_number') or order.get('id')}",
+        f"Exhibition: {order.get('exhibition_name') or ''}",
+        f"Delivery method: {order.get('delivery_method') or ''}",
+        f"Payment method: {order.get('payment_method') or ''}",
+        f"Payment split: {order.get('payment_split') or ''}",
+        f"Paid amount: {money_format(order.get('paid_amount'))}",
+    ]
+    if order.get('delivery_address'):
+        note_lines.append(f"Delivery address: {order.get('delivery_address')}")
+
+    total_amount = money_decimal(order.get('total_amount'))
+    paid_amount = money_decimal(order.get('paid_amount'))
+    balance_amount = max(total_amount - paid_amount, Decimal('0'))
+    is_partially_paid = paid_amount > 0 and paid_amount < total_amount
+    is_fully_paid = paid_amount >= total_amount and total_amount > 0
+    partial_paid_discount = paid_amount if is_partially_paid else Decimal('0')
+    if is_partially_paid:
+        note_lines.append(f"Shopify total reflects remaining balance: {money_format(balance_amount)}")
+        note_lines.append(f"Paid amount added as Shopify discount: {money_format(paid_amount)}")
+
+    draft_order = build_exhibition_shopify_draft_order(
+        order,
+        customer,
+        line_items,
+        note_lines,
+        shipping_address,
+        partial_paid_discount=partial_paid_discount,
+    )
+    if not draft_order.save():
+        error_message = shopify_error_message(draft_order, 'Could not save Shopify draft order.')
+        if phone and is_shopify_phone_error(error_message):
+            phone = ''
+            shipping_address = dict(shipping_address)
+            shipping_address.pop('phone', None)
+            note_lines.append('Shopify phone omitted: original exhibition phone was rejected by Shopify.')
+            draft_order = build_exhibition_shopify_draft_order(
+                order,
+                customer,
+                line_items,
+                note_lines,
+                shipping_address,
+                partial_paid_discount=partial_paid_discount,
+            )
+            if not draft_order.save():
+                raise RuntimeError(shopify_error_message(draft_order, 'Could not save Shopify draft order without phone.'))
+        else:
+            raise RuntimeError(error_message)
+
+    complete_params = {}
+    if not is_fully_paid:
+        complete_params['payment_pending'] = True
+    try:
+        draft_order.complete(complete_params)
+    except Exception as e:
+        errors = getattr(draft_order, 'errors', None)
+        raise RuntimeError(f"Shopify could not complete the exhibition order: {e or errors or 'Unknown completion error'}")
+
+    try:
+        refreshed_draft_order = shopify.DraftOrder.find(draft_order.id)
+    except Exception:
+        refreshed_draft_order = draft_order
+
+    order_id = getattr(refreshed_draft_order, 'order_id', None) or getattr(draft_order, 'order_id', None)
+    order_name = getattr(refreshed_draft_order, 'name', '') or getattr(draft_order, 'name', '') or ''
+    if not order_id:
+        raise RuntimeError('Shopify created the draft, but the completed order ID did not come back.')
+
+    warnings = []
+    if is_fully_paid:
+        try:
+            mark_shopify_order_as_paid(order_id)
+        except Exception as e:
+            warnings.append(f'Could not mark order as paid: {e}')
+
+    shopify_order = None
+    if order.get('delivery_method') == 'Pickup from Expo':
+        try:
+            shopify_order = shopify.Order.find(order_id)
+            warnings.extend(fulfill_shopify_order(shopify_order))
+        except Exception as e:
+            warnings.append(f'Could not fulfill pickup order: {e}')
+        try:
+            shopify_order = shopify_order or shopify.Order.find(order_id)
+            close_result = shopify_order.close()
+            if close_result is False:
+                warnings.append('Shopify order close returned false.')
+        except Exception as e:
+            warnings.append(f'Could not archive pickup order: {e}')
+
+    update_exhibition_order_shopify_push(
+        order.get('id'),
+        status='pushed',
+        shopify_order_id=str(order_id),
+        shopify_order_name=order_name,
+        shopify_draft_order_id=str(getattr(draft_order, 'id', '') or ''),
+        error='',
+    )
+    return {
+        'order_id': order_id,
+        'order_name': order_name,
+        'draft_order_id': getattr(draft_order, 'id', None),
+        'customer_id': shopify_resource_id(customer),
+        'warnings': warnings,
+    }
 
 
 def build_daraz_profit_records(start_date: str = '', end_date: str = ''):
@@ -3161,13 +4816,738 @@ def payments_page():
     return render_template('payments.html')
 
 
+@app.route('/attendance/login', methods=['GET', 'POST'])
+def attendance_login_page():
+    next_url = request.values.get('next') or url_for('attendance_page')
+    if not str(next_url).startswith('/'):
+        next_url = url_for('attendance_page')
+    if request.method == 'POST':
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        employee = get_attendance_employee_by_username(username)
+        if employee and employee.get('active') and check_password_hash(employee.get('password_hash') or '', password):
+            session[ATTENDANCE_SESSION_KEY] = employee['id']
+            if employee.get('role') == 'admin' and next_url == url_for('attendance_page'):
+                next_url = url_for('attendance_admin_page')
+            return redirect(next_url)
+        return render_template('attendance_login.html', login_error='Wrong username or password.', next_url=next_url), 401
+    return render_template('attendance_login.html', login_error='', next_url=next_url)
+
+
+@app.route('/attendance/logout', methods=['POST'])
+def attendance_logout_page():
+    session.pop(ATTENDANCE_SESSION_KEY, None)
+    return redirect(url_for('attendance_login_page'))
+
+
+@app.route('/attendance')
+def attendance_page():
+    employee = attendance_user()
+    if not employee:
+        return redirect(url_for('attendance_login_page', next=request.path))
+    return render_template('attendance.html', employee=serialize_attendance_employee(employee))
+
+
+@app.route('/attendance-manifest.webmanifest')
+def attendance_manifest():
+    return send_from_directory('static', 'attendance.webmanifest', mimetype='application/manifest+json')
+
+
+@app.route('/attendance-sw.js')
+def attendance_service_worker():
+    return send_from_directory('static', 'attendance-sw.js', mimetype='application/javascript')
+
+
+@app.route('/attendance/admin')
+def attendance_admin_page():
+    employee = attendance_user()
+    if not employee:
+        return redirect(url_for('attendance_login_page', next=request.path))
+    if employee.get('role') != 'admin':
+        return 'Admin access required', 403
+    return render_template('attendance_admin.html', employee=serialize_attendance_employee(employee))
+
+
+@app.route('/api/attendance/status')
+def attendance_status_api():
+    employee, error = require_attendance_user()
+    if error:
+        return error
+    today_record = get_attendance_record_for_date(employee['id'], attendance_today())
+    open_record = get_open_attendance_record_for_employee(employee['id'])
+    return jsonify({
+        'ok': True,
+        'employee': serialize_attendance_employee(employee),
+        'today': serialize_attendance_record(open_record or today_record),
+        'locations': [
+            {
+                'id': row.get('id'),
+                'name': row.get('name'),
+                'plus_code': row.get('plus_code'),
+                'latitude': float(row.get('latitude')),
+                'longitude': float(row.get('longitude')),
+                'radius_meters': int(row.get('radius_meters') or 150),
+            }
+            for row in list_attendance_locations(active_only=True)
+        ],
+        'max_accuracy_meters': ATTENDANCE_MAX_GPS_ACCURACY_METERS,
+    })
+
+
+@app.route('/api/attendance/month-records')
+def attendance_month_records_api():
+    employee, error = require_attendance_user()
+    if error:
+        return error
+    month_start, month_end = attendance_month_bounds()
+    rows = list_attendance_records(
+        start_date=month_start,
+        end_date=month_end,
+        employee_id=employee['id'],
+    )
+    records = []
+    total_minutes = 0
+    completed_days = 0
+    for row in rows:
+        minutes = attendance_record_minutes(row)
+        if minutes:
+            total_minutes += minutes
+            completed_days += 1
+        serialized = serialize_attendance_record(row)
+        serialized.update({
+            'total_minutes': minutes,
+            'total_time': attendance_minutes_label(minutes) if minutes else '-',
+            'is_complete': bool(row.get('check_in_at') and row.get('check_out_at')),
+        })
+        records.append(serialized)
+    return jsonify({
+        'ok': True,
+        'employee': serialize_attendance_employee(employee),
+        'month': month_start.strftime('%B %Y'),
+        'records': records,
+        'summary': {
+            'days': len(records),
+            'completed_days': completed_days,
+            'total_minutes': total_minutes,
+            'total_time': attendance_minutes_label(total_minutes),
+        },
+    })
+
+
+@app.route('/api/attendance/check-in', methods=['POST'])
+def attendance_check_in_api():
+    employee, error = require_attendance_user()
+    if error:
+        return error
+    open_record = get_open_attendance_record_for_employee(employee['id'])
+    if open_record:
+        return jsonify({'ok': False, 'error': 'Check out from your open shift before checking in again.'}), 400
+    existing = get_attendance_record_for_date(employee['id'], attendance_today())
+    if existing and existing.get('check_in_at'):
+        return jsonify({'ok': False, 'error': 'You have already checked in today.'}), 400
+    payload = request.get_json(silent=True) or {}
+    capture, capture_error = validate_attendance_capture(payload)
+    if capture_error:
+        return jsonify({'ok': False, 'error': capture_error}), 400
+    record = create_attendance_checkin(
+        employee_id=employee['id'],
+        location_id=capture['location']['id'],
+        latitude=capture['latitude'],
+        longitude=capture['longitude'],
+        accuracy_meters=capture['accuracy_meters'],
+        distance_meters=capture['distance_meters'],
+        photo=capture['photo'],
+        user_agent=str(request.user_agent or '')[:500],
+        ip_address=(request.headers.get('X-Forwarded-For') or request.remote_addr or '')[:120],
+        work_date=attendance_today(),
+    )
+    if not record:
+        return jsonify({'ok': False, 'error': 'Could not save check-in.'}), 500
+    return jsonify({'ok': True, 'record': serialize_attendance_record(record)})
+
+
+@app.route('/api/attendance/check-out', methods=['POST'])
+def attendance_check_out_api():
+    employee, error = require_attendance_user()
+    if error:
+        return error
+    now = attendance_now()
+    today_record = get_attendance_record_for_date(employee['id'], now.date())
+    open_record = get_open_attendance_record_for_employee(employee['id'])
+    existing = today_record
+    if open_record and attendance_record_work_date(open_record) != now.date():
+        if now.hour <= ATTENDANCE_OVERNIGHT_CHECKOUT_HOUR:
+            existing = open_record
+        else:
+            return jsonify({'ok': False, 'error': 'Yesterday shift is still open. Ask admin to close it before checking in again.'}), 400
+    elif open_record:
+        existing = open_record
+    if not existing or not existing.get('check_in_at'):
+        return jsonify({'ok': False, 'error': 'Check in first before checking out.'}), 400
+    if existing.get('check_out_at'):
+        return jsonify({'ok': False, 'error': 'You have already checked out today.'}), 400
+    payload = request.get_json(silent=True) or {}
+    capture, capture_error = validate_attendance_capture(payload)
+    if capture_error:
+        return jsonify({'ok': False, 'error': capture_error}), 400
+    record = update_attendance_checkout(
+        record_id=existing['id'],
+        latitude=capture['latitude'],
+        longitude=capture['longitude'],
+        accuracy_meters=capture['accuracy_meters'],
+        distance_meters=capture['distance_meters'],
+        photo=capture['photo'],
+        user_agent=str(request.user_agent or '')[:500],
+        ip_address=(request.headers.get('X-Forwarded-For') or request.remote_addr or '')[:120],
+    )
+    if not record:
+        return jsonify({'ok': False, 'error': 'Could not save check-out.'}), 500
+    return jsonify({'ok': True, 'record': serialize_attendance_record(record)})
+
+
+@app.route('/api/attendance/admin/employees', methods=['GET', 'POST'])
+def attendance_admin_employees_api():
+    _, error = require_attendance_user(admin_required=True)
+    if error:
+        return error
+    if request.method == 'POST':
+        payload = request.get_json(silent=True) or {}
+        username = str(payload.get('username') or '').strip()
+        full_name = str(payload.get('full_name') or '').strip()
+        password = str(payload.get('password') or '')
+        role = 'admin' if payload.get('role') == 'admin' else 'employee'
+        if not username or not full_name or not password:
+            return jsonify({'ok': False, 'error': 'Name, username, and password are required.'}), 400
+        employee = create_attendance_employee(
+            username=username,
+            password_hash=generate_password_hash(password),
+            full_name=full_name,
+            role=role,
+        )
+        if not employee:
+            return jsonify({'ok': False, 'error': 'Could not save employee login.'}), 500
+        return jsonify({'ok': True, 'employee': serialize_attendance_employee(employee)})
+    return jsonify({
+        'ok': True,
+        'employees': [serialize_attendance_employee(row) for row in list_attendance_employees(include_inactive=True)],
+    })
+
+
+@app.route('/api/attendance/admin/records')
+def attendance_admin_records_api():
+    _, error = require_attendance_user(admin_required=True)
+    if error:
+        return error
+    month_start = month_end = None
+    if request.args.get('month'):
+        month_start, month_end = attendance_month_bounds(request.args.get('month'))
+    rows = list_attendance_records(
+        start_date=month_start or request.args.get('start_date') or None,
+        end_date=month_end or request.args.get('end_date') or None,
+        employee_id=request.args.get('employee_id') or None,
+    )
+    employees = [serialize_attendance_employee(row) for row in list_attendance_employees(include_inactive=True)]
+    active_employees = [row for row in employees if row.get('active')]
+    scoped_days = attendance_days_in_scope(
+        month_start or parse_iso_day(request.args.get('start_date')) or attendance_today(),
+        month_end or parse_iso_day(request.args.get('end_date')) or attendance_today(),
+    )
+    employee_summaries = build_attendance_employee_summaries(
+        rows,
+        active_employees,
+        month_start or parse_iso_day(request.args.get('start_date')) or attendance_today(),
+        month_end or parse_iso_day(request.args.get('end_date')) or attendance_today(),
+    )
+    open_count = sum(1 for row in rows if not row.get('check_out_at'))
+    closed_count = len(rows) - open_count
+    total_minutes = sum(attendance_record_minutes(row) for row in rows)
+    completed_count = sum(1 for row in rows if row.get('check_in_at') and row.get('check_out_at'))
+    average_minutes = round(total_minutes / completed_count) if completed_count else 0
+    return jsonify({
+        'ok': True,
+        'records': [serialize_attendance_record(row) for row in rows],
+        'summary': {
+            'records': len(rows),
+            'open': open_count,
+            'closed': closed_count,
+            'employees': len(active_employees),
+            'scoped_days': scoped_days,
+            'total_minutes': total_minutes,
+            'total_time': attendance_minutes_label(total_minutes),
+            'average_daily_minutes': average_minutes,
+            'average_daily_time': attendance_minutes_label(average_minutes),
+            'leaves': sum(row['leaves'] for row in employee_summaries),
+            'short_attendance': sum(row['short_attendance_days'] for row in employee_summaries),
+            'overtime_days': sum(row['overtime_days'] for row in employee_summaries),
+            'overtime_minutes': sum(row['overtime_minutes'] for row in employee_summaries),
+            'overtime_time': attendance_minutes_label(sum(row['overtime_minutes'] for row in employee_summaries)),
+        },
+        'month': (month_start.strftime('%Y-%m') if month_start else ''),
+        'month_label': (month_start.strftime('%B %Y') if month_start else ''),
+        'employee_summaries': employee_summaries,
+        'employees': employees,
+        'locations': [
+            {
+                'id': row.get('id'),
+                'name': row.get('name'),
+                'plus_code': row.get('plus_code'),
+                'latitude': float(row.get('latitude')),
+                'longitude': float(row.get('longitude')),
+                'radius_meters': int(row.get('radius_meters') or 150),
+                'active': bool(row.get('active')),
+            }
+            for row in list_attendance_locations(active_only=False)
+        ],
+    })
+
+
+@app.route('/attendance/admin/records/<int:record_id>/photo/<kind>')
+def attendance_admin_record_photo_page(record_id, kind):
+    employee = attendance_user()
+    if not employee:
+        return redirect(url_for('attendance_login_page', next=request.path))
+    if employee.get('role') != 'admin':
+        return 'Admin access required', 403
+    if kind not in {'check-in', 'check-out'}:
+        return 'Photo not found', 404
+    record = get_attendance_record(record_id)
+    if not record:
+        return 'Photo not found', 404
+    key = 'check_in_photo' if kind == 'check-in' else 'check_out_photo'
+    photo = record.get(key) or ''
+    if not photo:
+        return 'Photo not found', 404
+    return f"""<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Attendance Photo</title>
+<style>body{{margin:0;background:#111827;color:#fff;font-family:system-ui;display:grid;place-items:center;min-height:100vh}}img{{max-width:100%;max-height:100vh}}</style>
+</head><body><img alt="Attendance photo" src="{photo}"></body></html>"""
+
+
+@app.route('/exhibition')
+def exhibition_page():
+    return render_template('exhibition.html')
+
+
+@app.route('/exhibition/accounts')
+def exhibition_accounts_page():
+    return render_template('exhibition_accounts.html', target_sale=EXHIBITION_TARGET_SALE)
+
+
+@app.route('/exhibition/orders')
+def exhibition_orders_page():
+    return render_template('exhibition_orders.html')
+
+
+@app.route('/exhibition/invoice/<int:order_id>')
+def exhibition_invoice_page(order_id):
+    order = get_exhibition_order(order_id)
+    if not order:
+        return "Invoice not found", 404
+    invoice = build_exhibition_invoice_payload(order)
+    return render_template('exhibition_invoice.html', invoice=invoice)
+
+
+@app.route('/exhibition/invoice/<int:order_id>/plain')
+def exhibition_plain_invoice_page(order_id):
+    order = get_exhibition_order(order_id)
+    if not order:
+        return "Invoice not found", 404
+    invoice = build_exhibition_invoice_payload(order)
+    receipt = build_exhibition_plain_receipt(invoice)
+    return Response(receipt, mimetype='text/plain; charset=utf-8')
+
+
+@app.route('/api/exhibition/bootstrap')
+def exhibition_bootstrap_api():
+    try:
+        exhibitions = [exhibition_serialize_row(row) for row in list_exhibitions()]
+        exhibition_id = request.args.get('exhibition_id') or (exhibitions[0]['id'] if exhibitions else None)
+        products = build_exhibition_product_catalog()
+        recent_orders = [exhibition_serialize_row(row) for row in list_exhibition_orders(exhibition_id=exhibition_id, limit=25)]
+        return jsonify({
+            'ok': True,
+            'exhibitions': exhibitions,
+            'selected_exhibition_id': exhibition_id,
+            'products': products,
+            'recent_orders': recent_orders,
+            'delivery_methods': sorted(EXHIBITION_DELIVERY_METHODS),
+            'payment_methods': sorted(EXHIBITION_PAYMENT_METHODS),
+            'payment_splits': ['100% Paid', '50% Paid', 'Custom Amount'],
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/exhibition/exhibitions', methods=['POST'])
+def exhibition_create_exhibition_api():
+    payload = request.get_json(silent=True) or request.form or {}
+    row = create_exhibition(
+        name=payload.get('name'),
+        location=payload.get('location') or '',
+        starts_on=payload.get('starts_on') or None,
+        ends_on=payload.get('ends_on') or None,
+        notes=payload.get('notes') or '',
+    )
+    if not row:
+        return jsonify({'ok': False, 'error': 'Exhibition name is required.'}), 400
+    return jsonify({'ok': True, 'exhibition': exhibition_serialize_row(row)})
+
+
+@app.route('/api/exhibition/orders', methods=['POST'])
+def exhibition_create_order_api():
+    payload = request.get_json(silent=True) or {}
+    normalized, error = normalize_exhibition_order_payload(payload)
+    if error:
+        message, status_code = error
+        return jsonify({'ok': False, 'error': message}), status_code
+    order = create_exhibition_order(
+        order_number=make_exhibition_order_number(),
+        **normalized,
+    )
+    if not order:
+        return jsonify({'ok': False, 'error': 'Could not create exhibition order.'}), 500
+    order_id = order.get('id')
+    return jsonify({
+        'ok': True,
+        'order': exhibition_serialize_row(order),
+        'invoice_url': url_for('exhibition_invoice_page', order_id=order_id),
+    })
+
+
+@app.route('/api/exhibition/orders/<int:order_id>', methods=['GET'])
+def exhibition_get_order_api(order_id):
+    order = get_exhibition_order(order_id)
+    if not order:
+        return jsonify({'ok': False, 'error': 'Order not found.'}), 404
+    return jsonify({'ok': True, 'order': exhibition_serialize_row(order)})
+
+
+@app.route('/api/exhibition/orders/<int:order_id>', methods=['PUT'])
+def exhibition_update_order_api(order_id):
+    if not get_exhibition_order(order_id):
+        return jsonify({'ok': False, 'error': 'Order not found.'}), 404
+    payload = request.get_json(silent=True) or {}
+    normalized, error = normalize_exhibition_order_payload(payload)
+    if error:
+        message, status_code = error
+        return jsonify({'ok': False, 'error': message}), status_code
+    order = update_exhibition_order(order_id=order_id, **normalized)
+    if not order:
+        return jsonify({'ok': False, 'error': 'Could not update exhibition order.'}), 500
+    return jsonify({
+        'ok': True,
+        'order': exhibition_serialize_row(order),
+        'invoice_url': url_for('exhibition_invoice_page', order_id=order_id),
+    })
+
+
+@app.route('/api/exhibition/orders/<int:order_id>', methods=['DELETE'])
+def exhibition_delete_order_api(order_id):
+    if not delete_exhibition_order(order_id):
+        return jsonify({'ok': False, 'error': 'Order not found or could not be deleted.'}), 404
+    return jsonify({'ok': True})
+
+
+@app.route('/api/exhibition/orders/<int:order_id>/push-shopify', methods=['POST'])
+def exhibition_push_order_shopify_api(order_id):
+    order = get_exhibition_order(order_id)
+    if not order:
+        return jsonify({'ok': False, 'error': 'Order not found.'}), 404
+    try:
+        result = push_exhibition_order_to_shopify(order)
+        return jsonify({'ok': True, **result})
+    except Exception as e:
+        update_exhibition_order_shopify_push(order_id, status='error', error=str(e))
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/exhibition/orders/push-shopify', methods=['POST'])
+def exhibition_bulk_push_orders_shopify_api():
+    payload = request.get_json(silent=True) or {}
+    order_ids = payload.get('order_ids') or []
+    if not isinstance(order_ids, list) or not order_ids:
+        return jsonify({'ok': False, 'error': 'Select at least one order to push.'}), 400
+    results = []
+    for raw_order_id in order_ids:
+        try:
+            order_id = int(raw_order_id)
+        except Exception:
+            continue
+        order = get_exhibition_order(order_id)
+        if not order:
+            results.append({'order_id': order_id, 'ok': False, 'error': 'Order not found.'})
+            continue
+        try:
+            result = push_exhibition_order_to_shopify(order)
+            results.append({'order_id': order_id, 'ok': True, **result})
+        except Exception as e:
+            update_exhibition_order_shopify_push(order_id, status='error', error=str(e))
+            results.append({'order_id': order_id, 'ok': False, 'error': str(e)})
+    return jsonify({
+        'ok': True,
+        'results': results,
+        'success_count': sum(1 for result in results if result.get('ok')),
+        'error_count': sum(1 for result in results if not result.get('ok')),
+    })
+
+
+@app.route('/api/exhibition/orders-list')
+def exhibition_orders_list_api():
+    exhibition_id = request.args.get('exhibition_id') or None
+    search = normalize_catalog_match(request.args.get('search') or '')
+    delivery_method = (request.args.get('delivery_method') or '').strip()
+    push_status = (request.args.get('push_status') or '').strip().lower()
+    rows = []
+    for row in list_exhibition_orders(exhibition_id=exhibition_id):
+        serialized = exhibition_serialize_row(row)
+        if delivery_method and serialized.get('delivery_method') != delivery_method:
+            continue
+        serialized_push_status = str(serialized.get('shopify_push_status') or 'unpushed').lower()
+        if push_status == 'pushed' and serialized_push_status != 'pushed':
+            continue
+        if push_status == 'unpushed' and serialized_push_status == 'pushed':
+            continue
+        if push_status == 'error' and serialized_push_status != 'error':
+            continue
+        haystack = normalize_catalog_match(
+            " ".join([
+                str(serialized.get('order_number') or ''),
+                str(serialized.get('product_name') or ''),
+                str(serialized.get('customer_name') or ''),
+                str(serialized.get('customer_phone') or ''),
+                str(serialized.get('exhibition_name') or ''),
+            ])
+        )
+        if search and search not in haystack:
+            continue
+        rows.append(serialized)
+    total_sale = sum((money_decimal(row.get('total_amount')) for row in rows), Decimal('0'))
+    total_paid = sum((money_decimal(row.get('paid_amount')) for row in rows), Decimal('0'))
+    return jsonify({
+        'ok': True,
+        'exhibitions': [exhibition_serialize_row(row) for row in list_exhibitions()],
+        'delivery_methods': sorted(EXHIBITION_DELIVERY_METHODS),
+        'orders': rows,
+        'summary': {
+            'order_count': len(rows),
+            'total_sale': money_float(total_sale),
+            'total_paid': money_float(total_paid),
+            'balance': money_float(total_sale - total_paid),
+        },
+    })
+
+
+@app.route('/api/exhibition/orders/<int:order_id>/product-cost', methods=['PUT'])
+def exhibition_update_order_product_cost_api(order_id):
+    if not get_exhibition_order(order_id):
+        return jsonify({'ok': False, 'error': 'Order not found.'}), 404
+    payload = request.get_json(silent=True) or {}
+    raw_value = payload.get('product_cost')
+    product_cost = None if raw_value in (None, '') else max(money_float(raw_value), 0)
+    order = update_exhibition_order_product_cost(order_id, product_cost)
+    if not order:
+        return jsonify({'ok': False, 'error': 'Could not update product cost.'}), 500
+    return jsonify({'ok': True, 'order': exhibition_serialize_row(order)})
+
+
+@app.route('/api/exhibition/accounts')
+def exhibition_accounts_api():
+    exhibitions = [exhibition_serialize_row(row) for row in list_exhibitions()]
+    exhibition_id = request.args.get('exhibition_id') or (exhibitions[0]['id'] if exhibitions else None)
+    orders = list_exhibition_orders(exhibition_id=exhibition_id)
+    expenses = list_exhibition_expenses(exhibition_id=exhibition_id)
+    lookup = build_exhibition_cost_lookup()
+    order_rows = []
+    daily_rows = {}
+    total_sale = Decimal('0')
+    total_paid = Decimal('0')
+    total_product_cost = Decimal('0')
+    cash_income = Decimal('0')
+    bank_income = Decimal('0')
+    for order in orders:
+        item_cost_rows = []
+        product_cost_total = Decimal('0')
+        primary_match = None
+        for item in get_exhibition_order_items(order):
+            match = match_exhibition_order_cost(item, lookup)
+            matched_row = match.get('row')
+            if primary_match is None:
+                primary_match = match
+            qty = int(item.get('quantity') or 1)
+            unit_cost = Decimal(str(matched_row.get('exhibition_cost') if matched_row else 0))
+            line_cost = unit_cost * Decimal(qty)
+            product_cost_total += line_cost
+            item_cost_rows.append({
+                'product_name': item.get('product_name') or '',
+                'quantity': qty,
+                'matched_cost_name': matched_row.get('match_label') if matched_row else '',
+                'matched_cost': money_float(unit_cost),
+                'line_cost': money_float(line_cost),
+                'match_reason': match.get('reason'),
+                'match_score': match.get('score'),
+            })
+        auto_product_cost_total = product_cost_total
+        has_manual_cost = order.get('product_cost_override') is not None
+        if has_manual_cost:
+            product_cost_total = money_decimal(order.get('product_cost_override'))
+        total_product_cost += product_cost_total
+        order_total = money_decimal(order.get('total_amount'))
+        order_paid = money_decimal(order.get('paid_amount'))
+        total_sale += order_total
+        total_paid += order_paid
+        if order.get('payment_method') == 'Bank':
+            bank_income += order_paid
+        else:
+            cash_income += order_paid
+        created_at = order.get('created_at')
+        day_key = created_at.strftime('%Y-%m-%d') if hasattr(created_at, 'strftime') else str(created_at or '')[:10]
+        if day_key:
+            daily = daily_rows.setdefault(day_key, {
+                'date': day_key,
+                'order_count': 0,
+                'total_sale': Decimal('0'),
+                'total_paid': Decimal('0'),
+                'cash': Decimal('0'),
+                'bank': Decimal('0'),
+                'receivable': Decimal('0'),
+                'expense': Decimal('0'),
+                'product_cost': Decimal('0'),
+            })
+            daily['order_count'] += 1
+            daily['total_sale'] += order_total
+            daily['total_paid'] += order_paid
+            daily['receivable'] += order_total - order_paid
+            daily['product_cost'] += product_cost_total
+            if order.get('payment_method') == 'Bank':
+                daily['bank'] += order_paid
+            else:
+                daily['cash'] += order_paid
+        serialized = exhibition_serialize_row(order)
+        primary_match = primary_match or {'row': None, 'reason': 'No cost match', 'score': 0}
+        primary_row = primary_match.get('row')
+        serialized.update({
+            'item_costs': item_cost_rows,
+            'matched_cost_name': primary_row.get('match_label') if primary_row else '',
+            'matched_cost': item_cost_rows[0]['matched_cost'] if item_cost_rows else 0,
+            'product_cost_total': money_float(product_cost_total),
+            'auto_product_cost_total': money_float(auto_product_cost_total),
+            'product_cost_override': money_float(order.get('product_cost_override')) if has_manual_cost else None,
+            'has_manual_product_cost': has_manual_cost,
+            'match_reason': primary_match.get('reason'),
+            'match_score': primary_match.get('score'),
+            'cost_link': f"/shopify-product-costs?search={quote(str(order.get('product_name') or ''))}",
+        })
+        order_rows.append(serialized)
+
+    total_expense = sum((money_decimal(row.get('amount')) for row in expenses), Decimal('0'))
+    cash_expense = sum((money_decimal(row.get('amount')) for row in expenses if row.get('payment_method') != 'Bank'), Decimal('0'))
+    bank_expense = sum((money_decimal(row.get('amount')) for row in expenses if row.get('payment_method') == 'Bank'), Decimal('0'))
+    for expense in expenses:
+        expense_date = str(expense.get('expense_date') or '')[:10]
+        if not expense_date:
+            continue
+        daily = daily_rows.setdefault(expense_date, {
+            'date': expense_date,
+            'order_count': 0,
+            'total_sale': Decimal('0'),
+            'total_paid': Decimal('0'),
+            'cash': Decimal('0'),
+            'bank': Decimal('0'),
+            'receivable': Decimal('0'),
+            'expense': Decimal('0'),
+            'product_cost': Decimal('0'),
+        })
+        expense_amount = money_decimal(expense.get('amount'))
+        daily['expense'] += expense_amount
+        if expense.get('payment_method') == 'Bank':
+            daily['bank'] -= expense_amount
+        else:
+            daily['cash'] -= expense_amount
+    daily_summaries = []
+    for row in sorted(daily_rows.values(), key=lambda item: item['date'], reverse=True):
+        daily_summaries.append({
+            'date': row['date'],
+            'order_count': row['order_count'],
+            'total_sale': money_float(row['total_sale']),
+            'total_paid': money_float(row['total_paid']),
+            'cash': money_float(row['cash']),
+            'bank': money_float(row['bank']),
+            'receivable': money_float(row['receivable']),
+            'expense': money_float(row['expense']),
+            'product_cost': money_float(row['product_cost']),
+            'net_profit': money_float(row['total_sale'] - row['product_cost'] - row['expense']),
+        })
+    net_profit = total_sale - total_product_cost - total_expense
+    target_left = Decimal(str(EXHIBITION_TARGET_SALE)) - total_sale
+    return jsonify({
+        'ok': True,
+        'exhibitions': exhibitions,
+        'selected_exhibition_id': exhibition_id,
+        'orders': order_rows,
+        'expenses': [exhibition_serialize_row(row) for row in expenses],
+        'daily_summaries': daily_summaries,
+        'summary': {
+            'order_count': len(orders),
+            'total_sale': money_float(total_sale),
+            'total_paid': money_float(total_paid),
+            'target_left': money_float(target_left),
+            'total_expense': money_float(total_expense),
+            'cash': money_float(cash_income - cash_expense),
+            'bank': money_float(bank_income - bank_expense),
+            'receivable': money_float(total_sale - total_paid),
+            'product_cost': money_float(total_product_cost),
+            'net_profit': money_float(net_profit),
+            'target_sale': EXHIBITION_TARGET_SALE,
+        },
+    })
+
+
+@app.route('/api/exhibition/expenses', methods=['POST'])
+def exhibition_create_expense_api():
+    payload = request.get_json(silent=True) or {}
+    row = create_exhibition_expense(
+        exhibition_id=payload.get('exhibition_id'),
+        label=payload.get('label'),
+        amount=payload.get('amount') or 0,
+        expense_date=payload.get('expense_date') or None,
+        notes=payload.get('notes') or '',
+        payment_method=payload.get('payment_method') or 'Cash',
+    )
+    if not row:
+        return jsonify({'ok': False, 'error': 'Exhibition and expense label are required.'}), 400
+    return jsonify({'ok': True, 'expense': exhibition_serialize_row(row)})
+
+
 @app.route('/product-costs')
 def product_costs_page():
+    return redirect(url_for('shopify_product_costs_page'))
+
+
+@app.route('/shopify-product-costs')
+def shopify_product_costs_page():
     return render_template(
         'product_costs.html',
-        sources=COST_SOURCE_LABELS,
-        default_source=COST_SOURCE_DARAZ,
+        page_title='Shopify Product Cost',
+        page_subtitle='Beanbag cost calculator for Shopify products',
+        default_source=COST_SOURCE_SHOPIFY,
+        beans_price=get_shopify_beans_price(),
     )
+
+
+@app.route('/daraz-product-costs')
+def daraz_product_costs_page():
+    return render_template(
+        'product_costs.html',
+        page_title='Daraz Product Cost',
+        page_subtitle='Daraz product price and cost tracking',
+        default_source=COST_SOURCE_DARAZ,
+        beans_price=get_shopify_beans_price(),
+    )
+
+
+@app.route('/daraz-product-costs/sync-review')
+def daraz_product_sync_review_page():
+    return render_template('daraz_sync_review.html')
 
 
 @app.route('/daraz-profits')
@@ -3189,6 +5569,114 @@ def costing_catalog_api():
             'label': COST_SOURCE_LABELS[source],
             'rows': rows,
             'saved_count': len(saved),
+            'beans_price': get_shopify_beans_price(),
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/daraz-sync/review')
+def daraz_sync_review_api():
+    try:
+        return jsonify({'ok': True, **build_daraz_sync_plan()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/daraz-sync/save-matched-prices', methods=['POST'])
+def daraz_sync_save_matched_prices_api():
+    try:
+        rows = with_saved_costs(COST_SOURCE_DARAZ, build_daraz_cost_catalog())
+        results = []
+        for row in rows:
+            matched_price = money_float(row.get('matched_shopify_price'))
+            if matched_price <= 0:
+                continue
+            item = {
+                'variant_key': row.get('variant_key'),
+                'name': row.get('primary_name'),
+                'price': matched_price,
+                'ok': False,
+            }
+            try:
+                save_daraz_matched_price(row, matched_price)
+                item['ok'] = True
+            except Exception as e:
+                item['error'] = str(e)
+            results.append(item)
+        return jsonify({
+            'ok': True,
+            'saved': sum(1 for item in results if item.get('ok')),
+            'failed': sum(1 for item in results if not item.get('ok')),
+            'results': results,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/daraz-sync/apply', methods=['POST'])
+def daraz_sync_apply_api():
+    payload = request.get_json(silent=True) or {}
+    selected = set(str(item) for item in (payload.get('selected_ids') or []))
+    settings = payload.get('settings') or {}
+    if not selected:
+        return jsonify({'ok': False, 'error': 'Select at least one sync item.'}), 400
+
+    try:
+        shopify_groups = group_cost_rows(with_saved_costs(COST_SOURCE_SHOPIFY, build_shopify_cost_catalog()), COST_SOURCE_SHOPIFY)
+        daraz_rows = with_saved_costs(COST_SOURCE_DARAZ, build_daraz_cost_catalog())
+        daraz_groups = group_cost_rows(daraz_rows, COST_SOURCE_DARAZ)
+        daraz_rows_by_variant = {row.get('variant_key'): row for row in daraz_rows}
+        shopify_rows_by_variant = {
+            row.get('variant_key'): row
+            for group in shopify_groups.values()
+            for row in group.get('rows') or []
+        }
+        plan = build_daraz_sync_plan()
+        results = []
+
+        for action in plan.get('price_updates') or []:
+            if action.get('id') not in selected:
+                continue
+            row = daraz_rows_by_variant.get(action.get('daraz_variant_key'))
+            item = {'id': action.get('id'), 'type': 'price', 'name': action.get('daraz_name'), 'ok': False}
+            try:
+                save_daraz_matched_price(row, action.get('shopify_price'))
+                item['ok'] = True
+            except Exception as e:
+                item['error'] = str(e)
+            results.append(item)
+
+        for action in plan.get('missing_products') or []:
+            if action.get('id') not in selected:
+                continue
+            group = shopify_groups.get(action.get('shopify_group_key'))
+            item = {'id': action.get('id'), 'type': 'create_product', 'name': action.get('name'), 'ok': False}
+            try:
+                item['response'] = create_daraz_product_from_shopify(group, settings)
+                item['ok'] = True
+            except Exception as e:
+                item['error'] = str(e)
+            results.append(item)
+
+        for action in plan.get('missing_variants') or []:
+            if action.get('id') not in selected:
+                continue
+            row = shopify_rows_by_variant.get(action.get('shopify_variant_key'))
+            target_group = next((group for group in daraz_groups.values() if group.get('item_id') == action.get('target_daraz_item_id')), None)
+            item = {'id': action.get('id'), 'type': 'add_variant', 'name': action.get('name'), 'ok': False}
+            try:
+                item['response'] = add_daraz_variant_from_shopify(row, target_group, settings)
+                item['ok'] = True
+            except Exception as e:
+                item['error'] = str(e)
+            results.append(item)
+
+        return jsonify({
+            'ok': True,
+            'applied': sum(1 for item in results if item.get('ok')),
+            'failed': sum(1 for item in results if not item.get('ok')),
+            'results': results,
         })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
@@ -3204,6 +5692,18 @@ def costing_save_api():
     sku = str(payload.get('sku') or '').strip()
     source_product_id = str(payload.get('source_product_id') or '').strip()
     source_variant_id = str(payload.get('source_variant_id') or '').strip()
+    product_price = money_float(payload.get('product_price'))
+    calc_fields = {
+        'beans_kg': money_float(payload.get('beans_kg')),
+        'fabric_cost': money_float(payload.get('fabric_cost')),
+        'yard_qty': money_float(payload.get('yard_qty')),
+        'fusium_cost': money_float(payload.get('fusium_cost')),
+        'making_cost': money_float(payload.get('making_cost')),
+        'overhead_cost': money_float(payload.get('overhead_cost')),
+        'delivery_cost': money_float(payload.get('delivery_cost')),
+        'return_cost': money_float(payload.get('return_cost')),
+        'ads_cost': money_float(payload.get('ads_cost')),
+    }
 
     if source not in COST_SOURCE_LABELS:
         return jsonify({'ok': False, 'error': 'Unknown source.'}), 400
@@ -3212,19 +5712,37 @@ def costing_save_api():
     if not primary_name:
         return jsonify({'ok': False, 'error': 'Primary name is required.'}), 400
 
-    product_cost = money_decimal(payload.get('product_cost'))
-    success = upsert_product_cost(
-        source=source,
-        variant_key=variant_key,
-        primary_name=primary_name,
-        secondary_name=secondary_name,
-        sku=sku,
-        product_cost=str(product_cost),
-        source_product_id=source_product_id,
-        source_variant_id=source_variant_id,
-    )
-    if not success:
-        return jsonify({'ok': False, 'error': 'Could not save product cost.'}), 500
+    product_cost = calculate_shopify_net_cost(calc_fields, get_shopify_beans_price()) if source == COST_SOURCE_SHOPIFY else money_float(payload.get('product_cost'))
+    try:
+        if source == COST_SOURCE_SHOPIFY and source_variant_id:
+            update_shopify_variant_price(source_variant_id, product_price)
+        if source == COST_SOURCE_DARAZ:
+            update_daraz_sku_price(source_product_id, source_variant_id, sku, product_price)
+
+        success = upsert_product_cost(
+            source=source,
+            variant_key=variant_key,
+            primary_name=primary_name,
+            secondary_name=secondary_name,
+            sku=sku,
+            product_price=str(product_price),
+            beans_kg=str(calc_fields['beans_kg']),
+            fabric_cost=str(calc_fields['fabric_cost']),
+            yard_qty=str(calc_fields['yard_qty']),
+            fusium_cost=str(calc_fields['fusium_cost']),
+            making_cost=str(calc_fields['making_cost']),
+            overhead_cost=str(calc_fields['overhead_cost']),
+            delivery_cost=str(calc_fields['delivery_cost']),
+            return_cost=str(calc_fields['return_cost']),
+            ads_cost=str(calc_fields['ads_cost']),
+            product_cost=str(product_cost),
+            source_product_id=source_product_id,
+            source_variant_id=source_variant_id,
+        )
+        if not success:
+            return jsonify({'ok': False, 'error': 'Could not save product cost.'}), 500
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
     return jsonify({
         'ok': True,
@@ -3234,11 +5752,22 @@ def costing_save_api():
             'primary_name': primary_name,
             'secondary_name': secondary_name,
             'sku': sku,
+            'product_price': product_price,
+            **calc_fields,
             'product_cost': float(product_cost),
             'source_product_id': source_product_id,
             'source_variant_id': source_variant_id,
         }
     })
+
+
+@app.route('/api/costing/beans-price', methods=['POST'])
+def costing_beans_price_api():
+    payload = request.get_json(silent=True) or {}
+    beans_price = money_float(payload.get('beans_price') or DEFAULT_SHOPIFY_BEANS_PRICE)
+    if not save_shopify_beans_price(beans_price):
+        return jsonify({'ok': False, 'error': 'Could not save beans price.'}), 500
+    return jsonify({'ok': True, 'beans_price': beans_price})
 
 
 @app.route('/api/daraz/profits')
@@ -3675,6 +6204,7 @@ def load_initial_data():
 # Initialize DB at module level (fast — just creates table if not exists)
 with app.app_context():
     init_db()
+    ensure_default_attendance_admin()
 
 # Start background scheduler at module level so Gunicorn picks it up
 scheduler = BackgroundScheduler(daemon=True)

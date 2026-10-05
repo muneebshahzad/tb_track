@@ -3,21 +3,50 @@
 
 {% block content %}
 <style>
-  .source-pill { padding: 6px 12px; border-radius: 999px; border: 1px solid #d7def0; background: #fff; color: #6b7280; font-size: 12px; font-weight: 600; cursor: pointer; }
-  .source-pill.active { background: #4e73df; border-color: #4e73df; color: #fff; }
   .cost-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .cost-table th { padding: 10px 12px; text-align: left; font-size: 10px; font-weight: 700; color: #858796; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; background: #f8f9fc; }
   .cost-table td { padding: 10px 12px; border-bottom: 1px solid #e3e6f0; vertical-align: middle; }
   .cost-table tr:hover td { background: #fbfcff; }
-  .cost-input { width: 100%; border: 1px solid #dbe1f0; border-radius: 8px; padding: 8px 10px; font-size: 12px; font-family: 'DM Sans', sans-serif; outline: none; }
+  .cost-input { width: 92px; border: 1px solid #dbe1f0; border-radius: 8px; padding: 8px 10px; font-size: 12px; font-family: 'DM Sans', sans-serif; outline: none; }
   .cost-input:focus { border-color: #4e73df; box-shadow: 0 0 0 3px rgba(78,115,223,0.08); }
-  .mini-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .calc-value { font-size: 12px; font-weight: 700; color: #3a3b45; white-space: nowrap; }
+  .calc-muted { font-size: 11px; color: #858796; white-space: nowrap; }
+  .beans-panel { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .beans-input { width: 120px; }
+  .bulk-panel { padding:14px 16px;margin-bottom:16px; }
+  .bulk-grid { display:grid;grid-template-columns:repeat(10, minmax(96px, 1fr));gap:10px;align-items:end; }
+  .bulk-field label { display:block;font-size:10px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;white-space:nowrap; }
+  .bulk-field .cost-input { width:100%;box-sizing:border-box; }
+  .bulk-product-select { min-width:280px;max-width:420px;min-height:96px;border:1px solid #dbe1f0;border-radius:8px;padding:8px 10px;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;background:#fff;color:#3a3b45; }
+  .bulk-product-select:focus { border-color:#4e73df;box-shadow:0 0 0 3px rgba(78,115,223,0.08); }
+  .bulk-actions { display:flex;gap:8px;flex-wrap:wrap; }
+  .table-actions { margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
+  .filter-pill { padding:6px 12px;border-radius:999px;border:1px solid #d7def0;background:#fff;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif; }
+  .filter-pill.active { background:#4e73df;border-color:#4e73df;color:#fff; }
+  .suggest-btn { min-width:60px;padding:6px 10px;font-size:11px; }
+  .match-card { min-width:180px;display:flex;flex-direction:column;gap:5px; }
+  .match-title { font-size:12px;font-weight:700;color:#3a3b45;line-height:1.3; }
+  .price-stack { min-width:120px;display:flex;flex-direction:column;gap:4px; }
+  .price-note { font-size:10px;color:#858796;white-space:nowrap; }
+  .sort-header { border:0;background:transparent;padding:0;color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:4px;text-align:left; }
+  .sort-header:hover { color:#4e73df; }
+  .sort-icon { font-size:10px;color:#b7bfd6;min-width:10px; }
+  .sort-header.active .sort-icon { color:#4e73df; }
+  .product-group-row td { background:#f7f9fe;border-top:1px solid #e3e6f0;border-bottom:1px solid #dfe5f5;padding:9px 12px; }
+  .product-group-title { display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800;color:#2f3442; }
+  .product-group-count { border-radius:999px;background:#edf2ff;color:#4e73df;font-size:10px;font-weight:800;padding:2px 8px; }
+  .variant-product-cell { position:relative;padding-left:18px; }
+  .variant-product-cell::before { content:'';position:absolute;left:3px;top:-11px;bottom:-11px;width:2px;background:#dfe5f5; }
+  .variant-product-cell::after { content:'';position:absolute;left:0;top:21px;width:8px;height:8px;border-radius:50%;background:#8ea2d8;border:2px solid #fff;box-shadow:0 0 0 1px #dfe5f5; }
+  .variant-name { font-size:13px;font-weight:700;color:#3a3b45;line-height:1.35; }
+  .mini-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
   .mini-kpi { background: #fff; border-radius: 12px; border: 1px solid #e3e6f0; padding: 14px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
   .row-image { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; background: #eef2ff; border: 1px solid #e3e6f0; }
   .empty-state { padding: 42px 16px; text-align: center; color: #858796; font-size: 13px; }
   .save-btn { min-width: 84px; justify-content: center; }
   @media (max-width: 960px) {
     .mini-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .bulk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
 </style>
 
@@ -25,50 +54,112 @@
 
 <div style="display:flex;flex-direction:column;height:calc(100% - 3px);overflow:hidden;">
   <div class="topbar">
-    <span class="topbar-title">Product Costs</span>
-    <span style="font-size:12px;color:#858796;" class="hide-mob">— Manual variant costs for Daraz, Lahore, and Leopards</span>
+    <span class="topbar-title">{{ page_title or 'Product Costs' }}</span>
+    <span style="font-size:12px;color:#858796;" class="hide-mob">- {{ page_subtitle or 'Product price and cost tracking' }}</span>
     <div style="flex:1"></div>
     <div class="search-box">
       <span style="color:#858796;font-size:13px;">🔍</span>
-      <input id="catalogSearch" placeholder="Search names or SKU…" style="width:200px;" oninput="renderCatalog()"/>
+      <input id="catalogSearch" placeholder="Search products..." style="width:200px;" oninput="renderCatalog()"/>
     </div>
   </div>
 
   <div style="flex:1;overflow:auto;padding:16px;">
-    <div class="section-card" style="padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Source</span>
-      {% for key, label in sources.items() %}
-        <button class="source-pill {% if key == default_source %}active{% endif %}" data-source="{{ key }}" onclick="switchSource('{{ key }}', this)">{{ label }}</button>
-      {% endfor %}
-      <div style="margin-left:auto;font-size:12px;color:#858796;" id="catalogUpdatedAt">Ready</div>
+    <div style="font-size:12px;color:#858796;text-align:right;margin-bottom:10px;" id="catalogUpdatedAt">Ready</div>
+    {% if default_source == 'shopify' %}
+    <div class="section-card" style="padding:14px 16px;margin-bottom:16px;">
+      <div class="beans-panel">
+        <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Beans Price / KG</span>
+        <input class="cost-input beans-input" id="beansPriceInput" type="number" min="0" step="0.01" value="{{ beans_price|round(2) }}" oninput="renderCatalog()"/>
+        <button class="btn btn-primary save-btn" id="saveBeansPriceBtn" onclick="saveBeansPrice()">Save Beans Price</button>
+        <span class="calc-muted">Beans value = kg used x beans price. Delivery cost is manually added per product and defaults to 0.</span>
+      </div>
     </div>
+    {% endif %}
 
     <div class="mini-kpi-grid">
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Variants</div><div id="kpiVariants" style="font-size:22px;font-weight:700;color:#3a3b45;margin-top:6px;">0</div></div>
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Costs Set</div><div id="kpiCostsSet" style="font-size:22px;font-weight:700;color:#4e73df;margin-top:6px;">0</div></div>
       <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Missing Costs</div><div id="kpiMissing" style="font-size:22px;font-weight:700;color:#e74a3b;margin-top:6px;">0</div></div>
-      <div class="mini-kpi"><div style="font-size:10px;color:#858796;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">Current Source</div><div id="kpiSource" style="font-size:18px;font-weight:700;color:#20c997;margin-top:8px;">{{ sources[default_source] }}</div></div>
+    </div>
+
+    <div class="section-card bulk-panel">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Bulk Variant Pricing</span>
+        <span class="calc-muted">Select products, then fill only the fields you want to copy to their variants.</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">Products</span>
+        <select class="bulk-product-select" id="bulkProductSelect" multiple>
+        </select>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <span class="calc-muted" id="bulkProductCount">No products selected</span>
+          <div class="bulk-actions">
+            <button class="btn btn-secondary save-btn" onclick="selectVisibleProducts()">Select Visible</button>
+            <button class="btn btn-secondary save-btn" onclick="clearProductSelection()">Clear Products</button>
+          </div>
+        </div>
+      </div>
+      <div class="bulk-grid">
+        <div class="bulk-field"><label for="bulk_beans_kg">Beans KG</label><input class="cost-input" id="bulk_beans_kg" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_fabric_cost">Fabric Cost</label><input class="cost-input" id="bulk_fabric_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_yard_qty">Yard</label><input class="cost-input" id="bulk_yard_qty" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_fusium_cost">Fusium</label><input class="cost-input" id="bulk_fusium_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_making_cost">Making</label><input class="cost-input" id="bulk_making_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_overhead_cost">Overhead</label><input class="cost-input" id="bulk_overhead_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_delivery_cost">Del Cost</label><input class="cost-input" id="bulk_delivery_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_return_cost">Return Cost</label><input class="cost-input" id="bulk_return_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_ads_cost">Ads Cost</label><input class="cost-input" id="bulk_ads_cost" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+        <div class="bulk-field"><label for="bulk_product_price">Selling Price</label><input class="cost-input" id="bulk_product_price" type="number" min="0" step="0.01" placeholder="Skip"/></div>
+      </div>
+      <div class="bulk-actions" style="margin-top:12px;">
+        <button class="btn btn-primary save-btn" id="bulkApplyBtn" onclick="applyBulkValues()">Apply to Variants</button>
+        <button class="btn btn-secondary save-btn" id="bulkSaveBtn" onclick="saveSelectedProductRows()">Save Variants</button>
+        <button class="btn btn-secondary save-btn" onclick="clearBulkValues()">Clear</button>
+        {% if default_source == 'daraz' %}
+        <button class="btn btn-secondary save-btn" onclick="applyMatchedShopifyPrices()">Apply Shopify Prices</button>
+        <button class="btn btn-primary save-btn" id="bulkSaveMatchedBtn" onclick="bulkSaveMatchedShopifyPrices()">Save All Matches</button>
+        <a class="btn btn-secondary save-btn" href="/daraz-product-costs/sync-review">Review Missing</a>
+        {% endif %}
+      </div>
     </div>
 
     <div class="section-card">
       <div class="section-header">
-        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Variant Cost Table</span>
+        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Product Cost Calculator</span>
         <span class="section-count" id="catalogCount">0</span>
+        <div class="table-actions">
+          <button class="filter-pill" id="missingOnlyBtn" onclick="toggleMissingOnly()">Missing Costs</button>
+        </div>
       </div>
       <div style="overflow-x:auto;">
         <table class="cost-table">
           <thead>
             <tr>
               <th style="width:72px;">Image</th>
-              <th>Primary Name</th>
-              <th>Alt Name</th>
-              <th>SKU / Key</th>
-              <th style="width:140px;">Product Cost</th>
+              <th style="min-width:220px;">Product</th>
+              {% if default_source == 'daraz' %}
+              <th>Daraz Price</th>
+              <th>Shopify Match</th>
+              {% endif %}
+              <th>Beans KG</th>
+              <th>Beans Value</th>
+              <th>Fabric Cost</th>
+              <th>Yard</th>
+              <th>Fusium</th>
+              <th>Making</th>
+              <th>Overhead</th>
+              <th>Del Cost</th>
+              <th>Return Cost</th>
+              <th>Ads Cost</th>
+              <th><button class="sort-header" id="sort-net_cost" onclick="toggleSort('net_cost')">Net Cost <span class="sort-icon">↕</span></button></th>
+              <th><button class="sort-header" id="sort-suggested_price" onclick="toggleSort('suggested_price')">Suggested Price <span class="sort-icon">↕</span></button></th>
+              <th><button class="sort-header" id="sort-product_price" onclick="toggleSort('product_price')">Selling Price <span class="sort-icon">↕</span></button></th>
+              <th><button class="sort-header" id="sort-net_profit" onclick="toggleSort('net_profit')">Net Profit <span class="sort-icon">↕</span></button></th>
               <th style="width:110px;">Save</th>
             </tr>
           </thead>
           <tbody id="catalogBody">
-            <tr><td colspan="6" class="empty-state">Loading variant catalog…</td></tr>
+            <tr><td colspan="{% if default_source == 'daraz' %}19{% else %}17{% endif %}" class="empty-state">Loading variant catalog...</td></tr>
           </tbody>
         </table>
       </div>
@@ -79,9 +170,24 @@
 
 {% block extra_js %}
 <script>
-const sourceLabels = {{ sources|tojson }};
 let currentSource = {{ default_source|tojson }};
 let catalogRows = [];
+let beansPrice = Number({{ beans_price|tojson }});
+let missingOnly = false;
+let sortState = { key: '', direction: 'asc' };
+const tableColspan = currentSource === 'daraz' ? 19 : 17;
+const bulkFields = [
+  'beans_kg',
+  'fabric_cost',
+  'yard_qty',
+  'fusium_cost',
+  'making_cost',
+  'overhead_cost',
+  'delivery_cost',
+  'return_cost',
+  'ads_cost',
+  'product_price',
+];
 
 function formatMoneyInput(value) {
   const num = Number(value || 0);
@@ -89,115 +195,635 @@ function formatMoneyInput(value) {
   return num % 1 === 0 ? String(num) : num.toFixed(2);
 }
 
+function num(value) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoney(value) {
+  return Math.round(num(value)).toLocaleString('en-PK');
+}
+
+function rowDomKey(row) {
+  return encodeURIComponent(row.variant_key || '').replaceAll('%', '_');
+}
+
+function suggestedPrice(netCost) {
+  const cost = num(netCost);
+  return cost > 0 ? Math.ceil(cost / 0.56) : 0;
+}
+
+function hasMissingCosts(row) {
+  return [
+    'beans_kg',
+    'fabric_cost',
+    'yard_qty',
+    'fusium_cost',
+    'making_cost',
+    'overhead_cost',
+    'return_cost',
+    'ads_cost',
+  ].some(field => num(row[field]) <= 0);
+}
+
+function rowCalc(row, index = null) {
+  const getField = (field) => {
+    if (index === null) return num(row[field]);
+    const el = document.getElementById(`${field}-${index}`);
+    return el ? num(el.value) : num(row[field]);
+  };
+  const sellingPrice = getField('product_price');
+  const beansKg = getField('beans_kg');
+  const fabricCost = getField('fabric_cost');
+  const yardQty = getField('yard_qty');
+  const fusiumCost = getField('fusium_cost');
+  const makingCost = getField('making_cost');
+  const overheadCost = getField('overhead_cost');
+  const deliveryCost = getField('delivery_cost');
+  const returnCost = getField('return_cost');
+  const adsCost = getField('ads_cost');
+  const beansValue = beansKg * beansPrice;
+  const materialTotal = beansValue + (fabricCost * yardQty) + fusiumCost + makingCost + overheadCost + deliveryCost;
+  const netCost = materialTotal + returnCost + adsCost;
+  const netProfit = (sellingPrice * 0.96) - netCost;
+  return { beansValue, netCost, netProfit };
+}
+
+function rowCalcByKey(row) {
+  const key = rowDomKey(row);
+  const getField = (field) => {
+    const el = document.getElementById(`${field}-${key}`);
+    return el ? num(el.value) : num(row[field]);
+  };
+  const sellingPrice = getField('product_price');
+  const beansKg = getField('beans_kg');
+  const fabricCost = getField('fabric_cost');
+  const yardQty = getField('yard_qty');
+  const fusiumCost = getField('fusium_cost');
+  const makingCost = getField('making_cost');
+  const overheadCost = getField('overhead_cost');
+  const deliveryCost = getField('delivery_cost');
+  const returnCost = getField('return_cost');
+  const adsCost = getField('ads_cost');
+  const beansValue = beansKg * beansPrice;
+  const materialTotal = beansValue + (fabricCost * yardQty) + fusiumCost + makingCost + overheadCost + deliveryCost;
+  const netCost = materialTotal + returnCost + adsCost;
+  const netProfit = (sellingPrice * 0.96) - netCost;
+  return { beansValue, netCost, netProfit };
+}
+
+function findRowByEncodedKey(encodedKey) {
+  return catalogRows.find(entry => encodeURIComponent(entry.variant_key) === encodedKey);
+}
+
 async function loadCatalog(source = currentSource) {
   currentSource = source;
-  document.getElementById('catalogBody').innerHTML = '<tr><td colspan="6" class="empty-state">Loading variant catalog…</td></tr>';
+  document.getElementById('catalogBody').innerHTML = `<tr><td colspan="${tableColspan}" class="empty-state">Loading variant catalog...</td></tr>`;
   try {
     const res = await fetch(`/api/costing/catalog?source=${encodeURIComponent(source)}`);
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not load product cost catalog.');
     catalogRows = data.rows || [];
-    document.getElementById('kpiSource').textContent = data.label || sourceLabels[source] || source;
+    beansPrice = Number(data.beans_price || beansPrice || 0);
+    const beansInput = document.getElementById('beansPriceInput');
+    if (beansInput) beansInput.value = formatMoneyInput(beansPrice);
     document.getElementById('catalogUpdatedAt').textContent = `Loaded ${new Date().toLocaleTimeString('en-PK')}`;
+    updateBulkProductOptions();
     updateCatalogKPIs();
     renderCatalog();
   } catch (error) {
-    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="6" class="empty-state">${error.message}</td></tr>`;
+    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="${tableColspan}" class="empty-state">${error.message}</td></tr>`;
     showToast(error.message || 'Could not load cost catalog');
   }
 }
 
+function getProductBaseName(name) {
+  const value = String(name || 'Untitled product').trim();
+  if (value.includes(' - ')) return value.split(' - ')[0].trim();
+  return value;
+}
+
+function productGroupKey(row) {
+  return String(row.source_product_id || getProductBaseName(row.primary_name) || row.variant_key || '').trim();
+}
+
+function productGroupLabel(row) {
+  const name = String(row.primary_name || 'Untitled product').trim();
+  const secondary = String(row.secondary_name || '').trim();
+  if (secondary && name.toLowerCase().endsWith(` - ${secondary.toLowerCase()}`)) {
+    return name.slice(0, -(secondary.length + 3)).trim();
+  }
+  return getProductBaseName(row.primary_name);
+}
+
+function variantLabel(row) {
+  const groupLabel = productGroupLabel(row);
+  const name = String(row.primary_name || 'Untitled variant').trim();
+  const secondary = String(row.secondary_name || '').trim();
+  if (secondary) return secondary;
+  if (groupLabel && name.toLowerCase().startsWith(`${groupLabel.toLowerCase()} - `)) {
+    return name.slice(groupLabel.length + 3).trim();
+  }
+  return name || groupLabel || 'Variant';
+}
+
+function groupedVisibleRows(rows) {
+  const groups = [];
+  const byKey = new Map();
+  rows.forEach((row, index) => {
+    const key = productGroupKey(row) || `row-${index}`;
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, label: productGroupLabel(row), image: row.image || '', rows: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    if (!group.image && row.image) group.image = row.image;
+    group.rows.push({ row, index });
+  });
+  return groups;
+}
+
+function selectedProductRows() {
+  const selectedKeys = Array.from(document.getElementById('bulkProductSelect')?.selectedOptions || [])
+    .map(option => option.value)
+    .filter(Boolean);
+  if (!selectedKeys.length) return [];
+  const selected = new Set(selectedKeys);
+  return catalogRows.filter(row => selected.has(productGroupKey(row)));
+}
+
+function updateBulkProductCount() {
+  const countEl = document.getElementById('bulkProductCount');
+  if (!countEl) return;
+  const rows = selectedProductRows();
+  const productCount = new Set(rows.map(productGroupKey)).size;
+  countEl.textContent = rows.length ? `${productCount} product${productCount === 1 ? '' : 's'}, ${rows.length} variants selected` : 'No products selected';
+}
+
+function updateBulkProductOptions() {
+  const select = document.getElementById('bulkProductSelect');
+  if (!select) return;
+  const previousValues = new Set(Array.from(select.selectedOptions || []).map(option => option.value));
+  const groups = new Map();
+  catalogRows.forEach(row => {
+    const key = productGroupKey(row);
+    if (!key) return;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      groups.set(key, { label: productGroupLabel(row), count: 1 });
+    }
+  });
+  const options = Array.from(groups.entries())
+    .sort((a, b) => a[1].label.localeCompare(b[1].label))
+    .map(([key, group]) => `<option value="${escapeAttr(key)}">${escapeHtml(group.label)} (${group.count})</option>`)
+    .join('');
+  select.innerHTML = options;
+  Array.from(select.options).forEach(option => {
+    option.selected = previousValues.has(option.value);
+  });
+  select.onchange = updateBulkProductCount;
+  updateBulkProductCount();
+}
+
+function selectVisibleProducts() {
+  const select = document.getElementById('bulkProductSelect');
+  if (!select) return;
+  const visibleKeys = new Set(getFilteredRows().map(productGroupKey));
+  Array.from(select.options).forEach(option => {
+    option.selected = visibleKeys.has(option.value);
+  });
+  updateBulkProductCount();
+}
+
+function clearProductSelection() {
+  const select = document.getElementById('bulkProductSelect');
+  if (!select) return;
+  Array.from(select.options).forEach(option => {
+    option.selected = false;
+  });
+  updateBulkProductCount();
+}
+
+function sortValue(row, key) {
+  const calc = rowCalc(row);
+  if (key === 'net_cost') return calc.netCost;
+  if (key === 'suggested_price') return suggestedPrice(calc.netCost);
+  if (key === 'product_price') return num(row.product_price);
+  if (key === 'net_profit') return calc.netProfit;
+  return 0;
+}
+
+function updateSortHeaders() {
+  document.querySelectorAll('.sort-header').forEach(button => {
+    const key = button.id.replace('sort-', '');
+    const icon = button.querySelector('.sort-icon');
+    const active = key === sortState.key;
+    button.classList.toggle('active', active);
+    if (icon) icon.textContent = active ? (sortState.direction === 'asc' ? '↑' : '↓') : '↕';
+  });
+}
+
+function toggleSort(key) {
+  if (sortState.key === key) {
+    sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortState = { key, direction: 'desc' };
+  }
+  renderCatalog();
+}
+
+function getFilteredRows() {
+  const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
+  const rows = catalogRows.filter(row => {
+    if (missingOnly && !hasMissingCosts(row)) return false;
+    if (!q) return true;
+    return [
+      row.primary_name,
+      row.sku,
+      row.seller_sku,
+      row.shop_sku,
+      row.matched_shopify_name,
+      row.matched_shopify_sku,
+    ].some(value => String(value || '').toLowerCase().includes(q));
+  });
+  if (!sortState.key) return rows;
+  const direction = sortState.direction === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => (sortValue(a, sortState.key) - sortValue(b, sortState.key)) * direction);
+}
+
+function toggleMissingOnly() {
+  missingOnly = !missingOnly;
+  document.getElementById('missingOnlyBtn')?.classList.toggle('active', missingOnly);
+  renderCatalog();
+}
+
 function updateCatalogKPIs(filteredRows = null) {
   const rows = filteredRows || catalogRows;
-  const costsSet = rows.filter(row => Number(row.product_cost || 0) > 0).length;
+  const costsSet = rows.filter(row => Number(row.product_cost || rowCalc(row).netCost || 0) > 0).length;
   document.getElementById('kpiVariants').textContent = rows.length;
   document.getElementById('kpiCostsSet').textContent = costsSet;
   document.getElementById('kpiMissing').textContent = Math.max(rows.length - costsSet, 0);
   document.getElementById('catalogCount').textContent = rows.length;
 }
 
-function switchSource(source, btn) {
-  document.querySelectorAll('.source-pill').forEach(el => el.classList.remove('active'));
-  btn.classList.add('active');
-  loadCatalog(source);
-}
-
 function renderCatalog() {
-  const q = (document.getElementById('catalogSearch').value || '').trim().toLowerCase();
-  const rows = catalogRows.filter(row => {
-    if (!q) return true;
-    return [
-      row.primary_name,
-      row.secondary_name,
-      row.sku,
-      row.variant_key,
-    ].some(value => String(value || '').toLowerCase().includes(q));
-  });
+  beansPrice = num(document.getElementById('beansPriceInput')?.value || beansPrice);
+  const rows = getFilteredRows();
 
   updateCatalogKPIs(rows);
+  updateSortHeaders();
 
   if (!rows.length) {
-    document.getElementById('catalogBody').innerHTML = '<tr><td colspan="6" class="empty-state">No variants match your search.</td></tr>';
+    document.getElementById('catalogBody').innerHTML = `<tr><td colspan="${tableColspan}" class="empty-state">No variants match your search.</td></tr>`;
     return;
   }
 
-  document.getElementById('catalogBody').innerHTML = rows.map((row, index) => `
+  const groups = groupedVisibleRows(rows);
+  document.getElementById('catalogBody').innerHTML = groups.map(group => {
+    const groupHeader = `
+      <tr class="product-group-row">
+        <td colspan="${tableColspan}">
+          <div class="product-group-title">
+            <span>${escapeHtml(group.label || 'Untitled product')}</span>
+            <span class="product-group-count">${group.rows.length} variant${group.rows.length === 1 ? '' : 's'}</span>
+          </div>
+        </td>
+      </tr>
+    `;
+    const variantRows = group.rows.map(({ row, index }) => {
+    const key = rowDomKey(row);
+    const encodedKey = encodeURIComponent(row.variant_key);
+    const encodedKeyJson = JSON.stringify(encodedKey);
+    const calc = rowCalc(row);
+    const suggested = suggestedPrice(calc.netCost);
+    return `
     <tr>
       <td><img class="row-image" src="${row.image || 'https://static.thenounproject.com/png/1578832-200.png'}" alt=""></td>
       <td>
-        <div style="font-size:13px;font-weight:700;color:#3a3b45;line-height:1.35;">${escapeHtml(row.primary_name || 'Untitled variant')}</div>
+        <div class="variant-product-cell">
+          <div class="variant-name">${escapeHtml(variantLabel(row))}</div>
+          ${row.primary_name && variantLabel(row) === row.primary_name ? '' : `<div class="calc-muted">${escapeHtml(row.primary_name || '')}</div>`}
+        ${row.sku ? `<div class="calc-muted">${escapeHtml(row.sku)}</div>` : ''}
+        </div>
+      </td>
+      ${currentSource === 'daraz' ? darazPriceCell(row) : ''}
+      ${currentSource === 'daraz' ? shopifyMatchCell(row, encodedKey) : ''}
+      <td>
+        <input class="cost-input" id="beans_kg-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.beans_kg)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
+      </td>
+      <td><span class="calc-value" id="beansValue-${key}">${formatMoney(calc.beansValue)}</span></td>
+      <td>
+        <input class="cost-input" id="fabric_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.fabric_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <input class="cost-input" id="secondary-${index}" value="${escapeAttr(row.secondary_name || '')}" placeholder="Optional alternate name"/>
+        <input class="cost-input" id="yard_qty-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.yard_qty)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <div style="font-size:12px;font-weight:600;color:#3a3b45;">${escapeHtml(row.sku || 'No SKU')}</div>
-        <div style="font-size:10px;color:#858796;font-family:'DM Mono',monospace;margin-top:3px;">${escapeHtml(row.variant_key)}</div>
+        <input class="cost-input" id="fusium_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.fusium_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <input class="cost-input" id="cost-${index}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.product_cost)}" placeholder="0"/>
+        <input class="cost-input" id="making_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.making_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
       </td>
       <td>
-        <button class="btn btn-primary save-btn" id="save-${index}" onclick='saveRow(${JSON.stringify(index)}, ${JSON.stringify(encodeURIComponent(row.variant_key))})'>Save</button>
+        <input class="cost-input" id="overhead_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.overhead_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
+      </td>
+      <td>
+        <input class="cost-input" id="delivery_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.delivery_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
+      </td>
+      <td>
+        <input class="cost-input" id="return_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.return_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
+      </td>
+      <td>
+        <input class="cost-input" id="ads_cost-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.ads_cost)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
+      </td>
+      <td><span class="calc-value" id="netCost-${key}">${formatMoney(calc.netCost)}</span></td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="calc-value" id="suggestedPrice-${key}">${suggested ? formatMoney(suggested) : '—'}</span>
+          <button class="btn btn-secondary suggest-btn" onclick="useSuggestedPriceByKey(${encodedKeyJson})">Use</button>
+        </div>
+      </td>
+      <td>
+        <input class="cost-input" id="product_price-${key}" type="number" min="0" step="0.01" value="${formatMoneyInput(row.product_price)}" oninput="updateRowCalcByKey(${encodedKeyJson})"/>
+      </td>
+      <td><span class="calc-value" id="netProfit-${key}" style="color:${calc.netProfit >= 0 ? '#1cc88a' : '#e74a3b'}">${formatMoney(calc.netProfit)}</span></td>
+      <td>
+        <button class="btn btn-primary save-btn" id="save-${key}" onclick="saveRow(${encodedKeyJson})">Save</button>
       </td>
     </tr>
-  `).join('');
+  `;
+    }).join('');
+    return groupHeader + variantRows;
+  }).join('');
 }
 
-async function saveRow(index, encodedKey) {
-  const row = catalogRows.find(entry => encodeURIComponent(entry.variant_key) === encodedKey);
+function darazPriceCell(row) {
+  const basePrice = num(row.daraz_base_price);
+  const sellerPrice = num(row.daraz_seller_price || row.product_price);
+  const specialPrice = num(row.daraz_special_price);
+  const livePrice = num(row.daraz_live_price);
+  const sourceLabel = row.daraz_price_source === 'seller_special' ? 'Seller special' : 'Seller base';
+  return `
+    <td>
+      <div class="price-stack">
+        <span class="calc-value">${formatMoney(sellerPrice || basePrice)}</span>
+        <span class="price-note">${escapeHtml(sourceLabel)}${basePrice ? `: ${formatMoney(basePrice)}` : ''}</span>
+        ${specialPrice ? `<span class="price-note">Special field: ${formatMoney(specialPrice)}</span>` : ''}
+        ${livePrice ? `<span class="price-note">Live campaign: ${formatMoney(livePrice)}</span>` : '<span class="price-note">Live campaign: not exposed</span>'}
+      </div>
+    </td>
+  `;
+}
+
+function shopifyMatchCell(row, encodedKey) {
+  const matchedPrice = num(row.matched_shopify_price);
+  if (!matchedPrice) {
+    return '<td><span class="calc-muted">No Shopify match</span></td>';
+  }
+  const encodedKeyJson = JSON.stringify(encodedKey);
+  return `
+    <td>
+      <div class="match-card">
+        <span class="match-title">${escapeHtml(row.matched_shopify_name || 'Matched Shopify product')}</span>
+        <span class="calc-muted">${escapeHtml(row.match_reason || 'Match')}${row.matched_shopify_sku ? ` - ${escapeHtml(row.matched_shopify_sku)}` : ''}</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span class="calc-value">${formatMoney(matchedPrice)}</span>
+          <button class="btn btn-secondary suggest-btn" onclick="useMatchedShopifyPriceByKey(${encodedKeyJson})">Use</button>
+        </div>
+      </div>
+    </td>
+  `;
+}
+
+function updateRowCalcByKey(encodedKey) {
+  const row = findRowByEncodedKey(encodedKey);
   if (!row) return;
-  const btn = document.getElementById(`save-${index}`);
-  const secondaryName = document.getElementById(`secondary-${index}`).value.trim();
-  const productCost = document.getElementById(`cost-${index}`).value;
+  const key = rowDomKey(row);
+  beansPrice = num(document.getElementById('beansPriceInput')?.value || beansPrice);
+  const calc = rowCalcByKey(row);
+  const suggested = suggestedPrice(calc.netCost);
+  document.getElementById(`beansValue-${key}`).textContent = formatMoney(calc.beansValue);
+  document.getElementById(`netCost-${key}`).textContent = formatMoney(calc.netCost);
+  document.getElementById(`suggestedPrice-${key}`).textContent = suggested ? formatMoney(suggested) : '—';
+  const profitEl = document.getElementById(`netProfit-${key}`);
+  profitEl.textContent = formatMoney(calc.netProfit);
+  profitEl.style.color = calc.netProfit >= 0 ? '#1cc88a' : '#e74a3b';
+}
+
+function useSuggestedPriceByKey(encodedKey) {
+  const row = findRowByEncodedKey(encodedKey);
+  if (!row) return;
+  const key = rowDomKey(row);
+  const calc = rowCalcByKey(row);
+  const price = suggestedPrice(calc.netCost);
+  const priceInput = document.getElementById(`product_price-${key}`);
+  if (!price || !priceInput) return;
+  priceInput.value = formatMoneyInput(price);
+  row.product_price = price;
+  updateRowCalcByKey(encodedKey);
+}
+
+function useMatchedShopifyPriceByKey(encodedKey) {
+  const row = findRowByEncodedKey(encodedKey);
+  if (!row) return;
+  const key = rowDomKey(row);
+  const matchedPrice = num(row.matched_shopify_price);
+  const priceInput = document.getElementById(`product_price-${key}`);
+  if (!matchedPrice || !priceInput) return;
+  priceInput.value = formatMoneyInput(matchedPrice);
+  row.product_price = matchedPrice;
+  updateRowCalcByKey(encodedKey);
+}
+
+function readRowInputsIntoModel(row) {
+  const key = rowDomKey(row);
+  bulkFields.forEach((field) => {
+    const el = document.getElementById(`${field}-${key}`);
+    if (el) row[field] = Number(el.value || 0);
+  });
+  const secondaryName = row.secondary_name || '';
+  row.secondary_name = secondaryName;
+  return row;
+}
+
+async function saveCostRow(row) {
+  const calc = rowCalc(row);
+  const res = await fetch('/api/costing/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source: currentSource,
+      variant_key: row.variant_key,
+      primary_name: row.primary_name,
+      secondary_name: row.secondary_name || '',
+      sku: row.sku,
+      product_price: row.product_price,
+      product_cost: calc.netCost,
+      beans_kg: row.beans_kg,
+      fabric_cost: row.fabric_cost,
+      yard_qty: row.yard_qty,
+      fusium_cost: row.fusium_cost,
+      making_cost: row.making_cost,
+      overhead_cost: row.overhead_cost,
+      delivery_cost: row.delivery_cost,
+      return_cost: row.return_cost,
+      ads_cost: row.ads_cost,
+      source_product_id: row.source_product_id,
+      source_variant_id: row.source_variant_id,
+      inventory_item_id: row.inventory_item_id,
+    }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Could not save product price/cost.');
+  row.product_cost = Number((data.saved && data.saved.product_cost) || calc.netCost || 0);
+  return data;
+}
+
+async function saveRow(encodedKey) {
+  const row = findRowByEncodedKey(encodedKey);
+  if (!row) return;
+  const btn = document.getElementById(`save-${rowDomKey(row)}`);
   btn.disabled = true;
   btn.textContent = 'Saving…';
   try {
-    const res = await fetch('/api/costing/save', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source: currentSource,
-        variant_key: row.variant_key,
-        primary_name: row.primary_name,
-        secondary_name: secondaryName,
-        sku: row.sku,
-        product_cost,
-        source_product_id: row.source_product_id,
-        source_variant_id: row.source_variant_id,
-      }),
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Could not save product cost.');
-    row.secondary_name = secondaryName;
-    row.product_cost = Number(productCost || 0);
+    readRowInputsIntoModel(row);
+    await saveCostRow(row);
     updateCatalogKPIs();
-    showToast('Cost saved');
+    showToast('Price and cost saved');
   } catch (error) {
-    showToast(error.message || 'Could not save product cost');
+    showToast(error.message || 'Could not save product price/cost');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Save';
+  }
+}
+
+function getBulkValues() {
+  const values = {};
+  bulkFields.forEach((field) => {
+    const el = document.getElementById(`bulk_${field}`);
+    if (el && String(el.value).trim() !== '') values[field] = num(el.value);
+  });
+  return values;
+}
+
+function applyBulkValues() {
+  const rows = selectedProductRows();
+  if (!rows.length) {
+    showToast('Select at least one product first');
+    return;
+  }
+  const values = getBulkValues();
+  if (!Object.keys(values).length) {
+    showToast('Fill at least one bulk field');
+    return;
+  }
+  rows.forEach(row => {
+    Object.entries(values).forEach(([field, value]) => {
+      row[field] = value;
+    });
+    row.product_cost = rowCalc(row).netCost;
+  });
+  renderCatalog();
+  updateBulkProductCount();
+  showToast(`Applied to ${rows.length} variants`);
+}
+
+function applyMatchedShopifyPrices() {
+  const rows = selectedProductRows();
+  if (!rows.length) {
+    showToast('Select at least one product first');
+    return;
+  }
+  let applied = 0;
+  rows.forEach(row => {
+    const matchedPrice = num(row.matched_shopify_price);
+    if (matchedPrice > 0) {
+      row.product_price = matchedPrice;
+      row.product_cost = rowCalc(row).netCost;
+      applied += 1;
+    }
+  });
+  renderCatalog();
+  updateBulkProductCount();
+  showToast(applied ? `Applied Shopify price to ${applied} variants` : 'No matched Shopify prices found');
+}
+
+async function bulkSaveMatchedShopifyPrices() {
+  const btn = document.getElementById('bulkSaveMatchedBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/daraz-sync/save-matched-prices', { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not save matched prices');
+    showToast(`Saved ${data.saved || 0} matched prices${data.failed ? `, ${data.failed} failed` : ''}`);
+    await loadCatalog(currentSource);
+  } catch (error) {
+    showToast(error.message || 'Could not save matched prices');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save All Matches';
+  }
+}
+
+async function saveSelectedProductRows() {
+  const rows = selectedProductRows();
+  const btn = document.getElementById('bulkSaveBtn');
+  if (!rows.length) {
+    showToast('Select at least one product first');
+    return;
+  }
+  btn.disabled = true;
+  try {
+    for (let i = 0; i < rows.length; i += 1) {
+      btn.textContent = `Saving ${i + 1}/${rows.length}`;
+      readRowInputsIntoModel(rows[i]);
+      await saveCostRow(rows[i]);
+    }
+    updateCatalogKPIs();
+    renderCatalog();
+    showToast(`Saved ${rows.length} variants`);
+  } catch (error) {
+    showToast(error.message || 'Could not save product variants');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Variants';
+  }
+}
+
+function clearBulkValues() {
+  bulkFields.forEach((field) => {
+    const el = document.getElementById(`bulk_${field}`);
+    if (el) el.value = '';
+  });
+}
+
+async function saveBeansPrice() {
+  const btn = document.getElementById('saveBeansPriceBtn');
+  beansPrice = num(document.getElementById('beansPriceInput').value);
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/costing/beans-price', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ beans_price: beansPrice }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not save beans price.');
+    beansPrice = Number(data.beans_price || beansPrice);
+    renderCatalog();
+    showToast('Beans price saved');
+  } catch (error) {
+    showToast(error.message || 'Could not save beans price');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save Beans Price';
   }
 }
 

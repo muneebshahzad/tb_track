@@ -1,0 +1,202 @@
+{% extends 'base.html' %}
+{% block title %}TB Track - Daraz Sync Review{% endblock %}
+
+{% block content %}
+<style>
+  .review-wrap { height:100%;overflow:auto;padding:18px;background:#f8f9fc; }
+  .review-head { display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap; }
+  .review-title { font-size:20px;font-weight:800;color:#2f3442; }
+  .review-card { background:#fff;border:1px solid #e3e6f0;border-radius:10px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,0.04);overflow:hidden; }
+  .review-card-head { display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #e3e6f0;background:#fbfcff; }
+  .review-card-title { font-size:14px;font-weight:800;color:#3a3b45; }
+  .review-count { border-radius:999px;background:#edf2ff;color:#4e73df;font-size:11px;font-weight:800;padding:2px 8px; }
+  .review-body { padding:12px 14px; }
+  .settings-grid { display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px;align-items:end; }
+  .setting-field label { display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#858796;font-weight:800;margin-bottom:5px; }
+  .setting-field input { width:100%;box-sizing:border-box;border:1px solid #dbe1f0;border-radius:8px;padding:8px 10px;font-family:'DM Sans',sans-serif; }
+  .review-table { width:100%;border-collapse:collapse;font-size:12px; }
+  .review-table th { text-align:left;padding:9px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#858796;border-bottom:1px solid #e3e6f0;background:#f8f9fc; }
+  .review-table td { padding:10px 8px;border-bottom:1px solid #eef1f7;vertical-align:top; }
+  .review-name { font-weight:800;color:#343846;line-height:1.35; }
+  .review-muted { font-size:11px;color:#858796;line-height:1.4; }
+  .review-img { width:44px;height:44px;border-radius:8px;object-fit:cover;border:1px solid #e3e6f0;background:#eef2ff; }
+  .empty-note { padding:22px;text-align:center;color:#858796;font-size:13px; }
+  .results-box { white-space:pre-wrap;font-size:12px;color:#3a3b45;background:#f8f9fc;border:1px solid #e3e6f0;border-radius:8px;padding:10px;max-height:260px;overflow:auto; }
+  @media (max-width: 980px) { .settings-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+</style>
+
+<div class="review-wrap">
+  <div class="review-head">
+    <div class="review-title">Daraz Sync Review</div>
+    <a class="btn btn-secondary" href="/daraz-product-costs">Back</a>
+    <button class="btn btn-primary" id="applyBtn" onclick="applySelected()">Apply Selected</button>
+    <button class="btn btn-secondary" onclick="loadPlan()">Refresh</button>
+    <span class="review-muted" id="statusText">Loading...</span>
+  </div>
+
+  <div class="review-card">
+    <div class="review-card-head">
+      <span class="review-card-title">Upload Defaults</span>
+      <span class="review-muted">Required before creating new Daraz products or variants.</span>
+    </div>
+    <div class="review-body">
+      <div class="settings-grid">
+        <div class="setting-field"><label>Category ID</label><input id="category_id" value="10000740"></div>
+        <div class="setting-field"><label>Quantity</label><input id="quantity" value="1000"></div>
+        <div class="setting-field"><label>Weight</label><input id="package_weight" value="2"></div>
+        <div class="setting-field"><label>Length</label><input id="package_length" value="20"></div>
+        <div class="setting-field"><label>Width</label><input id="package_width" value="20"></div>
+        <div class="setting-field"><label>Height</label><input id="package_height" value="20"></div>
+        <div class="setting-field"><label>Brand</label><input id="brand" value="No Brand"></div>
+        <div class="setting-field"><label>Package Content</label><input id="package_content" value="Bean bag"></div>
+        <div class="setting-field" style="grid-column:span 2;"><label>Description Override</label><input id="description" placeholder="Optional"></div>
+        <div class="setting-field" style="grid-column:span 2;"><label>Short Description</label><input id="short_description" placeholder="Optional"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="planRoot"></div>
+
+  <div class="review-card" id="resultsCard" style="display:none;">
+    <div class="review-card-head"><span class="review-card-title">Results</span></div>
+    <div class="review-body"><div class="results-box" id="resultsBox"></div></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let syncPlan = null;
+
+function money(value) {
+  return Math.round(Number(value || 0)).toLocaleString('en-PK');
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function checkedInput(id) {
+  return `<input type="checkbox" class="sync-check" value="${escapeHtml(id)}" checked>`;
+}
+
+function section(title, count, rowsHtml) {
+  return `
+    <div class="review-card">
+      <div class="review-card-head">
+        <span class="review-card-title">${escapeHtml(title)}</span>
+        <span class="review-count">${count}</span>
+      </div>
+      <div class="review-body">${count ? rowsHtml : '<div class="empty-note">Nothing to review here.</div>'}</div>
+    </div>
+  `;
+}
+
+function renderPriceUpdates(items) {
+  const rows = items.map(item => `
+    <tr>
+      <td>${checkedInput(item.id)}</td>
+      <td><div class="review-name">${escapeHtml(item.daraz_name)}</div><div class="review-muted">${escapeHtml(item.seller_sku)}</div></td>
+      <td>${money(item.daraz_price)}</td>
+      <td><div class="review-name">${escapeHtml(item.shopify_name)}</div><div class="review-muted">${escapeHtml(item.shopify_sku)}</div></td>
+      <td>${money(item.shopify_price)}</td>
+    </tr>
+  `).join('');
+  return section('Matched Shopify Prices To Save', items.length, `
+    <table class="review-table"><thead><tr><th></th><th>Daraz</th><th>Current</th><th>Shopify Match</th><th>New Price</th></tr></thead><tbody>${rows}</tbody></table>
+  `);
+}
+
+function renderMissingProducts(items) {
+  const rows = items.map(item => `
+    <tr>
+      <td>${checkedInput(item.id)}</td>
+      <td>${item.images && item.images[0] ? `<img class="review-img" src="${escapeHtml(item.images[0])}">` : ''}</td>
+      <td><div class="review-name">${escapeHtml(item.name)}</div><div class="review-muted">${item.variant_count} variants will be created as a new Daraz product.</div></td>
+      <td>${(item.rows || []).map(row => `<div class="review-muted">${escapeHtml(row.variant || row.name)} - ${escapeHtml(row.sku)} - ${money(row.price)}</div>`).join('')}</td>
+    </tr>
+  `).join('');
+  return section('Missing Products To Create', items.length, `
+    <table class="review-table"><thead><tr><th></th><th>Image</th><th>Product</th><th>Variants</th></tr></thead><tbody>${rows}</tbody></table>
+  `);
+}
+
+function renderMissingVariants(items) {
+  const rows = items.map(item => `
+    <tr>
+      <td>${checkedInput(item.id)}</td>
+      <td>${item.image ? `<img class="review-img" src="${escapeHtml(item.image)}">` : ''}</td>
+      <td><div class="review-name">${escapeHtml(item.name)}</div><div class="review-muted">${escapeHtml(item.sku)} - ${money(item.price)}</div></td>
+      <td><div class="review-name">${escapeHtml(item.target_daraz_name)}</div><div class="review-muted">Item ${escapeHtml(item.target_daraz_item_id)}</div></td>
+    </tr>
+  `).join('');
+  return section('Missing Variants To Add', items.length, `
+    <table class="review-table"><thead><tr><th></th><th>Image</th><th>Shopify Variant</th><th>Existing Daraz Product</th></tr></thead><tbody>${rows}</tbody></table>
+  `);
+}
+
+async function loadPlan() {
+  document.getElementById('statusText').textContent = 'Loading...';
+  const res = await fetch('/api/daraz-sync/review');
+  const data = await res.json();
+  if (!data.ok) {
+    document.getElementById('statusText').textContent = data.error || 'Could not load sync plan';
+    return;
+  }
+  syncPlan = data;
+  document.getElementById('planRoot').innerHTML =
+    renderPriceUpdates(data.price_updates || []) +
+    renderMissingProducts(data.missing_products || []) +
+    renderMissingVariants(data.missing_variants || []);
+  document.getElementById('statusText').textContent =
+    `${data.summary.price_updates} prices, ${data.summary.missing_products} products, ${data.summary.missing_variants} variants`;
+}
+
+function settingsPayload() {
+  return {
+    category_id: document.getElementById('category_id').value,
+    quantity: document.getElementById('quantity').value,
+    package_weight: document.getElementById('package_weight').value,
+    package_length: document.getElementById('package_length').value,
+    package_width: document.getElementById('package_width').value,
+    package_height: document.getElementById('package_height').value,
+    brand: document.getElementById('brand').value,
+    package_content: document.getElementById('package_content').value,
+    description: document.getElementById('description').value,
+    short_description: document.getElementById('short_description').value,
+  };
+}
+
+async function applySelected() {
+  const selected_ids = Array.from(document.querySelectorAll('.sync-check:checked')).map(input => input.value);
+  if (!selected_ids.length) {
+    document.getElementById('statusText').textContent = 'Select at least one item.';
+    return;
+  }
+  const btn = document.getElementById('applyBtn');
+  btn.disabled = true;
+  btn.textContent = 'Applying...';
+  try {
+    const res = await fetch('/api/daraz-sync/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selected_ids, settings: settingsPayload() }),
+    });
+    const data = await res.json();
+    document.getElementById('resultsCard').style.display = 'block';
+    document.getElementById('resultsBox').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('statusText').textContent = data.ok ? `Applied ${data.applied}, failed ${data.failed}` : (data.error || 'Apply failed');
+    if (data.ok) await loadPlan();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Apply Selected';
+  }
+}
+
+loadPlan();
+</script>
+{% endblock %}

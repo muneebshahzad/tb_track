@@ -160,8 +160,12 @@ async function fetchChunk(url, timeoutMs = 25000) {
   const tid  = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const r = await fetch(url, { signal: ctrl.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json();
-  } catch(_) { return null; }
+  } catch(error) {
+    console.warn('Finance fetch failed:', url, error);
+    return null;
+  }
   finally { clearTimeout(tid); }
 }
 
@@ -169,6 +173,63 @@ function makeChunks(arr, size) {
   const out = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+function uniqueValues(arr) {
+  return Array.from(new Set((arr || []).map(value => String(value || '').trim()).filter(Boolean)));
+}
+
+function dateInputString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function makeDateChunks(from, to, daysPerChunk = 30) {
+  const chunks = [];
+  let cursor = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime()) || cursor > end) {
+    return [{ from, to }];
+  }
+  while (cursor <= end) {
+    const chunkStart = new Date(cursor);
+    const chunkEnd = new Date(cursor);
+    chunkEnd.setDate(chunkEnd.getDate() + daysPerChunk - 1);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
+    chunks.push({ from: dateInputString(chunkStart), to: dateInputString(chunkEnd) });
+    cursor = new Date(chunkEnd);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return chunks;
+}
+
+async function fetchCNChunks(endpoint, paramName, cnNums, options = {}) {
+  const chunkSize = options.chunkSize || 20;
+  const timeoutMs = options.timeoutMs || 45000;
+  const dataKey = options.dataKey;
+  const chunks = makeChunks(uniqueValues(cnNums), chunkSize);
+  const merged = [];
+  const failedChunks = [];
+
+  for (let i = 0; i < chunks.length; i += 1) {
+    const chunk = chunks[i];
+    const url = `${endpoint}?${paramName}=${encodeURIComponent(chunk.join(','))}`;
+    const data = await fetchChunk(url, timeoutMs);
+    if (!data || Number(data.status || 0) !== 1) {
+      failedChunks.push(chunk);
+      continue;
+    }
+    const rows = dataKey ? data[dataKey] : data;
+    if (Array.isArray(rows)) merged.push(...rows);
+  }
+
+  if (failedChunks.length) {
+    console.warn(`${endpoint} failed for ${failedChunks.length} chunk(s)`, failedChunks);
+    showToast(`${failedChunks.length} Leopards chunk(s) failed. Refresh or use a smaller date range if totals look incomplete.`);
+  }
+  return merged;
 }
 
 function renderInvoices() {
@@ -196,25 +257,39 @@ async function fetchPayments() {
   const btn  = document.getElementById('fetchBtn');
   btn.textContent = '⏳ Loading…'; btn.disabled = true;
   try {
-    const r    = await fetchChunk(`/api/leopards/last-status?from_date=${from}&to_date=${to}`, 35000);
-    if (!r) { showToast('Last-status API timed out'); return; }
-    const packets = r.packet_list || [];
+    const dateChunks = makeDateChunks(from, to, 30);
+    const packetMap = new Map();
+    const failedDateChunks = [];
+    for (const chunk of dateChunks) {
+      const r = await fetchChunk(`/api/leopards/last-status?from_date=${chunk.from}&to_date=${chunk.to}`, 45000);
+      if (!r || Number(r.status || 0) !== 1) {
+        failedDateChunks.push(chunk);
+        continue;
+      }
+      (r.packet_list || []).forEach(packet => {
+        const cn = String(packet.tracking_number || '').trim();
+        if (cn) packetMap.set(cn, packet);
+      });
+    }
+    if (failedDateChunks.length) {
+      console.warn('Last-status failed date chunks:', failedDateChunks);
+      showToast(`${failedDateChunks.length} date chunk(s) failed. Try fetching again if records look incomplete.`);
+    }
+    const packets = Array.from(packetMap.values());
     if (!packets.length) { showToast('No packets found for this date range.'); return; }
 
     // CN field from last-status API is "tracking_number"
-    const cnNums = packets.map(p => p.tracking_number).filter(Boolean);
+    const cnNums = uniqueValues(packets.map(p => p.tracking_number));
 
-    // Enrich product names via track-packets in parallel chunks of 20
+    // Enrich product names via track-packets in small server-safe chunks.
     const trackMap = {};
-    const trackResults = await Promise.all(
-      makeChunks(cnNums, 20).map(chunk =>
-        fetchChunk('/api/leopards/track-packets?track_numbers=' + chunk.join(','))
-      )
-    );
-    trackResults.forEach(d => {
-      if (d && d.status === 1 && Array.isArray(d.packet_list)) {
-        d.packet_list.forEach(p => { trackMap[String(p.track_number)] = p.special_instructions || '—'; });
-      }
+    const trackPackets = await fetchCNChunks('/api/leopards/track-packets', 'track_numbers', cnNums, {
+      chunkSize: 15,
+      timeoutMs: 45000,
+      dataKey: 'packet_list',
+    });
+    trackPackets.forEach(p => {
+      trackMap[String(p.track_number)] = p.special_instructions || '—';
     });
     packets.forEach(p => {
       const cn = String(p.tracking_number || '');
@@ -243,23 +318,30 @@ async function loadFromOrders() {
 }
 
 async function enrichAndRender(packetList, cnNums, from, to) {
-  // Server handles batching internally — send all CNs in one request each
-  const allCNs = cnNums.join(',');
+  const uniqueCNs = uniqueValues(cnNums);
   const [payResult, chargesResult, invoicesResult] = await Promise.all([
-    fetchChunk('/api/leopards/payment-details?cn_numbers=' + allCNs, 120000),
-    fetchChunk('/api/leopards/shipping-charges?cn_numbers=' + allCNs, 120000),
+    fetchCNChunks('/api/leopards/payment-details', 'cn_numbers', uniqueCNs, {
+      chunkSize: 20,
+      timeoutMs: 45000,
+      dataKey: 'payment_list',
+    }),
+    fetchCNChunks('/api/leopards/shipping-charges', 'cn_numbers', uniqueCNs, {
+      chunkSize: 20,
+      timeoutMs: 45000,
+      dataKey: 'data',
+    }),
     fetchChunk(`/api/leopards/invoices?start_date=${from}&end_date=${to}`, 60000)
   ]);
 
   const payMap = {};
-  if (payResult && payResult.payment_list) {
-    payResult.payment_list.forEach(p => { payMap[String(p.booked_packet_cn)] = p; });
+  if (Array.isArray(payResult)) {
+    payResult.forEach(p => { payMap[String(p.booked_packet_cn)] = p; });
   }
 
   // getShippingCharges returns flat objects: {cn_number, billed_charges, invoice_cheque_date, ...}
   const chargesMap = {};
-  if (chargesResult && chargesResult.data) {
-    chargesResult.data.forEach(c => { chargesMap[String(c.cn_number)] = c; });
+  if (Array.isArray(chargesResult)) {
+    chargesResult.forEach(c => { chargesMap[String(c.cn_number)] = c; });
   }
 
   pendingInvoices = ((invoicesResult && invoicesResult.data) || [])

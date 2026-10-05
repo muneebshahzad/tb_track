@@ -1,4 +1,6 @@
 import os
+import json
+from datetime import date, datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -35,10 +37,200 @@ def _ensure_product_costs_table(cur):
             sku TEXT NOT NULL DEFAULT '',
             primary_name TEXT NOT NULL,
             secondary_name TEXT NOT NULL DEFAULT '',
+            product_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            beans_kg NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            fabric_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            yard_qty NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            fusium_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            making_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            overhead_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            delivery_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            return_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            ads_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
             product_cost NUMERIC(12, 2) NOT NULL DEFAULT 0,
             updated_at TIMESTAMPTZ DEFAULT NOW(),
             PRIMARY KEY (source, variant_key)
         )
+    """)
+    for column in (
+        "product_price",
+        "beans_kg",
+        "fabric_cost",
+        "yard_qty",
+        "fusium_cost",
+        "making_cost",
+        "overhead_cost",
+        "delivery_cost",
+        "return_cost",
+        "ads_cost",
+    ):
+        cur.execute(f"""
+            ALTER TABLE product_costs
+            ADD COLUMN IF NOT EXISTS {column} NUMERIC(12, 2) NOT NULL DEFAULT 0
+        """)
+
+
+def _ensure_exhibition_tables(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS exhibitions (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            location TEXT NOT NULL DEFAULT '',
+            starts_on DATE,
+            ends_on DATE,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS exhibition_orders (
+            id BIGSERIAL PRIMARY KEY,
+            exhibition_id BIGINT REFERENCES exhibitions(id) ON DELETE SET NULL,
+            order_number TEXT NOT NULL UNIQUE,
+            customer_name TEXT NOT NULL DEFAULT '',
+            customer_phone TEXT NOT NULL DEFAULT '',
+            product_name TEXT NOT NULL,
+            shopify_product_id TEXT NOT NULL DEFAULT '',
+            shopify_variant_id TEXT NOT NULL DEFAULT '',
+            sku TEXT NOT NULL DEFAULT '',
+            items JSONB NOT NULL DEFAULT '[]'::jsonb,
+            quantity INTEGER NOT NULL DEFAULT 1,
+            unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            discount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            delivery_method TEXT NOT NULL DEFAULT 'Pickup from Expo',
+            delivery_address TEXT NOT NULL DEFAULT '',
+            delivery_charges NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            payment_method TEXT NOT NULL DEFAULT 'Cash',
+            payment_split TEXT NOT NULL DEFAULT '100% Paid',
+            custom_paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            paid_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            product_cost_override NUMERIC(12, 2),
+            shopify_push_status TEXT NOT NULL DEFAULT 'unpushed',
+            shopify_order_id TEXT NOT NULL DEFAULT '',
+            shopify_order_name TEXT NOT NULL DEFAULT '',
+            shopify_draft_order_id TEXT NOT NULL DEFAULT '',
+            shopify_push_error TEXT NOT NULL DEFAULT '',
+            shopify_pushed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        ALTER TABLE exhibition_orders
+        ADD COLUMN IF NOT EXISTS delivery_address TEXT NOT NULL DEFAULT ''
+    """)
+    cur.execute("""
+        ALTER TABLE exhibition_orders
+        ADD COLUMN IF NOT EXISTS items JSONB NOT NULL DEFAULT '[]'::jsonb
+    """)
+    cur.execute("""
+        ALTER TABLE exhibition_orders
+        ADD COLUMN IF NOT EXISTS product_cost_override NUMERIC(12, 2)
+    """)
+    for column, definition in (
+        ("shopify_push_status", "TEXT NOT NULL DEFAULT 'unpushed'"),
+        ("shopify_order_id", "TEXT NOT NULL DEFAULT ''"),
+        ("shopify_order_name", "TEXT NOT NULL DEFAULT ''"),
+        ("shopify_draft_order_id", "TEXT NOT NULL DEFAULT ''"),
+        ("shopify_push_error", "TEXT NOT NULL DEFAULT ''"),
+        ("shopify_pushed_at", "TIMESTAMPTZ"),
+    ):
+        cur.execute(f"""
+            ALTER TABLE exhibition_orders
+            ADD COLUMN IF NOT EXISTS {column} {definition}
+        """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_exhibition_orders_exhibition
+        ON exhibition_orders (exhibition_id, created_at DESC)
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS exhibition_expenses (
+            id BIGSERIAL PRIMARY KEY,
+            exhibition_id BIGINT REFERENCES exhibitions(id) ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+            payment_method TEXT NOT NULL DEFAULT 'Cash',
+            expense_date DATE DEFAULT CURRENT_DATE,
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        ALTER TABLE exhibition_expenses
+        ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'Cash'
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_exhibition_expenses_exhibition
+        ON exhibition_expenses (exhibition_id, expense_date DESC, id DESC)
+    """)
+
+
+def _ensure_attendance_tables(cur):
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance_employees (
+            id BIGSERIAL PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'employee',
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance_locations (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            plus_code TEXT NOT NULL DEFAULT '',
+            latitude NUMERIC(10, 7) NOT NULL,
+            longitude NUMERIC(10, 7) NOT NULL,
+            radius_meters INTEGER NOT NULL DEFAULT 150,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        INSERT INTO attendance_locations (name, plus_code, latitude, longitude, radius_meters)
+        VALUES ('Tick Bags Office', '97XX+3W Lahore, Pakistan', 31.3976875, 74.2998125, 150)
+        ON CONFLICT (name) DO NOTHING
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS attendance_records (
+            id BIGSERIAL PRIMARY KEY,
+            employee_id BIGINT NOT NULL REFERENCES attendance_employees(id) ON DELETE CASCADE,
+            location_id BIGINT REFERENCES attendance_locations(id) ON DELETE SET NULL,
+            work_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            check_in_at TIMESTAMPTZ,
+            check_in_latitude NUMERIC(10, 7),
+            check_in_longitude NUMERIC(10, 7),
+            check_in_accuracy_meters NUMERIC(10, 2),
+            check_in_distance_meters NUMERIC(10, 2),
+            check_in_photo TEXT NOT NULL DEFAULT '',
+            check_in_user_agent TEXT NOT NULL DEFAULT '',
+            check_in_ip TEXT NOT NULL DEFAULT '',
+            check_out_at TIMESTAMPTZ,
+            check_out_latitude NUMERIC(10, 7),
+            check_out_longitude NUMERIC(10, 7),
+            check_out_accuracy_meters NUMERIC(10, 2),
+            check_out_distance_meters NUMERIC(10, 2),
+            check_out_photo TEXT NOT NULL DEFAULT '',
+            check_out_user_agent TEXT NOT NULL DEFAULT '',
+            check_out_ip TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'open',
+            notes TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_employee_work_date
+        ON attendance_records (employee_id, work_date)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_attendance_records_date
+        ON attendance_records (work_date DESC, employee_id)
     """)
 
 
@@ -369,6 +561,8 @@ def init_db():
                 """)
                 _ensure_app_settings_table(cur)
                 _ensure_product_costs_table(cur)
+                _ensure_exhibition_tables(cur)
+                _ensure_attendance_tables(cur)
                 _ensure_tickbot_auto_reply_jobs_table(cur)
                 _ensure_whatsapp_tables(cur)
             conn.commit()
@@ -468,7 +662,9 @@ def list_product_costs(source: str = "") -> list[dict]:
                 if source:
                     cur.execute("""
                         SELECT source, variant_key, source_product_id, source_variant_id, sku,
-                               primary_name, secondary_name, product_cost, updated_at
+                               primary_name, secondary_name, product_price, beans_kg,
+                               fabric_cost, yard_qty, fusium_cost, making_cost, overhead_cost,
+                               delivery_cost, return_cost, ads_cost, product_cost, updated_at
                         FROM product_costs
                         WHERE source = %s
                         ORDER BY primary_name ASC, sku ASC, variant_key ASC
@@ -476,7 +672,9 @@ def list_product_costs(source: str = "") -> list[dict]:
                 else:
                     cur.execute("""
                         SELECT source, variant_key, source_product_id, source_variant_id, sku,
-                               primary_name, secondary_name, product_cost, updated_at
+                               primary_name, secondary_name, product_price, beans_kg,
+                               fabric_cost, yard_qty, fusium_cost, making_cost, overhead_cost,
+                               delivery_cost, return_cost, ads_cost, product_cost, updated_at
                         FROM product_costs
                         ORDER BY source ASC, primary_name ASC, sku ASC, variant_key ASC
                     """)
@@ -498,12 +696,727 @@ def get_product_cost_lookup(source: str = "") -> dict:
     return lookup
 
 
+def _date_or_none(value):
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def list_exhibitions() -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    SELECT id, name, location, starts_on, ends_on, notes, created_at
+                    FROM exhibitions
+                    ORDER BY COALESCE(starts_on, created_at::date) DESC, id DESC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+                _set_last_db_error("")
+                return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_exhibitions error: {e}")
+        return []
+
+
+def create_exhibition(name: str, location: str = "", starts_on=None, ends_on=None, notes: str = "") -> dict | None:
+    name = str(name or "").strip()
+    if not name:
+        return None
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    INSERT INTO exhibitions (name, location, starts_on, ends_on, notes)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id, name, location, starts_on, ends_on, notes, created_at
+                """, (name, location or "", _date_or_none(starts_on), _date_or_none(ends_on), notes or ""))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_exhibition error: {e}")
+        return None
+
+
+def list_exhibition_orders(exhibition_id=None, limit: int | None = None) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                params = []
+                where = ""
+                if exhibition_id:
+                    where = "WHERE o.exhibition_id = %s"
+                    params.append(exhibition_id)
+                limit_sql = ""
+                if limit:
+                    limit_sql = "LIMIT %s"
+                    params.append(limit)
+                cur.execute(f"""
+                    SELECT o.*, e.name AS exhibition_name
+                    FROM exhibition_orders o
+                    LEFT JOIN exhibitions e ON e.id = o.exhibition_id
+                    {where}
+                    ORDER BY o.created_at DESC, o.id DESC
+                    {limit_sql}
+                """, tuple(params))
+                rows = [dict(row) for row in cur.fetchall()]
+                _set_last_db_error("")
+                return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_exhibition_orders error: {e}")
+        return []
+
+
+def get_exhibition_order(order_id) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    SELECT o.*, e.name AS exhibition_name, e.location AS exhibition_location
+                    FROM exhibition_orders o
+                    LEFT JOIN exhibitions e ON e.id = o.exhibition_id
+                    WHERE o.id = %s
+                """, (order_id,))
+                row = cur.fetchone()
+                _set_last_db_error("")
+                return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_exhibition_order error: {e}")
+        return None
+
+
+def create_exhibition_order(
+    exhibition_id,
+    order_number: str,
+    customer_name: str,
+    customer_phone: str,
+    product_name: str,
+    shopify_product_id: str = "",
+    shopify_variant_id: str = "",
+    sku: str = "",
+    items=None,
+    quantity=1,
+    unit_price=0,
+    discount=0,
+    delivery_method: str = "Pickup from Expo",
+    delivery_address: str = "",
+    delivery_charges=0,
+    payment_method: str = "Cash",
+    payment_split: str = "100% Paid",
+    custom_paid_amount=0,
+    total_amount=0,
+    paid_amount=0,
+) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    INSERT INTO exhibition_orders (
+                        exhibition_id, order_number, customer_name, customer_phone,
+                        product_name, shopify_product_id, shopify_variant_id, sku,
+                        items, quantity, unit_price, discount, delivery_method, delivery_address, delivery_charges,
+                        payment_method, payment_split, custom_paid_amount, total_amount, paid_amount
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """, (
+                    exhibition_id or None,
+                    order_number,
+                    customer_name or "",
+                    customer_phone or "",
+                    product_name,
+                    shopify_product_id or "",
+                    shopify_variant_id or "",
+                    sku or "",
+                    json.dumps(items or []),
+                    int(quantity or 1),
+                    unit_price,
+                    discount,
+                    delivery_method or "Pickup from Expo",
+                    delivery_address or "",
+                    delivery_charges,
+                    payment_method or "Cash",
+                    payment_split or "100% Paid",
+                    custom_paid_amount,
+                    total_amount,
+                    paid_amount,
+                ))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_exhibition_order error: {e}")
+        return None
+
+
+def update_exhibition_order(
+    order_id,
+    exhibition_id,
+    customer_name: str,
+    customer_phone: str,
+    product_name: str,
+    shopify_product_id: str = "",
+    shopify_variant_id: str = "",
+    sku: str = "",
+    items=None,
+    quantity=1,
+    unit_price=0,
+    discount=0,
+    delivery_method: str = "Pickup from Expo",
+    delivery_address: str = "",
+    delivery_charges=0,
+    payment_method: str = "Cash",
+    payment_split: str = "100% Paid",
+    custom_paid_amount=0,
+    total_amount=0,
+    paid_amount=0,
+) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    UPDATE exhibition_orders
+                    SET exhibition_id = %s,
+                        customer_name = %s,
+                        customer_phone = %s,
+                        product_name = %s,
+                        shopify_product_id = %s,
+                        shopify_variant_id = %s,
+                        sku = %s,
+                        items = %s::jsonb,
+                        quantity = %s,
+                        unit_price = %s,
+                        discount = %s,
+                        delivery_method = %s,
+                        delivery_address = %s,
+                        delivery_charges = %s,
+                        payment_method = %s,
+                        payment_split = %s,
+                        custom_paid_amount = %s,
+                        total_amount = %s,
+                        paid_amount = %s
+                    WHERE id = %s
+                    RETURNING *
+                """, (
+                    exhibition_id or None,
+                    customer_name or "",
+                    customer_phone or "",
+                    product_name,
+                    shopify_product_id or "",
+                    shopify_variant_id or "",
+                    sku or "",
+                    json.dumps(items or []),
+                    int(quantity or 1),
+                    unit_price,
+                    discount,
+                    delivery_method or "Pickup from Expo",
+                    delivery_address or "",
+                    delivery_charges,
+                    payment_method or "Cash",
+                    payment_split or "100% Paid",
+                    custom_paid_amount,
+                    total_amount,
+                    paid_amount,
+                    order_id,
+                ))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_exhibition_order error: {e}")
+        return None
+
+
+def delete_exhibition_order(order_id) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("DELETE FROM exhibition_orders WHERE id = %s", (order_id,))
+                deleted = cur.rowcount > 0
+            conn.commit()
+        _set_last_db_error("")
+        return deleted
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB delete_exhibition_order error: {e}")
+        return False
+
+
+def update_exhibition_order_product_cost(order_id, product_cost_override):
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    UPDATE exhibition_orders
+                    SET product_cost_override = %s
+                    WHERE id = %s
+                    RETURNING *
+                """, (product_cost_override, order_id))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_exhibition_order_product_cost error: {e}")
+        return None
+
+
+def update_exhibition_order_shopify_push(
+    order_id,
+    status: str,
+    shopify_order_id: str = "",
+    shopify_order_name: str = "",
+    shopify_draft_order_id: str = "",
+    error: str = "",
+):
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    UPDATE exhibition_orders
+                    SET shopify_push_status = %s,
+                        shopify_order_id = COALESCE(NULLIF(%s, ''), shopify_order_id),
+                        shopify_order_name = COALESCE(NULLIF(%s, ''), shopify_order_name),
+                        shopify_draft_order_id = COALESCE(NULLIF(%s, ''), shopify_draft_order_id),
+                        shopify_push_error = %s,
+                        shopify_pushed_at = CASE WHEN %s = 'pushed' THEN NOW() ELSE shopify_pushed_at END
+                    WHERE id = %s
+                    RETURNING *
+                """, (
+                    status or "unpushed",
+                    shopify_order_id or "",
+                    shopify_order_name or "",
+                    shopify_draft_order_id or "",
+                    error or "",
+                    status or "unpushed",
+                    order_id,
+                ))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_exhibition_order_shopify_push error: {e}")
+        return None
+
+
+def list_exhibition_expenses(exhibition_id=None) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                params = []
+                where = ""
+                if exhibition_id:
+                    where = "WHERE x.exhibition_id = %s"
+                    params.append(exhibition_id)
+                cur.execute(f"""
+                    SELECT x.*, e.name AS exhibition_name
+                    FROM exhibition_expenses x
+                    LEFT JOIN exhibitions e ON e.id = x.exhibition_id
+                    {where}
+                    ORDER BY x.expense_date DESC, x.id DESC
+                """, tuple(params))
+                rows = [dict(row) for row in cur.fetchall()]
+                _set_last_db_error("")
+                return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_exhibition_expenses error: {e}")
+        return []
+
+
+def create_exhibition_expense(
+    exhibition_id,
+    label: str,
+    amount=0,
+    expense_date=None,
+    notes: str = "",
+    payment_method: str = "Cash",
+) -> dict | None:
+    label = str(label or "").strip()
+    payment_method = "Bank" if payment_method == "Bank" else "Cash"
+    if not exhibition_id or not label:
+        return None
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_exhibition_tables(cur)
+                cur.execute("""
+                    INSERT INTO exhibition_expenses (exhibition_id, label, amount, payment_method, expense_date, notes)
+                    VALUES (%s, %s, %s, %s, COALESCE(%s, CURRENT_DATE), %s)
+                    RETURNING *
+                """, (exhibition_id, label, amount, payment_method, _date_or_none(expense_date), notes or ""))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_exhibition_expense error: {e}")
+        return None
+
+
+def list_attendance_employees(include_inactive: bool = False) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                where = "" if include_inactive else "WHERE active = TRUE"
+                cur.execute(f"""
+                    SELECT id, username, full_name, role, active, created_at, updated_at
+                    FROM attendance_employees
+                    {where}
+                    ORDER BY active DESC, full_name ASC, username ASC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_attendance_employees error: {e}")
+        return []
+
+
+def get_attendance_employee_by_username(username: str) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT id, username, password_hash, full_name, role, active, created_at, updated_at
+                    FROM attendance_employees
+                    WHERE LOWER(username) = LOWER(%s)
+                """, (str(username or "").strip(),))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_attendance_employee_by_username error: {e}")
+        return None
+
+
+def get_attendance_employee(employee_id) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT id, username, full_name, role, active, created_at, updated_at
+                    FROM attendance_employees
+                    WHERE id = %s
+                """, (employee_id,))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_attendance_employee error: {e}")
+        return None
+
+
+def create_attendance_employee(username: str, password_hash: str, full_name: str, role: str = "employee") -> dict | None:
+    username = str(username or "").strip()
+    full_name = str(full_name or "").strip()
+    role = "admin" if role == "admin" else "employee"
+    if not username or not password_hash or not full_name:
+        return None
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    INSERT INTO attendance_employees (username, password_hash, full_name, role)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (username) DO UPDATE
+                        SET password_hash = EXCLUDED.password_hash,
+                            full_name = EXCLUDED.full_name,
+                            role = EXCLUDED.role,
+                            active = TRUE,
+                            updated_at = NOW()
+                    RETURNING id, username, full_name, role, active, created_at, updated_at
+                """, (username, password_hash, full_name, role))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_attendance_employee error: {e}")
+        return None
+
+
+def list_attendance_locations(active_only: bool = True) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                where = "WHERE active = TRUE" if active_only else ""
+                cur.execute(f"""
+                    SELECT id, name, plus_code, latitude, longitude, radius_meters, active, created_at
+                    FROM attendance_locations
+                    {where}
+                    ORDER BY active DESC, name ASC
+                """)
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_attendance_locations error: {e}")
+        return []
+
+
+def get_attendance_record_for_date(employee_id, work_date=None) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT r.*, e.full_name, e.username, e.role, l.name AS location_name, l.plus_code
+                    FROM attendance_records r
+                    JOIN attendance_employees e ON e.id = r.employee_id
+                    LEFT JOIN attendance_locations l ON l.id = r.location_id
+                    WHERE r.employee_id = %s
+                      AND r.work_date = COALESCE(%s, CURRENT_DATE)
+                """, (employee_id, _date_or_none(work_date)))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_attendance_record_for_date error: {e}")
+        return None
+
+
+def get_open_attendance_record_for_employee(employee_id) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT r.*, e.full_name, e.username, e.role, l.name AS location_name, l.plus_code
+                    FROM attendance_records r
+                    JOIN attendance_employees e ON e.id = r.employee_id
+                    LEFT JOIN attendance_locations l ON l.id = r.location_id
+                    WHERE r.employee_id = %s
+                      AND r.check_in_at IS NOT NULL
+                      AND r.check_out_at IS NULL
+                    ORDER BY r.check_in_at DESC, r.id DESC
+                    LIMIT 1
+                """, (employee_id,))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_open_attendance_record_for_employee error: {e}")
+        return None
+
+
+def create_attendance_checkin(
+    employee_id,
+    location_id,
+    latitude,
+    longitude,
+    accuracy_meters,
+    distance_meters,
+    photo: str,
+    user_agent: str,
+    ip_address: str,
+    work_date=None,
+) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    INSERT INTO attendance_records (
+                        employee_id, location_id, work_date, check_in_at,
+                        check_in_latitude, check_in_longitude, check_in_accuracy_meters,
+                        check_in_distance_meters, check_in_photo, check_in_user_agent, check_in_ip
+                    )
+                    VALUES (%s, %s, COALESCE(%s, CURRENT_DATE), NOW(), %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                """, (
+                    employee_id,
+                    location_id,
+                    _date_or_none(work_date),
+                    latitude,
+                    longitude,
+                    accuracy_meters,
+                    distance_meters,
+                    photo or "",
+                    user_agent or "",
+                    ip_address or "",
+                ))
+                row = dict(cur.fetchone())
+            conn.commit()
+        _set_last_db_error("")
+        return row
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB create_attendance_checkin error: {e}")
+        return None
+
+
+def update_attendance_checkout(
+    record_id,
+    latitude,
+    longitude,
+    accuracy_meters,
+    distance_meters,
+    photo: str,
+    user_agent: str,
+    ip_address: str,
+) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    UPDATE attendance_records
+                    SET check_out_at = NOW(),
+                        check_out_latitude = %s,
+                        check_out_longitude = %s,
+                        check_out_accuracy_meters = %s,
+                        check_out_distance_meters = %s,
+                        check_out_photo = %s,
+                        check_out_user_agent = %s,
+                        check_out_ip = %s,
+                        status = 'closed',
+                        updated_at = NOW()
+                    WHERE id = %s
+                      AND check_out_at IS NULL
+                    RETURNING *
+                """, (
+                    latitude,
+                    longitude,
+                    accuracy_meters,
+                    distance_meters,
+                    photo or "",
+                    user_agent or "",
+                    ip_address or "",
+                    record_id,
+                ))
+                row = cur.fetchone()
+            conn.commit()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update_attendance_checkout error: {e}")
+        return None
+
+
+def list_attendance_records(start_date=None, end_date=None, employee_id=None) -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                params = []
+                clauses = []
+                if start_date:
+                    clauses.append("r.work_date >= %s")
+                    params.append(_date_or_none(start_date))
+                if end_date:
+                    clauses.append("r.work_date <= %s")
+                    params.append(_date_or_none(end_date))
+                if employee_id:
+                    clauses.append("r.employee_id = %s")
+                    params.append(employee_id)
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                cur.execute(f"""
+                    SELECT r.id, r.employee_id, r.location_id, r.work_date,
+                           r.check_in_at, r.check_in_latitude, r.check_in_longitude,
+                           r.check_in_accuracy_meters, r.check_in_distance_meters,
+                           r.check_in_photo,
+                           r.check_out_at, r.check_out_latitude, r.check_out_longitude,
+                           r.check_out_accuracy_meters, r.check_out_distance_meters,
+                           r.check_out_photo,
+                           r.status, r.notes, r.created_at, r.updated_at,
+                           e.full_name, e.username, e.role,
+                           l.name AS location_name, l.plus_code
+                    FROM attendance_records r
+                    JOIN attendance_employees e ON e.id = r.employee_id
+                    LEFT JOIN attendance_locations l ON l.id = r.location_id
+                    {where}
+                    ORDER BY r.work_date DESC, r.check_in_at DESC, r.id DESC
+                    LIMIT 5000
+                """, tuple(params))
+                rows = [dict(row) for row in cur.fetchall()]
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB list_attendance_records error: {e}")
+        return []
+
+
+def get_attendance_record(record_id) -> dict | None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_attendance_tables(cur)
+                cur.execute("""
+                    SELECT r.*, e.full_name, e.username, e.role, l.name AS location_name, l.plus_code
+                    FROM attendance_records r
+                    JOIN attendance_employees e ON e.id = r.employee_id
+                    LEFT JOIN attendance_locations l ON l.id = r.location_id
+                    WHERE r.id = %s
+                """, (record_id,))
+                row = cur.fetchone()
+        _set_last_db_error("")
+        return dict(row) if row else None
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB get_attendance_record error: {e}")
+        return None
+
+
 def upsert_product_cost(
     source: str,
     variant_key: str,
     primary_name: str,
     secondary_name: str = "",
     sku: str = "",
+    product_price=0,
+    beans_kg=0,
+    fabric_cost=0,
+    yard_qty=0,
+    fusium_cost=0,
+    making_cost=0,
+    overhead_cost=0,
+    delivery_cost=0,
+    return_cost=0,
+    ads_cost=0,
     product_cost=0,
     source_product_id: str = "",
     source_variant_id: str = "",
@@ -521,15 +1434,35 @@ def upsert_product_cost(
                         sku,
                         primary_name,
                         secondary_name,
+                        product_price,
+                        beans_kg,
+                        fabric_cost,
+                        yard_qty,
+                        fusium_cost,
+                        making_cost,
+                        overhead_cost,
+                        delivery_cost,
+                        return_cost,
+                        ads_cost,
                         product_cost
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (source, variant_key) DO UPDATE
                     SET source_product_id = EXCLUDED.source_product_id,
                         source_variant_id = EXCLUDED.source_variant_id,
                         sku = EXCLUDED.sku,
                         primary_name = EXCLUDED.primary_name,
                         secondary_name = EXCLUDED.secondary_name,
+                        product_price = EXCLUDED.product_price,
+                        beans_kg = EXCLUDED.beans_kg,
+                        fabric_cost = EXCLUDED.fabric_cost,
+                        yard_qty = EXCLUDED.yard_qty,
+                        fusium_cost = EXCLUDED.fusium_cost,
+                        making_cost = EXCLUDED.making_cost,
+                        overhead_cost = EXCLUDED.overhead_cost,
+                        delivery_cost = EXCLUDED.delivery_cost,
+                        return_cost = EXCLUDED.return_cost,
+                        ads_cost = EXCLUDED.ads_cost,
                         product_cost = EXCLUDED.product_cost,
                         updated_at = NOW()
                 """, (
@@ -540,6 +1473,16 @@ def upsert_product_cost(
                     sku or "",
                     primary_name,
                     secondary_name or "",
+                    product_price,
+                    beans_kg,
+                    fabric_cost,
+                    yard_qty,
+                    fusium_cost,
+                    making_cost,
+                    overhead_cost,
+                    delivery_cost,
+                    return_cost,
+                    ads_cost,
                     product_cost,
                 ))
             conn.commit()

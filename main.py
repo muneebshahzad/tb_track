@@ -20,6 +20,7 @@ import aiohttp
 from flask import Flask
 import shopify
 import requests
+from shipkartex import shipkartex
 import json
 from urllib.parse import quote, urlparse
 
@@ -294,7 +295,7 @@ async def fetch_tracking_data_bulk(session, tracking_numbers):
 
         result = {}
         if data.get('status') == 1 and not data.get('error'):
-            for packet in data.get('packet_list', []):
+            for packet in (data.get('packet_list') or []):
                 cn = packet.get('track_number')
                 if cn:
                     result[cn] = packet
@@ -371,11 +372,17 @@ def process_line_item(line_item, fulfillments, tracking_cache, billing):
                 tracking_url = getattr(fulfillment, 'tracking_url', None) or (tracking_urls[0] if tracking_urls else '')
                 packet = tracking_cache.get(tracking_number)
                 parsed = parse_leopards_status(packet, tracking_number)
+                shipkartex_cn = shipkartex.identify(fulfillment)
+                if shipkartex_cn:
+                    parsed['status'] = 'Booked'
 
                 # Fall back to Shopify billing address when Leopards has no data
                 tracking_info.append({
                     'tracking_number': tracking_number,
                     'tracking_url': tracking_url,
+                    'tracking_company': getattr(fulfillment, 'tracking_company', ''),
+                    'courier': 'Shipkartex' if shipkartex_cn else 'Leopards',
+                    'shipkartex_tracking_number': shipkartex_cn,
                     'status':   parsed['status'],
                     'quantity': item.quantity,
                     'name':     billing.get('name',    'N/A'),
@@ -712,6 +719,9 @@ async def process_order(order, tracking_cache):
                 'line_total':         unit_price * float(info['quantity'] or 0),
                 'tracking_number':    info['tracking_number'],
                 'tracking_url':       info.get('tracking_url', ''),
+                'tracking_company':   info.get('tracking_company', ''),
+                'courier':            info.get('courier', ''),
+                'shipkartex_tracking_number': info.get('shipkartex_tracking_number'),
                 'status':             info['status'],
                 'name':               info.get('name', 'N/A'),
                 'address':            info.get('address', 'N/A'),
@@ -820,7 +830,7 @@ async def getShopifyOrders(force_status=None):
             if fulfillment.status == "cancelled":
                 continue
             tn = fulfillment.tracking_number
-            if tn and tn not in all_tracking_numbers:
+            if tn and not shipkartex.identify(fulfillment) and tn not in all_tracking_numbers:
                 all_tracking_numbers.append(tn)
 
     print(f"Found {len(all_tracking_numbers)} unique tracking numbers.")
@@ -861,6 +871,8 @@ async def getShopifyOrders(force_status=None):
         result = enrich_missing_customer_data_from_rest(result)
     except Exception as e:
         print(f"Continuing without Shopify REST customer enrichment: {e}")
+
+    await asyncio.to_thread(shipkartex.refresh, result)
 
     print(f"Processed {len(result)} orders in {time.time() - total_start:.2f}s")
     return result
@@ -1052,28 +1064,27 @@ def shopify_callback():
 
 @app.route('/api/refresh-tracking', methods=['POST'])
 def refresh_tracking_only():
-    """Lightweight endpoint: re-fetches Leopards tracking for non-final orders only."""
+    """Refresh active shipments through their identified courier."""
     global order_details
 
     final_states = {"RETURNED TO SHIPPER", "Delivered", "Refused by consignee"}
 
+    shipkartex_updated = shipkartex.refresh(order_details)
     active_cns = []
     for order in order_details:
-        if order.get('status') in final_states:
-            continue
         for item in order.get('line_items', []):
             cn = item.get('tracking_number')
-            if cn and cn != 'N/A' and cn not in active_cns:
+            if cn and cn != 'N/A' and item.get('courier') != 'Shipkartex' and item.get('status') not in final_states and cn not in active_cns:
                 active_cns.append(cn)
 
     if not active_cns:
-        return jsonify({'updated': 0})
+        return jsonify({'updated': shipkartex_updated})
 
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
 
-    updated = 0
+    updated = shipkartex_updated
     api_key = os.getenv('LEOPARD_API_KEY')
     api_password = os.getenv('LEOPARD_PASSWORD')
 
@@ -1090,7 +1101,7 @@ def refresh_tracking_only():
             r = requests.get(url, verify=False, timeout=30)
             data = r.json()
             if data.get('status') == 1:
-                for packet in data.get('packet_list', []):
+                for packet in (data.get('packet_list') or []):
                     cn = packet.get('track_number')
                     if cn:
                         tracking_cache[cn] = packet
@@ -1098,11 +1109,9 @@ def refresh_tracking_only():
             print(f"Tracking refresh chunk error: {e}")
 
     for order in order_details:
-        if order.get('status') in final_states:
-            continue
         for item in order.get('line_items', []):
             cn = item.get('tracking_number')
-            if cn and cn in tracking_cache:
+            if cn and item.get('courier') != 'Shipkartex' and item.get('status') not in final_states and cn in tracking_cache:
                 parsed = parse_leopards_status(tracking_cache[cn], cn)
                 item['status'] = parsed['status']
                 order['status'] = parsed['status']
@@ -2878,7 +2887,7 @@ def shopify_order_updated():
         # Build a minimal tracking cache for this one order
         tracking_numbers = [
             f.tracking_number for f in order.fulfillments
-            if f.status != "cancelled" and f.tracking_number
+            if f.status != "cancelled" and f.tracking_number and not shipkartex.identify(f)
         ]
         tracking_cache = {}
         if tracking_numbers:
@@ -2893,7 +2902,7 @@ def shopify_order_updated():
                 r = requests.get(url, verify=False, timeout=20)
                 d = r.json()
                 if d.get('status') == 1:
-                    for packet in d.get('packet_list', []):
+                    for packet in (d.get('packet_list') or []):
                         cn = packet.get('track_number')
                         if cn:
                             tracking_cache[cn] = packet
@@ -2901,6 +2910,7 @@ def shopify_order_updated():
                 print(f"Webhook tracking fetch error: {e}")
 
         updated_order_info = asyncio.run(process_order(order, tracking_cache))
+        shipkartex.refresh([updated_order_info])
         updated_order_info = enrich_orders_with_protected_customer_data([updated_order_info])[0]
         if (topic or '').lower() == 'orders/paid' or str(updated_order_info.get('financial_status', '')).lower() == 'paid':
             send_order_confirmation(updated_order_info)
@@ -2973,7 +2983,7 @@ def leopards_webhook():
             for order in order_details:
                 order_updated = False
                 for item in order.get('line_items', []):
-                    if item.get('tracking_number') == cn_number:
+                    if item.get('tracking_number') == cn_number and item.get('courier') != 'Shipkartex':
                         item['status'] = human_status
                         order_updated = True
                         updated_count += 1
@@ -3257,7 +3267,7 @@ def leopards_last_status():
         r = _req.get(url, verify=False, timeout=30)
         data = r.json()
         filtered = [
-            p for p in data.get('packet_list', [])
+            p for p in (data.get('packet_list') or [])
             if (p.get('booked_packet_status') or '').strip().lower()
             not in ('pickup request not send', 'pickup request sent')
         ]
@@ -3468,6 +3478,24 @@ def leopards_tracking_detail(tracking_number):
     if not tracking_number:
         return render_template('tracking_detail.html', tracking_number='', packet=None, parsed=None, history=[], error='Tracking number is missing.'), 400
 
+    stored_item = next((item for order in order_details for item in order.get('line_items', [])
+                        if str(item.get('tracking_number')) == tracking_number), {})
+    cn = shipkartex.identify(dict(stored_item, tracking_number=tracking_number))
+    if cn:
+        try:
+            events = shipkartex.history(cn)
+            if not events:
+                return render_template('tracking_detail.html', courier='Shipkartex', tracking_number=tracking_number,
+                                       packet=None, parsed=None, history=[], error='No Shipkartex tracking history found.'), 404
+            parsed = dict(stored_item, status=events[-1]['status'])
+            history = [{'Status': event['status'], 'Activity_Date': event.get('created', '')}
+                       for event in reversed(events)]
+            return render_template('tracking_detail.html', courier='Shipkartex', tracking_number=tracking_number,
+                                   packet=None, parsed=parsed, history=history, error='')
+        except (requests.RequestException, ValueError):
+            return render_template('tracking_detail.html', courier='Shipkartex', tracking_number=tracking_number,
+                                   packet=None, parsed=None, history=[], error='Shipkartex tracking is temporarily unavailable.'), 502
+
     api_key = os.getenv('LEOPARD_API_KEY')
     api_password = os.getenv('LEOPARD_PASSWORD')
     url = (
@@ -3479,7 +3507,7 @@ def leopards_tracking_detail(tracking_number):
         r = _req.get(url, verify=False, timeout=30)
         data = r.json()
         packet = next(
-            (item for item in data.get('packet_list', []) if str(item.get('track_number', '')).strip() == tracking_number),
+            (item for item in (data.get('packet_list') or []) if str(item.get('track_number', '')).strip() == tracking_number),
             None
         )
         if not packet:
@@ -3524,7 +3552,7 @@ def leopards_active_cns():
     for order in order_details:
         for item in order.get('line_items', []):
             cn = item.get('tracking_number', '')
-            if cn and cn != 'N/A' and cn not in seen:
+            if cn and cn != 'N/A' and cn not in seen and item.get('courier') != 'Shipkartex':
                 seen.add(cn)
                 cn_numbers.append(cn)
                 order_map.append({
@@ -3585,13 +3613,14 @@ def background_refresh():
         print(f"BACKGROUND REFRESH ERROR (Daraz): {e}")
 
     try:
+        shipkartex.refresh(order_details)
         final_states = {"RETURNED TO SHIPPER", "Delivered", "Refused by consignee"}
         active_cns = [
             item['tracking_number']
             for order in order_details
-            if order.get('status') not in final_states
             for item in order.get('line_items', [])
             if item.get('tracking_number') and item['tracking_number'] != 'N/A'
+            and item.get('courier') != 'Shipkartex' and item.get('status') not in final_states
         ]
         active_cns = list(dict.fromkeys(active_cns))  # deduplicate preserving order
 
@@ -3610,7 +3639,7 @@ def background_refresh():
                     r = _req.get(url, verify=False, timeout=30)
                     data = r.json()
                     if data.get('status') == 1:
-                        for packet in data.get('packet_list', []):
+                        for packet in (data.get('packet_list') or []):
                             cn = packet.get('track_number')
                             if cn:
                                 tracking_cache[cn] = packet
@@ -3618,11 +3647,9 @@ def background_refresh():
                     print(f"BACKGROUND REFRESH tracking chunk error: {e}")
 
             for order in order_details:
-                if order.get('status') in final_states:
-                    continue
                 for item in order.get('line_items', []):
                     cn = item.get('tracking_number')
-                    if cn and cn in tracking_cache:
+                    if cn and item.get('courier') != 'Shipkartex' and item.get('status') not in final_states and cn in tracking_cache:
                         parsed = parse_leopards_status(tracking_cache[cn], cn)
                         item['status'] = parsed['status']
                         order['status'] = parsed['status']

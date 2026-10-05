@@ -20,3 +20,6 @@ templates/ui_option_1.html
 templates/ui_option_2.html
 templates/ui_option_3.html
 templates/ui_simple.html
+
+.env
+.env.*

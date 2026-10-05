@@ -180,9 +180,9 @@
     <a class="back-link" href="/">← Back to Dashboard</a>
 
     <section class="card">
-      <div class="eyebrow">Leopards Tracking</div>
+      <div class="eyebrow">{{ courier|default('Leopards') }} Tracking</div>
       <h1>Shipment tracking details.</h1>
-      <p class="subcopy">This page pulls the latest CN activity directly from Leopards for a single shipment.</p>
+      <p class="subcopy">This page pulls the latest CN activity directly from {{ courier|default('Leopards') }} for a single shipment.</p>
       <div class="cn">{{ tracking_number }}</div>
 
       {% if error %}

@@ -664,7 +664,7 @@
   <!-- Bottom bar -->
   <div class="bottom-bar" id="bottomBar">
     <button class="bottom-btn bb-green" id="btnDeliver" onclick="applyDeliveredToAll()">
-      ✅ <span id="deliverLabel">Mark Out For Delivery as Delivered</span>
+      ✅ <span id="deliverLabel">Mark All Delivered</span>
     </button>
     <button class="bottom-btn bb-red" id="btnReturn" onclick="applyReturnedToAll()">
       ↩ <span id="returnLabel">Mark All Returned</span>
@@ -705,6 +705,30 @@ function isReturnedStatus(status) {
 function isOutForDeliveryStatus(status) {
   const normalized = normalizeTrackingStatus(status);
   return normalized === 'out for delivery' || normalized.startsWith('assigned to courier');
+}
+
+function isDeliveredStatus(status) {
+  return normalizeTrackingStatus(status) === 'delivered';
+}
+
+function hasOrderTag(order, tag) {
+  const wanted = normalizeTrackingStatus(tag);
+  return (order.tags || []).some(value => normalizeTrackingStatus(value) === wanted);
+}
+
+function displayedOrders(predicate) {
+  return ORDER_DATA.filter(order => {
+    const card = document.getElementById('order-card-' + order.id);
+    return card && card.style.display !== 'none' && predicate(order);
+  });
+}
+
+function deliveryCandidates() {
+  return displayedOrders(order => isDeliveredStatus(order.status) && !hasOrderTag(order, 'Delivered'));
+}
+
+function returnCandidates() {
+  return displayedOrders(order => isReturnedStatus(order.status) && !hasOrderTag(order, 'Returned'));
 }
 
 function isBookedStatus(status) {
@@ -784,18 +808,17 @@ function renderStats() {
 }
 
 // ── Bottom bar ──
-let ofdCount = ORDER_DATA.filter(o => isOutForDeliveryStatus(o.status)).length;
-let rtsCount = ORDER_DATA.filter(o => isReturnedStatus(o.status)).length;
-
 function updateBottomBar() {
   const btnD = document.getElementById('btnDeliver');
   const btnR = document.getElementById('btnReturn');
   const bar  = document.getElementById('bottomBar');
-  document.getElementById('deliverLabel').textContent = `Mark ${ofdCount} Out For Delivery as Delivered`;
-  document.getElementById('returnLabel').textContent  = `Mark All Returned (${rtsCount} Orders)`;
-  btnD.style.display = ofdCount > 0 ? 'flex' : 'none';
-  btnR.style.display = rtsCount > 0 ? 'flex' : 'none';
-  bar.classList.toggle('visible', ofdCount > 0 || rtsCount > 0);
+  const deliveredCount = deliveryCandidates().length;
+  const returnedCount = returnCandidates().length;
+  document.getElementById('deliverLabel').textContent = `Mark All Delivered (${deliveredCount} Orders)`;
+  document.getElementById('returnLabel').textContent  = `Mark All Returned (${returnedCount} Orders)`;
+  btnD.style.display = deliveredCount > 0 ? 'flex' : 'none';
+  btnR.style.display = returnedCount > 0 ? 'flex' : 'none';
+  bar.classList.toggle('visible', deliveredCount > 0 || returnedCount > 0);
 }
 
 // ── Filter + Search ──
@@ -833,6 +856,7 @@ function applyFilterSearch() {
   });
   document.getElementById('shopifyCount').textContent = visible;
   updateSelectAllDisplayedControl();
+  updateBottomBar();
 }
 
 function escapeHtml(value) {
@@ -1141,12 +1165,12 @@ async function applyTagWithRetry(orderId, tag, maxAttempts = 3) {
   return { success: false, error: lastError };
 }
 
-// ── Apply Delivered to All (Out For Delivery → Delivered) ──
+// ── Apply Shopify tags only to displayed orders with matching courier status ──
 async function applyDeliveredToAll() {
   if (window.bulkActionInProgress) return;
   const btn = document.getElementById('btnDeliver');
   const lbl = document.getElementById('deliverLabel');
-  const toDeliver = ORDER_DATA.filter(o => isOutForDeliveryStatus(o.status));
+  const toDeliver = deliveryCandidates();
   if (!toDeliver.length) return;
   setBulkActionInProgress(true);
   let failedCount = 0;
@@ -1155,13 +1179,12 @@ async function applyDeliveredToAll() {
       lbl.textContent = `Applying ${i+1}/${toDeliver.length}…`;
       const result = await applyTagWithRetry(toDeliver[i].id, 'Delivered');
       if (!result.success) failedCount++;
-      else toDeliver[i].status = 'Delivered';
+      else toDeliver[i].tags = [...(toDeliver[i].tags || []), 'Delivered'];
       await new Promise(r => setTimeout(r, 250));
     }
     showToast(failedCount
       ? `${toDeliver.length - failedCount} delivered; ${failedCount} failed. Click the delivery button to retry.`
       : `Applied "Delivered" to all ${toDeliver.length} orders`);
-    ofdCount = failedCount;
     updateBottomBar();
   } finally {
     setBulkActionInProgress(false);
@@ -1173,7 +1196,7 @@ async function applyReturnedToAll() {
   if (window.bulkActionInProgress) return;
   const btn = document.getElementById('btnReturn');
   const lbl = document.getElementById('returnLabel');
-  const toReturn = ORDER_DATA.filter(o => isReturnedStatus(o.status));
+  const toReturn = returnCandidates();
   if (!toReturn.length) return;
   setBulkActionInProgress(true);
   let failedCount = 0;
@@ -1182,13 +1205,12 @@ async function applyReturnedToAll() {
       lbl.textContent = `Applying ${i+1}/${toReturn.length}…`;
       const result = await applyTagWithRetry(toReturn[i].id, 'Returned');
       if (!result.success) failedCount++;
-      else toReturn[i].status = 'Returned';
+      else toReturn[i].tags = [...(toReturn[i].tags || []), 'Returned'];
       await new Promise(r => setTimeout(r, 250));
     }
     showToast(failedCount
       ? `${toReturn.length - failedCount} returned; ${failedCount} failed. Click Mark All Returned to retry.`
       : `Applied "Returned" to all ${toReturn.length} orders`);
-    rtsCount = failedCount;
     updateBottomBar();
   } finally {
     setBulkActionInProgress(false);

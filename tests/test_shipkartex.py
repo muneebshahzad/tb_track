@@ -88,6 +88,9 @@ class ShipkartexTests(unittest.TestCase):
         self.assertIn("'returned to shipper'", template)
         self.assertIn('ORDER_DATA.filter(o => isReturnedStatus(o.status))', template)
         self.assertIn('ORDER_DATA.filter(o => isOutForDeliveryStatus(o.status))', template)
+        self.assertIn('let bulkActionInProgress = false;', template)
+        self.assertIn('if (bulkActionInProgress) return;', template)
+        self.assertIn('d.updated > 0 && !bulkActionInProgress', template)
 
     def test_manual_refresh_does_not_send_shipkartex_to_leopards(self):
         # Load just this route to avoid application's production startup side effects.

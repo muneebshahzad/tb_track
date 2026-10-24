@@ -1448,6 +1448,11 @@ def apply_tag():
     try:
         order = shopify.Order.find(order_id)
 
+        if tag.strip().lower() == "archived":
+            if order.close():
+                return jsonify({"success": True, "message": "Order archived successfully."})
+            return jsonify({"success": False, "error": "Shopify did not archive the order."})
+
         if tag.strip().lower() == "returned":
             if order.cancel():
                 print("Order Cancelled")

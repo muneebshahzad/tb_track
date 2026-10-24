@@ -84,6 +84,8 @@ class ShipkartexTests(unittest.TestCase):
         self.assertIn('id="selectAllDisplayedBtn"', template)
         self.assertIn('function toggleSelectAllDisplayed()', template)
         self.assertIn('id="bulkMarkDeliveredBtn"', template)
+        self.assertIn('id="bulkArchiveBtn"', template)
+        self.assertIn("bulkMark('Archived')", template)
         self.assertIn("'return to sender'", template)
         self.assertIn("'returned to shipper'", template)
         self.assertIn('ORDER_DATA.filter(o => isReturnedStatus(o.status))', template)
@@ -99,6 +101,9 @@ class ShipkartexTests(unittest.TestCase):
         base_template = Path('templates/base.html').read_text()
         self.assertIn('if (window.bulkActionInProgress) return;', base_template)
         self.assertIn('if (!window.bulkActionInProgress) window.location.reload();', base_template)
+        main_source = Path('main.py').read_text()
+        self.assertIn('if tag.strip().lower() == "archived":', main_source)
+        self.assertIn('"message": "Order archived successfully."', main_source)
 
     def test_manual_refresh_does_not_send_shipkartex_to_leopards(self):
         # Load just this route to avoid application's production startup side effects.

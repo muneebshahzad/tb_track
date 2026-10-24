@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import time
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -74,6 +75,51 @@ class ShipkartexClient:
                 log.warning('Shipkartex account lookup unavailable; keeping previous identification data')
                 self._expires = time.monotonic() + 60
             return self._index
+
+    def payments(self, from_date='', to_date=''):
+        """Return normalized COD/payment rows from Shipkartex's order ledger."""
+        auth = os.getenv('SHIPKARTEX_AUTH_KEY', '').strip()
+        if not auth:
+            raise ValueError('Shipkartex credentials are not configured')
+        records = self.post('GetOrderList.php', {
+            'auth_key': auth,
+            'client_code': os.getenv('SHIPKARTEX_CLIENT_CODE', '').strip(),
+        })
+
+        def parse_date(raw):
+            try:
+                return datetime.strptime(str(raw or '')[:10], '%Y-%m-%d').date()
+            except ValueError:
+                return None
+
+        start = parse_date(from_date)
+        end = parse_date(to_date)
+        normalized = []
+        for row in records:
+            order_date = parse_date(row.get('order_date'))
+            if start and order_date and order_date < start:
+                continue
+            if end and order_date and order_date > end:
+                continue
+            cod = float(row.get('collection_amount') or 0)
+            charges = float(row.get('delivery_charges') or 0)
+            payment_status = str(row.get('payment_status') or '').strip()
+            normalized.append({
+                'order_id': str(row.get('order_id') or '—'),
+                'cn': str(row.get('tracking_no') or '—'),
+                'products': str(row.get('product_descriptiption') or '—'),
+                'cod': cod,
+                'status': str(row.get('status') or '—'),
+                'ship_charges': charges,
+                'ship_paid': None,
+                'cod_paid': payment_status.lower() == 'paid',
+                'payment_status': payment_status or 'Unknown',
+                'inv_date': '—',
+                'net': cod - charges,
+                'order_date': str(row.get('order_date') or ''),
+                'status_date': str(row.get('status_date') or ''),
+            })
+        return normalized
 
     def identify(self, item, index=None):
         cn = str(value(item, 'tracking_number') or '').strip()

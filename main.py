@@ -5825,6 +5825,18 @@ def leopards_last_status():
         return jsonify({"status": 0, "error": str(e)}), 500
 
 
+@app.route('/api/shipkartex/payments')
+def shipkartex_payments():
+    try:
+        records = shipkartex.payments(
+            request.args.get('from_date', ''),
+            request.args.get('to_date', ''),
+        )
+        return jsonify({'status': 1, 'source': 'Shipkartex order ledger', 'data': records})
+    except (ValueError, _req.RequestException) as e:
+        return jsonify({'status': 0, 'error': str(e), 'data': []}), 502
+
+
 @app.route('/api/leopards/payment-details')
 def leopards_payment_details():
     cn_numbers = request.args.get('cn_numbers', '')

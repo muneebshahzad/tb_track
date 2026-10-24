@@ -14,6 +14,7 @@
   .fin-table tr:hover td { background: #f8f9fc; }
   .paid-badge   { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #d4f5e9; color: #0f6848; white-space: nowrap; }
   .unpaid-badge { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #fce8e6; color: #e74a3b; white-space: nowrap; }
+  .unknown-badge { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #eef0f5; color: #6c757d; white-space: nowrap; }
   .invoice-status-badge { padding: 2px 7px; border-radius: 99px; font-size: 10px; font-weight: 600; background: #fff3cd; color: #8b5a00; white-space: nowrap; text-transform: capitalize; }
   @media (max-width: 767px) { .kpi-grid { grid-template-columns: repeat(2,1fr); } .hide-mob { display: none !important; } }
 </style>
@@ -24,7 +25,7 @@
 <div style="display:flex;flex-direction:column;height:calc(100% - 3px);overflow:hidden;">
   <div class="topbar">
     <span class="topbar-title">Finance</span>
-    <span style="font-size:12px;color:#858796;" class="hide-mob">— Leopards Settlements</span>
+    <span style="font-size:12px;color:#858796;" class="hide-mob">— Courier Settlements</span>
     <div style="flex:1"></div>
     <div class="search-box">
       <span style="color:#858796;font-size:13px;">🔍</span>
@@ -45,8 +46,10 @@
         <label style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;">To</label>
         <input type="date" id="toDate" style="background:#f8f9fc;border:1px solid #e3e6f0;color:#3a3b45;border-radius:7px;padding:6px 9px;font-size:12px;outline:none;cursor:pointer;font-family:'DM Sans',sans-serif;"/>
       </div>
-      <button onclick="fetchPayments()" id="fetchBtn" style="padding:8px 18px;border-radius:8px;border:none;background:#F5C400;color:#111;cursor:pointer;font-size:13px;font-weight:700;font-family:'DM Sans',sans-serif;">⚡ Fetch</button>
+      <button onclick="fetchPayments()" id="fetchBtn" style="padding:8px 18px;border-radius:8px;border:none;background:#F5C400;color:#111;cursor:pointer;font-size:13px;font-weight:700;font-family:'DM Sans',sans-serif;">🐆 Fetch Leopards</button>
+      <button onclick="fetchShipkartexPayments()" id="shipkartexBtn" style="padding:8px 18px;border-radius:8px;border:none;background:#2476b8;color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:'DM Sans',sans-serif;">🚚 Fetch Shipkartex</button>
       <button onclick="loadFromOrders()" style="padding:8px 16px;border-radius:8px;border:1.5px solid #e3e6f0;background:#fff;color:#4e73df;cursor:pointer;font-size:12px;font-weight:600;font-family:'DM Sans',sans-serif;">📦 Load From Orders</button>
+      <span id="financeSource" style="font-size:11px;color:#858796;margin-left:auto;">Choose a courier source</span>
     </div>
 
     <!-- KPI grid -->
@@ -55,7 +58,7 @@
       <div class="kpi-card"><div class="kpi-bar" style="background:#36b9cc;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Shipping Charges</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiShip">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">total billed</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#e74a3b;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Unpaid Delivered</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiUnpaidDeliv">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">COD unsettled</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#f6c23e;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Unpaid Shipping</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiUnpaidShip">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">charges pending</div></div>
-      <div class="kpi-card"><div class="kpi-bar" style="background:#6f42c1;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Net Receivable</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiNet">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">(Unpaid COD×96%) − Ship.</div></div>
+      <div class="kpi-card"><div class="kpi-bar" style="background:#6f42c1;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Net Receivable</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiNet">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiNetSub">(Unpaid COD×96%) − Ship.</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#ff8c42;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Invoices Amount Pending</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiInvoicesPending">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiInvoicesPendingSub">0 invoices processing</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#20c997;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Total Receivable</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiTotalReceivable">—</div><div style="font-size:10px;color:#858796;margin-top:4px;">Invoices pending + net receivable</div></div>
       <div class="kpi-card"><div class="kpi-bar" style="background:#1cc88a;"></div><div style="font-size:9px;font-weight:700;color:#858796;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px;">Delivered</div><div style="font-size:17px;font-weight:700;color:#3a3b45;" id="kpiDeliv">—</div><div style="font-size:10px;color:#858796;margin-top:4px;" id="kpiDelivSub">0 orders</div></div>
@@ -137,6 +140,7 @@ let pendingInvoices = [];
 let curFilt = 'all';
 let sortCol = null;
 let sortDir = 1;
+let financeSource = 'leopards';
 
 // Init dates
 (function() {
@@ -235,7 +239,10 @@ async function fetchCNChunks(endpoint, paramName, cnNums, options = {}) {
 function renderInvoices() {
   document.getElementById('invoiceCount').textContent = pendingInvoices.length;
   if (!pendingInvoices.length) {
-    document.getElementById('invoiceBody').innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:#858796;font-size:13px;">No processing invoices found for this date range.</td></tr>';
+    const message = financeSource === 'shipkartex'
+      ? 'Shipkartex does not provide invoice or remittance details through its documented API.'
+      : 'No processing invoices found for this date range.';
+    document.getElementById('invoiceBody').innerHTML = `<tr><td colspan="7" style="padding:24px;text-align:center;color:#858796;font-size:13px;">${message}</td></tr>`;
     return;
   }
   document.getElementById('invoiceBody').innerHTML = pendingInvoices.map(invoice => `
@@ -252,6 +259,8 @@ function renderInvoices() {
 }
 
 async function fetchPayments() {
+  financeSource = 'leopards';
+  document.getElementById('financeSource').textContent = 'Source: Leopards settlements';
   const from = document.getElementById('fromDate').value;
   const to   = document.getElementById('toDate').value;
   const btn  = document.getElementById('fetchBtn');
@@ -301,7 +310,29 @@ async function fetchPayments() {
   } catch(e) {
     showToast('Failed to fetch data');
   } finally {
-    btn.textContent = '⚡ Fetch'; btn.disabled = false;
+    btn.textContent = '🐆 Fetch Leopards'; btn.disabled = false;
+  }
+}
+
+async function fetchShipkartexPayments() {
+  const from = document.getElementById('fromDate').value;
+  const to = document.getElementById('toDate').value;
+  const btn = document.getElementById('shipkartexBtn');
+  btn.textContent = '⏳ Loading…'; btn.disabled = true;
+  try {
+    const result = await fetchChunk(`/api/shipkartex/payments?from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}`, 45000);
+    if (!result || Number(result.status || 0) !== 1) {
+      showToast((result && result.error) || 'Could not load Shipkartex payments');
+      return;
+    }
+    financeSource = 'shipkartex';
+    allRecords = result.data || [];
+    pendingInvoices = [];
+    document.getElementById('financeSource').textContent = 'Source: Shipkartex order ledger';
+    renderInvoices(); renderTable(); updateKPIs();
+    showToast(`Loaded ${allRecords.length} Shipkartex payment records`);
+  } finally {
+    btn.textContent = '🚚 Fetch Shipkartex'; btn.disabled = false;
   }
 }
 
@@ -398,7 +429,7 @@ function updateKPIs() {
   allRecords.forEach(x => {
     totalCOD += x.cod;
     if (x.ship_charges) totalCharges += x.ship_charges;
-    if (!x.ship_paid && x.ship_charges) unpaidShippingTotal += x.ship_charges;
+    if (x.ship_paid === false && x.ship_charges) unpaidShippingTotal += x.ship_charges;
     const isDelivered = /^delivered/i.test(x.status || '');
     const isReturned  = /return/i.test(x.status || '');
     if (isDelivered && !x.cod_paid) unpaidDeliveredCOD += x.cod;
@@ -407,7 +438,9 @@ function updateKPIs() {
     else                 { pendingCount++;   pendingCOD   += x.cod; }
   });
   const invoicesPendingTotal = pendingInvoices.reduce((sum, invoice) => sum + Number(invoice.invoice_cheque_amount || 0), 0);
-  const netReceivable = (unpaidDeliveredCOD * 0.96) - unpaidShippingTotal;
+  const netReceivable = financeSource === 'shipkartex'
+    ? allRecords.filter(x => /^delivered/i.test(x.status || '') && !x.cod_paid).reduce((sum, x) => sum + Number(x.net || 0), 0)
+    : (unpaidDeliveredCOD * 0.96) - unpaidShippingTotal;
   const totalReceivable = netReceivable + invoicesPendingTotal;
   document.getElementById('kpiTotalCOD').textContent    = fPKR(totalCOD);
   document.getElementById('kpiTotalSub').textContent    = allRecords.length + ' orders';
@@ -415,6 +448,9 @@ function updateKPIs() {
   document.getElementById('kpiUnpaidDeliv').textContent = unpaidDeliveredCOD ? fPKR(unpaidDeliveredCOD) : '—';
   document.getElementById('kpiUnpaidShip').textContent  = unpaidShippingTotal ? fPKR(unpaidShippingTotal) : '—';
   document.getElementById('kpiNet').textContent         = fPKR(netReceivable);
+  document.getElementById('kpiNetSub').textContent = financeSource === 'shipkartex'
+    ? 'Estimate: unpaid delivered COD − delivery charges'
+    : '(Unpaid COD×96%) − Ship.';
   document.getElementById('kpiInvoicesPending').textContent = invoicesPendingTotal ? fPKR(invoicesPendingTotal) : '—';
   document.getElementById('kpiInvoicesPendingSub').textContent = `${pendingInvoices.length} invoice${pendingInvoices.length === 1 ? '' : 's'} processing`;
   document.getElementById('kpiTotalReceivable').textContent = fPKR(totalReceivable);
@@ -466,7 +502,10 @@ function renderTable() {
     return;
   }
   document.getElementById('finBody').innerHTML = rows.map(r => {
-    const net = r.net || (/^delivered/i.test(r.status||'') ? r.cod*0.96 - r.ship_charges : 0);
+    const net = r.net ?? (/^delivered/i.test(r.status||'') ? r.cod*0.96 - r.ship_charges : 0);
+    const shipPayment = r.ship_paid === null
+      ? '<span class="unknown-badge">Unknown</span>'
+      : `<span class="${r.ship_paid?'paid-badge':'unpaid-badge'}">${r.ship_paid?'✓ Paid':'✕ Unpaid'}</span>`;
     return `<tr>
       <td style="font-family:'DM Mono',monospace;font-weight:700;color:#4e73df;font-size:11px;">${r.order_id}</td>
       <td style="font-family:'DM Mono',monospace;color:#6f42c1;font-size:11px;">${r.cn}</td>
@@ -474,7 +513,7 @@ function renderTable() {
       <td style="font-family:'DM Mono',monospace;font-weight:600;color:#3a3b45;white-space:nowrap;">${fPKR(r.cod)}</td>
       <td><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;background:#e8f8fb;color:#0a5c6e;white-space:nowrap;">${r.status}</span></td>
       <td style="font-family:'DM Mono',monospace;color:#3a3b45;white-space:nowrap;">${r.ship_charges ? fPKR(r.ship_charges) : '—'}</td>
-      <td><span class="${r.ship_paid?'paid-badge':'unpaid-badge'}">${r.ship_paid?'✓ Paid':'✕ Unpaid'}</span></td>
+      <td>${shipPayment}</td>
       <td><span class="${r.cod_paid?'paid-badge':'unpaid-badge'}">${r.cod_paid?'✓ Paid':'✕ Unpaid'}</span></td>
       <td style="font-family:'DM Mono',monospace;font-weight:700;color:${net>=0?'#1cc88a':'#e74a3b'};white-space:nowrap;">${fPKR(net)}</td>
       <td style="font-size:11px;color:#858796;white-space:nowrap;">${r.inv_date}</td>
@@ -493,8 +532,8 @@ function exportCSV() {
   const rows = getFiltered();
   const lines = [['Order ID','CN #','Products','COD','Status','Ship Charges','Ship Paid','COD Paid','Net','Invoice Date']];
   rows.forEach(r => {
-    const net = r.net || (/^delivered/i.test(r.status||'') ? r.cod*0.96 - r.ship_charges : 0);
-    lines.push([r.order_id, r.cn, `"${r.products}"`, r.cod, r.status, r.ship_charges, r.ship_paid?'Yes':'No', r.cod_paid?'Yes':'No', Math.round(net), r.inv_date]);
+    const net = r.net ?? (/^delivered/i.test(r.status||'') ? r.cod*0.96 - r.ship_charges : 0);
+    lines.push([r.order_id, r.cn, `"${r.products}"`, r.cod, r.status, r.ship_charges, r.ship_paid===null?'Unknown':r.ship_paid?'Yes':'No', r.cod_paid?'Yes':'No', Math.round(net), r.inv_date]);
   });
   const blob = new Blob([lines.map(l=>l.join(',')).join('\n')], {type:'text/csv'});
   const a = document.createElement('a');

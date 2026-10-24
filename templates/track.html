@@ -664,7 +664,7 @@
   <!-- Bottom bar -->
   <div class="bottom-bar" id="bottomBar">
     <button class="bottom-btn bb-green" id="btnDeliver" onclick="applyDeliveredToAll()">
-      ✅ <span id="deliverLabel">Mark All Delivered</span>
+      ✅ <span id="deliverLabel">Mark Out For Delivery as Delivered</span>
     </button>
     <button class="bottom-btn bb-red" id="btnReturn" onclick="applyReturnedToAll()">
       ↩ <span id="returnLabel">Mark All Returned</span>
@@ -791,7 +791,7 @@ function updateBottomBar() {
   const btnD = document.getElementById('btnDeliver');
   const btnR = document.getElementById('btnReturn');
   const bar  = document.getElementById('bottomBar');
-  document.getElementById('deliverLabel').textContent = `Mark All Delivered (${ofdCount} Orders)`;
+  document.getElementById('deliverLabel').textContent = `Mark ${ofdCount} Out For Delivery as Delivered`;
   document.getElementById('returnLabel').textContent  = `Mark All Returned (${rtsCount} Orders)`;
   btnD.style.display = ofdCount > 0 ? 'flex' : 'none';
   btnR.style.display = rtsCount > 0 ? 'flex' : 'none';
@@ -1159,7 +1159,7 @@ async function applyDeliveredToAll() {
       await new Promise(r => setTimeout(r, 250));
     }
     showToast(failedCount
-      ? `${toDeliver.length - failedCount} delivered; ${failedCount} failed. Click Mark All Delivered to retry.`
+      ? `${toDeliver.length - failedCount} delivered; ${failedCount} failed. Click the delivery button to retry.`
       : `Applied "Delivered" to all ${toDeliver.length} orders`);
     ofdCount = failedCount;
     updateBottomBar();

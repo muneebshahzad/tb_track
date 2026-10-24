@@ -225,6 +225,10 @@ document.addEventListener('DOMContentLoaded', initAvatars);
 
 function triggerRefresh(e) {
   e.preventDefault();
+  if (window.bulkActionInProgress) {
+    showToast('Finish the current bulk update before refreshing.');
+    return;
+  }
   const btn = document.getElementById('refreshDataBtn');
   btn.style.opacity = '0.5';
   btn.style.pointerEvents = 'none';
@@ -244,11 +248,16 @@ function triggerRefresh(e) {
 
   let fingerprint = null;
   async function checkState(initial = false) {
+    if (window.bulkActionInProgress) return;
     try {
       const response = await fetch('/api/shopify/order-state', { credentials: 'same-origin' });
       if (!response.ok) return;
       const payload = await response.json();
       if (!payload.fingerprint) return;
+      if (window.bulkActionInProgress) {
+        fingerprint = payload.fingerprint;
+        return;
+      }
       if (initial || !fingerprint) {
         fingerprint = payload.fingerprint;
         return;
@@ -256,7 +265,9 @@ function triggerRefresh(e) {
       if (payload.fingerprint !== fingerprint) {
         fingerprint = payload.fingerprint;
         showToast('Shopify orders updated. Refreshing...', 1200);
-        window.setTimeout(() => window.location.reload(), 900);
+        window.setTimeout(() => {
+          if (!window.bulkActionInProgress) window.location.reload();
+        }, 900);
       }
     } catch (error) {
       return;

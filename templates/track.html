@@ -978,10 +978,10 @@ function toggleEmployeeApprovals() {
 
 // ── Bulk selection ──
 const selectedOrders = new Set();
-let bulkActionInProgress = false;
+window.bulkActionInProgress = false;
 
 function setBulkActionInProgress(active) {
-  bulkActionInProgress = active;
+  window.bulkActionInProgress = active;
   document.querySelectorAll('#bulkBar .bulk-btn, #btnDeliver, #btnReturn').forEach(button => {
     button.disabled = active;
   });
@@ -1064,48 +1064,83 @@ function clearSelection() {
 }
 
 async function bulkMark(tag) {
-  if (bulkActionInProgress) return;
+  if (window.bulkActionInProgress) return;
   const ids = [...selectedOrders];
   if (!ids.length) return;
   const cnt = document.getElementById('bulkCount');
   setBulkActionInProgress(true);
+  const failedIds = [];
   try {
     for (let i = 0; i < ids.length; i++) {
       cnt.textContent = `Applying ${i+1}/${ids.length}…`;
-      try {
-        await fetch('/apply_tag', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ order_id: ids[i], tag })
-        });
-      } catch(e) {}
-      await new Promise(r => setTimeout(r, 400));
+      const result = await applyTagWithRetry(ids[i], tag);
+      if (!result.success) failedIds.push(ids[i]);
+      else {
+        const order = ORDER_DATA.find(item => String(item.id) === String(ids[i]));
+        if (order) order.status = tag;
+      }
+      await new Promise(r => setTimeout(r, 250));
     }
-    showToast(`Applied "${tag}" to ${ids.length} orders`);
-    clearSelection();
   } finally {
     setBulkActionInProgress(false);
   }
+  const failedSet = new Set(failedIds);
+  ids.forEach(id => {
+    const card = document.getElementById('order-card-' + id);
+    if (card && !failedSet.has(id)) setCardSelection(card, false);
+  });
+  updateBulkBar();
+  updateSelectAllDisplayedControl();
+  if (failedIds.length) {
+    showToast(`${ids.length - failedIds.length} updated; ${failedIds.length} failed and remain selected for retry.`);
+  } else {
+    showToast(`Applied "${tag}" to all ${ids.length} orders`);
+  }
+}
+
+async function applyTagWithRetry(orderId, tag, maxAttempts = 3) {
+  let lastError = 'Request failed';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch('/apply_tag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: orderId, tag })
+      });
+      const payload = await response.json();
+      if (response.ok && payload.success) return { success: true };
+      lastError = payload.error || `HTTP ${response.status}`;
+    } catch (error) {
+      lastError = error.message || 'Network error';
+    }
+    if (attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 750));
+    }
+  }
+  return { success: false, error: lastError };
 }
 
 // ── Apply Delivered to All (Out For Delivery → Delivered) ──
 async function applyDeliveredToAll() {
-  if (bulkActionInProgress) return;
+  if (window.bulkActionInProgress) return;
   const btn = document.getElementById('btnDeliver');
   const lbl = document.getElementById('deliverLabel');
   const toDeliver = ORDER_DATA.filter(o => isOutForDeliveryStatus(o.status));
   if (!toDeliver.length) return;
   setBulkActionInProgress(true);
+  let failedCount = 0;
   try {
     for (let i = 0; i < toDeliver.length; i++) {
       lbl.textContent = `Applying ${i+1}/${toDeliver.length}…`;
-      try {
-        await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: toDeliver[i].id, tag:'Delivered'}) });
-      } catch(e) {}
-      await new Promise(r => setTimeout(r, 600));
+      const result = await applyTagWithRetry(toDeliver[i].id, 'Delivered');
+      if (!result.success) failedCount++;
+      else toDeliver[i].status = 'Delivered';
+      await new Promise(r => setTimeout(r, 250));
     }
-    showToast(`Applied "Delivered" to ${toDeliver.length} orders`);
-    ofdCount = 0;
+    showToast(failedCount
+      ? `${toDeliver.length - failedCount} delivered; ${failedCount} failed. Click Mark All Delivered to retry.`
+      : `Applied "Delivered" to all ${toDeliver.length} orders`);
+    ofdCount = failedCount;
     updateBottomBar();
   } finally {
     setBulkActionInProgress(false);
@@ -1114,22 +1149,25 @@ async function applyDeliveredToAll() {
 
 // ── Apply Returned to All (all final return-status variants → Returned) ──
 async function applyReturnedToAll() {
-  if (bulkActionInProgress) return;
+  if (window.bulkActionInProgress) return;
   const btn = document.getElementById('btnReturn');
   const lbl = document.getElementById('returnLabel');
   const toReturn = ORDER_DATA.filter(o => isReturnedStatus(o.status));
   if (!toReturn.length) return;
   setBulkActionInProgress(true);
+  let failedCount = 0;
   try {
     for (let i = 0; i < toReturn.length; i++) {
       lbl.textContent = `Applying ${i+1}/${toReturn.length}…`;
-      try {
-        await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: toReturn[i].id, tag:'Returned'}) });
-      } catch(e) {}
-      await new Promise(r => setTimeout(r, 600));
+      const result = await applyTagWithRetry(toReturn[i].id, 'Returned');
+      if (!result.success) failedCount++;
+      else toReturn[i].status = 'Returned';
+      await new Promise(r => setTimeout(r, 250));
     }
-    showToast(`Applied "Returned" to ${toReturn.length} orders`);
-    rtsCount = 0;
+    showToast(failedCount
+      ? `${toReturn.length - failedCount} returned; ${failedCount} failed. Click Mark All Returned to retry.`
+      : `Applied "Returned" to all ${toReturn.length} orders`);
+    rtsCount = failedCount;
     updateBottomBar();
   } finally {
     setBulkActionInProgress(false);
@@ -1138,7 +1176,7 @@ async function applyReturnedToAll() {
 
 // ── Refresh Tracking ──
 function refreshTracking() {
-  if (bulkActionInProgress) {
+  if (window.bulkActionInProgress) {
     showToast('Finish the current bulk update before refreshing tracking.');
     return;
   }
@@ -1152,7 +1190,7 @@ function refreshTracking() {
     .then(d => {
       icon.style.animation = '';
       btn.disabled = false;
-      if (d.updated > 0 && !bulkActionInProgress) location.reload();
+      if (d.updated > 0 && !window.bulkActionInProgress) location.reload();
       else showToast('Tracking is up to date.');
     })
     .catch(() => { icon.style.animation = ''; btn.disabled = false; showToast('Refresh failed'); });
@@ -1160,9 +1198,9 @@ function refreshTracking() {
 
 // Auto-refresh every 8 minutes
 setInterval(() => {
-  if (bulkActionInProgress) return;
+  if (window.bulkActionInProgress) return;
   fetch('/api/refresh-tracking', { method:'POST' })
-    .then(r => r.json()).then(d => { if (d.updated > 0 && !bulkActionInProgress) location.reload(); })
+    .then(r => r.json()).then(d => { if (d.updated > 0 && !window.bulkActionInProgress) location.reload(); })
     .catch(() => {});
 }, 480000);
 

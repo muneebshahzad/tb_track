@@ -88,9 +88,13 @@ class ShipkartexTests(unittest.TestCase):
         self.assertIn("'returned to shipper'", template)
         self.assertIn('ORDER_DATA.filter(o => isReturnedStatus(o.status))', template)
         self.assertIn('ORDER_DATA.filter(o => isOutForDeliveryStatus(o.status))', template)
-        self.assertIn('let bulkActionInProgress = false;', template)
-        self.assertIn('if (bulkActionInProgress) return;', template)
-        self.assertIn('d.updated > 0 && !bulkActionInProgress', template)
+        self.assertIn('window.bulkActionInProgress = false;', template)
+        self.assertIn('function applyTagWithRetry(', template)
+        self.assertIn('failed and remain selected for retry', template)
+        self.assertIn('d.updated > 0 && !window.bulkActionInProgress', template)
+        base_template = Path('templates/base.html').read_text()
+        self.assertIn('if (window.bulkActionInProgress) return;', base_template)
+        self.assertIn('if (!window.bulkActionInProgress) window.location.reload();', base_template)
 
     def test_manual_refresh_does_not_send_shipkartex_to_leopards(self):
         # Load just this route to avoid application's production startup side effects.

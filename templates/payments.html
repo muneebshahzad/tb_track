@@ -114,7 +114,7 @@
               <th data-sort="ship_charges" onclick="sortBy('ship_charges')">Ship. <span class="sort-arrow" id="sa-ship_charges">↕</span></th>
               <th data-sort="ship_paid" onclick="sortBy('ship_paid')">Ship. Paid <span class="sort-arrow" id="sa-ship_paid">↕</span></th>
               <th data-sort="cod_paid" onclick="sortBy('cod_paid')">COD Paid <span class="sort-arrow" id="sa-cod_paid">↕</span></th>
-              <th data-sort="net" onclick="sortBy('net')">Net <span class="sort-arrow" id="sa-net">↕</span></th>
+              <th data-sort="net" onclick="sortBy('net')">Receivable <span class="sort-arrow" id="sa-net">↕</span></th>
               <th data-sort="inv_date" onclick="sortBy('inv_date')">Invoice <span class="sort-arrow" id="sa-inv_date">↕</span></th>
             </tr>
           </thead>
@@ -449,7 +449,7 @@ function updateKPIs() {
   document.getElementById('kpiUnpaidShip').textContent  = unpaidShippingTotal ? fPKR(unpaidShippingTotal) : '—';
   document.getElementById('kpiNet').textContent         = fPKR(netReceivable);
   document.getElementById('kpiNetSub').textContent = financeSource === 'shipkartex'
-    ? 'Estimate: unpaid delivered COD − delivery charges'
+    ? 'Pending delivered COD − delivery charges'
     : '(Unpaid COD×96%) − Ship.';
   document.getElementById('kpiInvoicesPending').textContent = invoicesPendingTotal ? fPKR(invoicesPendingTotal) : '—';
   document.getElementById('kpiInvoicesPendingSub').textContent = `${pendingInvoices.length} invoice${pendingInvoices.length === 1 ? '' : 's'} processing`;

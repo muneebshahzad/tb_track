@@ -43,14 +43,18 @@ class ShipkartexTests(unittest.TestCase):
             {'tracking_no': 'LE2', 'order_id': 11, 'payment_status': 'Pending',
              'collection_amount': '900', 'delivery_charges': '150', 'status': 'New Booked',
              'order_date': '2026-09-01 12:00:00'},
+            {'tracking_no': 'LE3', 'order_id': 12, 'payment_status': 'Pending',
+             'collection_amount': '2000', 'delivery_charges': '250', 'status': 'Delivered',
+             'order_date': '2026-10-12 12:00:00'},
         ]
         with patch.dict(os.environ, {'SHIPKARTEX_AUTH_KEY': 'test'}), patch.object(self.client, 'post', return_value=source):
             records = self.client.payments('2026-10-01', '2026-10-31')
-        self.assertEqual(len(records), 1)
+        self.assertEqual(len(records), 2)
         self.assertEqual(records[0]['cn'], 'LE1')
-        self.assertEqual(records[0]['net'], 1300)
         self.assertTrue(records[0]['cod_paid'])
         self.assertIsNone(records[0]['ship_paid'])
+        self.assertEqual(records[0]['net'], 0)
+        self.assertEqual(records[1]['net'], 1750)
 
     def test_failure_preserves_status(self):
         item = {'tracking_number': '1', 'courier': 'Shipkartex', 'status': 'Out for Delivery'}

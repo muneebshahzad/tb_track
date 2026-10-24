@@ -104,18 +104,21 @@ class ShipkartexClient:
             cod = float(row.get('collection_amount') or 0)
             charges = float(row.get('delivery_charges') or 0)
             payment_status = str(row.get('payment_status') or '').strip()
+            shipment_status = str(row.get('status') or '').strip()
+            cod_paid = payment_status.lower() == 'paid'
+            receivable = cod - charges if shipment_status.lower().startswith('delivered') and not cod_paid else 0
             normalized.append({
                 'order_id': str(row.get('order_id') or '—'),
                 'cn': str(row.get('tracking_no') or '—'),
                 'products': str(row.get('product_descriptiption') or '—'),
                 'cod': cod,
-                'status': str(row.get('status') or '—'),
+                'status': shipment_status or '—',
                 'ship_charges': charges,
                 'ship_paid': None,
-                'cod_paid': payment_status.lower() == 'paid',
+                'cod_paid': cod_paid,
                 'payment_status': payment_status or 'Unknown',
                 'inv_date': '—',
-                'net': cod - charges,
+                'net': receivable,
                 'order_date': str(row.get('order_date') or ''),
                 'status_date': str(row.get('status_date') or ''),
             })

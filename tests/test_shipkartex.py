@@ -136,6 +136,13 @@ class ShipkartexTests(unittest.TestCase):
         self.assertIn("hour='0-2,9-23'", main_source)
         self.assertIn("id='hourly_peak_refresh'", main_source)
         self.assertIn("{'shopify': orders, 'daraz': daraz_state}", main_source)
+        payment_template = Path('templates/shipkart_payments.html').read_text()
+        self.assertIn("from.setDate(from.getDate() - 59)", payment_template)
+        self.assertIn("id=\"skReceivableAmount\"", payment_template)
+        self.assertIn("id=\"skUndeliveredAmount\"", payment_template)
+        self.assertIn("id=\"skReceivedAmount\"", payment_template)
+        self.assertIn("id=\"skPayableAmount\"", payment_template)
+        self.assertIn("id=\"skShipPaidAmount\"", payment_template)
 
     def test_manual_refresh_does_not_send_shipkartex_to_leopards(self):
         # Load just this route to avoid application's production startup side effects.

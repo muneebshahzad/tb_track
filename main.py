@@ -1229,6 +1229,7 @@ def build_admin_mobile_sections():
         {'id': 'dashboard', 'label': 'Dashboard', 'icon': '🏠', 'src': '/?embedded=1'},
         {'id': 'inbox', 'label': 'Inbox', 'icon': '💬', 'src': '/whatsapp/inbox?embedded=1'},
         {'id': 'payments', 'label': 'Payments', 'icon': '💰', 'src': '/payments?embedded=1'},
+        {'id': 'shipkart-payments', 'label': 'ShipKart Pay', 'icon': '🚛', 'src': '/shipkart-payments?embedded=1'},
         {'id': 'scanner', 'label': 'Scanner', 'icon': '🔍', 'src': '/employee_portal'},
         {'id': 'employee-orders', 'label': 'Orders', 'icon': '🧾', 'src': '/employee_portal/orders'},
         {'id': 'pending', 'label': 'Pending', 'icon': '📋', 'src': '/pending?embedded=1'},
@@ -4833,6 +4834,11 @@ def normalize_shipper_advice_items(payload):
 @app.route('/payments')
 def payments_page():
     return render_template('payments.html')
+
+
+@app.route('/shipkart-payments')
+def shipkart_payments_page():
+    return render_template('shipkart_payments.html')
 
 
 @app.route('/attendance/login', methods=['GET', 'POST'])

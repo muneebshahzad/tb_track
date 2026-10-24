@@ -154,6 +154,7 @@
       <a href="/attendance/admin" class="sb-item {% if request.path.startswith('/attendance') %}active{% endif %}"><span class="sb-icon">🕒</span><span class="sb-item-label">Attendance</span></a>
       <a href="#" class="sb-item" id="refreshDataBtn" onclick="triggerRefresh(event)"><span class="sb-icon">🔄</span><span class="sb-item-label">Refresh Data</span></a>
       <a href="/payments" class="sb-item {% if request.path == '/payments' %}active{% endif %}"><span class="sb-icon">💰</span><span class="sb-item-label">Finance</span></a>
+      <a href="/shipkart-payments" class="sb-item {% if request.path == '/shipkart-payments' %}active{% endif %}"><span class="sb-icon">🚛</span><span class="sb-item-label">ShipKart Payments</span></a>
     </nav>
     <!-- Sidebar toggle button -->
     <button onclick="toggleSidebar()" class="sb-item" id="sidebarToggleBtn" style="border-top:1px solid rgba(255,255,255,0.1);flex-shrink:0;">

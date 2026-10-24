@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+{% block title %}TB Track – ShipKart Payments{% endblock %}
+
+{% block content %}
+<style>
+  .sk-page { flex:1; overflow:auto; padding:16px; }
+  .sk-filters { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; padding:14px 16px; margin-bottom:16px; }
+  .sk-field { display:flex; flex-direction:column; gap:3px; }
+  .sk-field label { font-size:9px; font-weight:700; color:#858796; text-transform:uppercase; letter-spacing:.06em; }
+  .sk-field input { background:#f8f9fc; border:1px solid #e3e6f0; color:#3a3b45; border-radius:7px; padding:7px 9px; font:12px 'DM Sans',sans-serif; outline:none; }
+  .sk-search { min-width:230px; }
+  .sk-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+  .sk-group { grid-column:1/-1; font-size:11px; font-weight:700; color:#858796; text-transform:uppercase; letter-spacing:.07em; margin-top:3px; }
+  .sk-card { background:#fff; border:1px solid #e3e6f0; border-radius:12px; padding:15px 17px; position:relative; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,.04); }
+  .sk-card::before { content:''; position:absolute; inset:0 0 auto; height:3px; background:var(--accent); }
+  .sk-label { color:#858796; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+  .sk-amount { color:#2d2e36; font:700 21px 'DM Mono',monospace; margin:7px 0 3px; }
+  .sk-count { color:#858796; font-size:11px; }
+  .sk-table { width:100%; border-collapse:collapse; font-size:12px; }
+  .sk-table th { padding:9px 11px; text-align:left; background:#f8f9fc; border-bottom:1px solid #e3e6f0; color:#858796; font-size:10px; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap; }
+  .sk-table td { padding:10px 11px; border-bottom:1px solid #edf0f5; vertical-align:middle; }
+  .sk-table tbody tr:hover td { background:#fafbfe; }
+  .sk-money { font-family:'DM Mono',monospace; white-space:nowrap; font-weight:600; }
+  .sk-pill { display:inline-flex; padding:3px 9px; border-radius:99px; font-size:10px; font-weight:700; white-space:nowrap; }
+  .sk-paid { background:#d4f5e9; color:#0f6848; }
+  .sk-pending { background:#fff3cd; color:#7a5c00; }
+  .sk-status { background:#e8f0ff; color:#3659bd; }
+  @media(max-width:800px) { .sk-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .sk-search { min-width:170px; flex:1; } }
+  @media(max-width:480px) { .sk-grid { grid-template-columns:1fr; } }
+</style>
+
+<div style="height:3px;background:linear-gradient(90deg,#2476b8,#36b9cc,#2476b8);flex-shrink:0;"></div>
+<div style="display:flex;flex-direction:column;height:calc(100% - 3px);overflow:hidden;">
+  <div class="topbar">
+    <span class="topbar-title">ShipKart Payments</span>
+    <span style="font-size:12px;color:#858796;">— Order Ledger</span>
+    <div style="flex:1;"></div>
+    <button class="btn btn-outline" onclick="exportShipkartCSV()">⬇ Export CSV</button>
+  </div>
+
+  <div class="sk-page">
+    <div class="section-card sk-filters">
+      <div class="sk-field"><label>From</label><input type="date" id="skFrom"></div>
+      <div class="sk-field"><label>To</label><input type="date" id="skTo"></div>
+      <button class="btn btn-primary" id="skLoad" onclick="loadShipkartPayments()">Refresh Stats</button>
+      <div class="sk-field" style="margin-left:auto;"><label>Search CN, order or status</label><input class="sk-search" id="skSearch" placeholder="Search…" oninput="renderShipkartTable()"></div>
+    </div>
+
+    <div class="sk-grid">
+      <div class="sk-card" style="--accent:#6f42c1;grid-column:1/-1;"><div class="sk-label">Net Amount</div><div class="sk-amount" id="skNetAmount">Rs 0</div><div class="sk-count" id="skNetCount">0 orders</div></div>
+      <div class="sk-group">COD Amount</div>
+      <div class="sk-card" style="--accent:#f6c23e;"><div class="sk-label">Receivable</div><div class="sk-amount" id="skReceivableAmount">Rs 0</div><div class="sk-count" id="skReceivableCount">0 orders</div></div>
+      <div class="sk-card" style="--accent:#36b9cc;"><div class="sk-label">Undelivered</div><div class="sk-amount" id="skUndeliveredAmount">Rs 0</div><div class="sk-count" id="skUndeliveredCount">0 orders</div></div>
+      <div class="sk-card" style="--accent:#1cc88a;"><div class="sk-label">Received</div><div class="sk-amount" id="skReceivedAmount">Rs 0</div><div class="sk-count" id="skReceivedCount">0 orders</div></div>
+      <div class="sk-group">Shipping Charges</div>
+      <div class="sk-card" style="--accent:#e74a3b;"><div class="sk-label">Payable</div><div class="sk-amount" id="skPayableAmount">Rs 0</div><div class="sk-count" id="skPayableCount">0 orders</div></div>
+      <div class="sk-card" style="--accent:#1cc88a;"><div class="sk-label">Paid</div><div class="sk-amount" id="skShipPaidAmount">Rs 0</div><div class="sk-count" id="skShipPaidCount">0 orders</div></div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-header"><strong>Consignments</strong><span class="section-count" id="skTableCount">0</span><span style="margin-left:auto;font-size:11px;color:#858796;" id="skRangeLabel"></span></div>
+      <div style="overflow-x:auto;">
+        <table class="sk-table">
+          <thead><tr><th>CN</th><th>Order</th><th>Order Date</th><th>Shipment Status</th><th>Payment</th><th>COD</th><th>Shipping</th><th>Net</th></tr></thead>
+          <tbody id="skBody"><tr><td colspan="8" style="padding:36px;text-align:center;color:#858796;">Loading ShipKart payments…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let shipkartRows = [];
+const money = value => 'Rs ' + Math.round(Number(value || 0)).toLocaleString('en-PK');
+const isDelivered = row => /^delivered/i.test(row.status || '');
+const isReturned = row => /return|cancel/i.test(row.status || '');
+const isPaid = row => String(row.payment_status || '').toLowerCase() === 'paid';
+const isReceivable = row => isDelivered(row) && !isPaid(row);
+const isUndelivered = row => !isPaid(row) && !isDelivered(row) && !isReturned(row);
+const isActiveCOD = row => isPaid(row) || isReceivable(row) || isUndelivered(row);
+
+function setCard(name, rows, amountFn) {
+  document.getElementById(`sk${name}Amount`).textContent = money(rows.reduce((sum, row) => sum + amountFn(row), 0));
+  document.getElementById(`sk${name}Count`).textContent = `${rows.length} order${rows.length === 1 ? '' : 's'}`;
+}
+
+function renderShipkartStats() {
+  const received = shipkartRows.filter(isPaid);
+  const receivable = shipkartRows.filter(isReceivable);
+  const undelivered = shipkartRows.filter(isUndelivered);
+  const active = shipkartRows.filter(isActiveCOD);
+  const shippingPaid = shipkartRows.filter(isPaid);
+  const shippingPayable = shipkartRows.filter(row => !isPaid(row));
+  setCard('Received', received, row => row.cod);
+  setCard('Receivable', receivable, row => row.cod);
+  setCard('Undelivered', undelivered, row => row.cod);
+  setCard('ShipPaid', shippingPaid, row => row.ship_charges);
+  setCard('Payable', shippingPayable, row => row.ship_charges);
+  setCard('Net', active, row => row.cod - row.ship_charges);
+}
+
+function filteredShipkartRows() {
+  const query = document.getElementById('skSearch').value.trim().toLowerCase();
+  if (!query) return shipkartRows;
+  return shipkartRows.filter(row => [row.cn, row.order_id, row.status, row.payment_status].some(value => String(value || '').toLowerCase().includes(query)));
+}
+
+function renderShipkartTable() {
+  const rows = filteredShipkartRows();
+  document.getElementById('skTableCount').textContent = rows.length;
+  const body = document.getElementById('skBody');
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8" style="padding:36px;text-align:center;color:#858796;">No consignments match this date range and search.</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(row => {
+    const rowNet = isActiveCOD(row) ? row.cod - row.ship_charges : 0;
+    return `<tr>
+      <td style="font-family:'DM Mono',monospace;font-weight:700;color:#2476b8;">${escapeHtml(row.cn)}</td>
+      <td>${escapeHtml(row.order_id)}</td>
+      <td style="white-space:nowrap;">${escapeHtml(String(row.order_date || '').slice(0,10) || '—')}</td>
+      <td><span class="sk-pill sk-status">${escapeHtml(row.status)}</span></td>
+      <td><span class="sk-pill ${isPaid(row) ? 'sk-paid' : 'sk-pending'}">${escapeHtml(row.payment_status)}</span></td>
+      <td class="sk-money">${money(row.cod)}</td>
+      <td class="sk-money">${money(row.ship_charges)}</td>
+      <td class="sk-money" style="color:${rowNet >= 0 ? '#0f6848' : '#e74a3b'};">${money(rowNet)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function loadShipkartPayments() {
+  const from = document.getElementById('skFrom').value;
+  const to = document.getElementById('skTo').value;
+  const button = document.getElementById('skLoad');
+  button.disabled = true; button.textContent = 'Loading…';
+  try {
+    const response = await fetch(`/api/shipkartex/payments?from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}`);
+    const payload = await response.json();
+    if (!response.ok || Number(payload.status || 0) !== 1) throw new Error(payload.error || 'Could not load ShipKart payments');
+    shipkartRows = payload.data || [];
+    document.getElementById('skRangeLabel').textContent = `${from} to ${to}`;
+    renderShipkartStats(); renderShipkartTable();
+  } catch (error) {
+    showToast(error.message || 'Could not load ShipKart payments');
+  } finally {
+    button.disabled = false; button.textContent = 'Refresh Stats';
+  }
+}
+
+function exportShipkartCSV() {
+  const rows = filteredShipkartRows();
+  const lines = [['CN','Order','Order Date','Shipment Status','Payment Status','COD','Shipping Charges','Net']];
+  rows.forEach(row => lines.push([row.cn,row.order_id,String(row.order_date||'').slice(0,10),`"${String(row.status||'').replace(/"/g,'""')}"`,row.payment_status,row.cod,row.ship_charges,isActiveCOD(row) ? row.cod-row.ship_charges : 0]));
+  const blob = new Blob([lines.map(row => row.join(',')).join('\n')], {type:'text/csv'});
+  const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `shipkart-payments-${document.getElementById('skTo').value}.csv`; link.click();
+}
+
+(function initShipkartPayments() {
+  const today = new Date();
+  const from = new Date(today); from.setDate(from.getDate() - 59);
+  document.getElementById('skTo').value = today.toISOString().slice(0,10);
+  document.getElementById('skFrom').value = from.toISOString().slice(0,10);
+  loadShipkartPayments();
+})();
+</script>
+{% endblock %}

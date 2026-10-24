@@ -247,7 +247,17 @@ function triggerRefresh(e) {
   if (!watchedPaths.has(window.location.pathname)) return;
 
   let fingerprint = null;
+  function isPakistanPeakRefreshTime() {
+    const hour = Number(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Karachi',
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).format(new Date()));
+    return hour >= 9 || hour <= 2;
+  }
+
   async function checkState(initial = false) {
+    if (!initial && !isPakistanPeakRefreshTime()) return;
     if (window.bulkActionInProgress) return;
     try {
       const response = await fetch('/api/shopify/order-state', { credentials: 'same-origin' });
@@ -275,7 +285,7 @@ function triggerRefresh(e) {
   }
 
   checkState(true);
-  window.setInterval(() => checkState(false), 30000);
+  window.setInterval(() => checkState(false), 3600000);
 })();
 </script>
 

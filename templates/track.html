@@ -1217,14 +1217,6 @@ function refreshTracking() {
     .catch(() => { icon.style.animation = ''; btn.disabled = false; showToast('Refresh failed'); });
 }
 
-// Auto-refresh every 8 minutes
-setInterval(() => {
-  if (window.bulkActionInProgress) return;
-  fetch('/api/refresh-tracking', { method:'POST' })
-    .then(r => r.json()).then(d => { if (d.updated > 0 && !window.bulkActionInProgress) location.reload(); })
-    .catch(() => {});
-}, 480000);
-
 // ── Email ──
 function sendEmail(type, trackingNumber) {
   const templates = {

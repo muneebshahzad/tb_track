@@ -4499,10 +4499,24 @@ def build_shopify_order_state():
             for order in order_details
         ]
 
-    state_json = json.dumps(orders, sort_keys=True, default=str)
+    daraz_state = [
+        {
+            'order_id': str(order.get('order_id') or order.get('order_number') or ''),
+            'status': str(order.get('status') or ''),
+            'updated': str(order.get('updated_at') or order.get('update_time') or ''),
+        }
+        for order in daraz_orders
+    ]
+
+    state_json = json.dumps(
+        {'shopify': orders, 'daraz': daraz_state},
+        sort_keys=True,
+        default=str,
+    )
     return {
         'success': True,
         'count': len(orders),
+        'daraz_count': len(daraz_state),
         'fingerprint': hashlib.sha256(state_json.encode('utf-8')).hexdigest(),
         'generated_at': datetime.now().isoformat(timespec='seconds'),
     }
@@ -6212,8 +6226,16 @@ with app.app_context():
     ensure_default_attendance_admin()
 
 # Start background scheduler at module level so Gunicorn picks it up
-scheduler = BackgroundScheduler(daemon=True)
-scheduler.add_job(background_refresh, 'interval', minutes=120)
+scheduler = BackgroundScheduler(daemon=True, timezone=KARACHI_TZ)
+scheduler.add_job(
+    background_refresh,
+    'cron',
+    hour='0-2,9-23',
+    minute=0,
+    timezone=KARACHI_TZ,
+    id='hourly_peak_refresh',
+    replace_existing=True,
+)
 # Also run once 30 seconds after startup (after health check passes)
 scheduler.add_job(background_refresh, 'date',
                   run_date=dt.datetime.now() + dt.timedelta(seconds=30))

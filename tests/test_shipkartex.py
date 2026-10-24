@@ -101,9 +101,15 @@ class ShipkartexTests(unittest.TestCase):
         base_template = Path('templates/base.html').read_text()
         self.assertIn('if (window.bulkActionInProgress) return;', base_template)
         self.assertIn('if (!window.bulkActionInProgress) window.location.reload();', base_template)
+        self.assertIn("timeZone: 'Asia/Karachi'", base_template)
+        self.assertIn('window.setInterval(() => checkState(false), 3600000);', base_template)
+        self.assertNotIn('}, 480000);', template)
         main_source = Path('main.py').read_text()
         self.assertIn('if tag.strip().lower() == "archived":', main_source)
         self.assertIn('"message": "Order archived successfully."', main_source)
+        self.assertIn("hour='0-2,9-23'", main_source)
+        self.assertIn("id='hourly_peak_refresh'", main_source)
+        self.assertIn("{'shopify': orders, 'daraz': daraz_state}", main_source)
 
     def test_manual_refresh_does_not_send_shipkartex_to_leopards(self):
         # Load just this route to avoid application's production startup side effects.

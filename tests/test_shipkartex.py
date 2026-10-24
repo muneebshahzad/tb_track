@@ -143,6 +143,9 @@ class ShipkartexTests(unittest.TestCase):
         self.assertIn("id=\"skReceivedAmount\"", payment_template)
         self.assertIn("id=\"skPayableAmount\"", payment_template)
         self.assertIn("id=\"skShipPaidAmount\"", payment_template)
+        self.assertIn("const isReceived = row => isPaid(row) && !isReturned(row);", payment_template)
+        self.assertIn("!isDelivered(row) && !isBooked(row) && !isReturned(row)", payment_template)
+        self.assertIn("setCard('Net', receivable, row => row.cod - row.ship_charges);", payment_template)
 
     def test_manual_refresh_does_not_send_shipkartex_to_leopards(self):
         # Load just this route to avoid application's production startup side effects.

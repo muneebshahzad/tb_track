@@ -76,10 +76,11 @@ let shipkartRows = [];
 const money = value => 'Rs ' + Math.round(Number(value || 0)).toLocaleString('en-PK');
 const isDelivered = row => /^delivered/i.test(row.status || '');
 const isReturned = row => /return|cancel/i.test(row.status || '');
+const isBooked = row => /^(new\s+)?booked$|^order is booked$/i.test(String(row.status || '').trim());
 const isPaid = row => String(row.payment_status || '').toLowerCase() === 'paid';
 const isReceivable = row => isDelivered(row) && !isPaid(row);
-const isUndelivered = row => !isPaid(row) && !isDelivered(row) && !isReturned(row);
-const isActiveCOD = row => isPaid(row) || isReceivable(row) || isUndelivered(row);
+const isUndelivered = row => !isPaid(row) && !isDelivered(row) && !isBooked(row) && !isReturned(row);
+const isReceived = row => isPaid(row) && !isReturned(row);
 
 function setCard(name, rows, amountFn) {
   document.getElementById(`sk${name}Amount`).textContent = money(rows.reduce((sum, row) => sum + amountFn(row), 0));
@@ -87,18 +88,17 @@ function setCard(name, rows, amountFn) {
 }
 
 function renderShipkartStats() {
-  const received = shipkartRows.filter(isPaid);
+  const received = shipkartRows.filter(isReceived);
   const receivable = shipkartRows.filter(isReceivable);
   const undelivered = shipkartRows.filter(isUndelivered);
-  const active = shipkartRows.filter(isActiveCOD);
-  const shippingPaid = shipkartRows.filter(isPaid);
-  const shippingPayable = shipkartRows.filter(row => !isPaid(row));
+  const shippingPaid = shipkartRows.filter(row => isPaid(row) && !isReturned(row));
+  const shippingPayable = shipkartRows.filter(row => !isPaid(row) && !isReturned(row));
   setCard('Received', received, row => row.cod);
   setCard('Receivable', receivable, row => row.cod);
   setCard('Undelivered', undelivered, row => row.cod);
   setCard('ShipPaid', shippingPaid, row => row.ship_charges);
   setCard('Payable', shippingPayable, row => row.ship_charges);
-  setCard('Net', active, row => row.cod - row.ship_charges);
+  setCard('Net', receivable, row => row.cod - row.ship_charges);
 }
 
 function filteredShipkartRows() {
@@ -116,7 +116,7 @@ function renderShipkartTable() {
     return;
   }
   body.innerHTML = rows.map(row => {
-    const rowNet = isActiveCOD(row) ? row.cod - row.ship_charges : 0;
+    const rowNet = isReceivable(row) ? row.cod - row.ship_charges : 0;
     return `<tr>
       <td style="font-family:'DM Mono',monospace;font-weight:700;color:#2476b8;">${escapeHtml(row.cn)}</td>
       <td>${escapeHtml(row.order_id)}</td>
@@ -156,7 +156,7 @@ async function loadShipkartPayments() {
 function exportShipkartCSV() {
   const rows = filteredShipkartRows();
   const lines = [['CN','Order','Order Date','Shipment Status','Payment Status','COD','Shipping Charges','Net']];
-  rows.forEach(row => lines.push([row.cn,row.order_id,String(row.order_date||'').slice(0,10),`"${String(row.status||'').replace(/"/g,'""')}"`,row.payment_status,row.cod,row.ship_charges,isActiveCOD(row) ? row.cod-row.ship_charges : 0]));
+  rows.forEach(row => lines.push([row.cn,row.order_id,String(row.order_date||'').slice(0,10),`"${String(row.status||'').replace(/"/g,'""')}"`,row.payment_status,row.cod,row.ship_charges,isReceivable(row) ? row.cod-row.ship_charges : 0]));
   const blob = new Blob([lines.map(row => row.join(',')).join('\n')], {type:'text/csv'});
   const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `shipkart-payments-${document.getElementById('skTo').value}.csv`; link.click();
 }

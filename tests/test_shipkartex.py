@@ -79,6 +79,16 @@ class ShipkartexTests(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertEqual(response['error'], 'No Leopards tracking record was found for this CN.')
 
+    def test_dashboard_bulk_controls_cover_status_variants(self):
+        template = Path('templates/track.html').read_text()
+        self.assertIn('id="selectAllDisplayedBtn"', template)
+        self.assertIn('function toggleSelectAllDisplayed()', template)
+        self.assertIn('id="bulkMarkDeliveredBtn"', template)
+        self.assertIn("'return to sender'", template)
+        self.assertIn("'returned to shipper'", template)
+        self.assertIn('ORDER_DATA.filter(o => isReturnedStatus(o.status))', template)
+        self.assertIn('ORDER_DATA.filter(o => isOutForDeliveryStatus(o.status))', template)
+
     def test_manual_refresh_does_not_send_shipkartex_to_leopards(self):
         # Load just this route to avoid application's production startup side effects.
         tree = ast.parse(Path('main.py').read_text())

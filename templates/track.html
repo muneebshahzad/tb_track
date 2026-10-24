@@ -21,6 +21,9 @@
   .bulk-actions { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; flex: 1; }
   .bulk-btn { padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.1); color: #fff; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'DM Sans', sans-serif; white-space: nowrap; transition: background 0.15s; }
   .bulk-btn:hover { background: rgba(255,255,255,0.2); }
+  .select-all-btn { padding: 5px 10px; border-radius: 7px; border: 1px solid #cfd7ed; background: #fff; color: #3659bd; cursor: pointer; font-size: 11px; font-weight: 700; font-family: 'DM Sans', sans-serif; white-space: nowrap; }
+  .select-all-btn:hover { background: #eef2ff; }
+  .select-all-btn:disabled { opacity: 0.5; cursor: default; }
   .bulk-clear { padding: 4px 10px; border-radius: 6px; border: 1px solid #555; background: transparent; color: #888; cursor: pointer; font-size: 11px; font-weight: 600; font-family: 'DM Sans', sans-serif; margin-left: auto; white-space: nowrap; }
 
   /* ── Filter strip ── */
@@ -248,7 +251,7 @@
   <div class="bulk-bar" id="bulkBar">
     <span class="bulk-count" id="bulkCount">0 selected</span>
     <div class="bulk-actions">
-      <button class="bulk-btn" onclick="bulkMark('Delivered')">✅ Delivered</button>
+      <button class="bulk-btn" id="bulkMarkDeliveredBtn" onclick="bulkMark('Delivered')">✅ Mark Delivered</button>
       <button class="bulk-btn" onclick="bulkMark('Returned')">↩ Returned</button>
       <button class="bulk-btn" onclick="bulkMark('Booked')">🏷️ Booked</button>
       <button class="bulk-btn" onclick="bulkMark('Out For Delivery')">🚚 Out For Delivery</button>
@@ -321,6 +324,9 @@
       <div style="width:24px;height:24px;border-radius:6px;background:#96bf48;display:flex;align-items:center;justify-content:center;font-size:12px;">🛍</div>
       <span style="font-size:13px;font-weight:700;color:#3a3b45;">Shopify Orders</span>
       <span class="section-count" id="shopifyCount">0</span>
+      <button class="select-all-btn" id="selectAllDisplayedBtn" type="button" onclick="toggleSelectAllDisplayed()" style="margin-left:auto;">
+        ☑ Select all displayed
+      </button>
     </div>
 
     <div style="padding:0 14px;display:flex;flex-direction:column;gap:10px;max-width:960px;" id="shopifyOrderList">
@@ -340,6 +346,7 @@
       {% else %}{% set badge_cls = 'sb-return' %}{% set dot_col = '#e74a3b' %}{% endif %}
 
       <div class="card" id="order-card-{{ order.id }}"
+           data-order-id="{{ order.id }}"
            data-status="{{ s }}"
            data-search="{{ order.order_id }} {{ s }} {{ order.financial_status or 'Pending' }} {{ name }} {{ city }} {{ phone }} {{ addr }} {% for tag in order.tags %}{{ tag }} {% endfor %}{% for i in order.line_items %}{{ i.product_title }} {{ i.tracking_number }} {% endfor %}">
 
@@ -681,6 +688,23 @@
 const ORDER_DATA = {{ order_details | tojson }};
 let SHIPPER_ADVICE_ITEMS = [];
 
+function normalizeTrackingStatus(status) {
+  return String(status || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function isReturnedStatus(status) {
+  return [
+    'return to sender',
+    'returned to sender',
+    'return to shipper',
+    'returned to shipper',
+  ].includes(normalizeTrackingStatus(status));
+}
+
+function isOutForDeliveryStatus(status) {
+  return normalizeTrackingStatus(status) === 'out for delivery';
+}
+
 // ── Stats strip ──
 function renderStats() {
   const counts = {}, totals = {};
@@ -692,8 +716,11 @@ function renderStats() {
     grandTotal += Number(o.total_price || 0);
   });
   const fmt = n => n >= 1000 ? Math.round(n / 1000) + 'k' : Math.round(n).toString();
-  const retCnt = (counts['Being Return'] || 0) + (counts['RETURNED TO SHIPPER'] || 0);
-  const retAmt = (totals['Being Return'] || 0) + (totals['RETURNED TO SHIPPER'] || 0);
+  const returnedOrders = ORDER_DATA.filter(o =>
+    normalizeTrackingStatus(o.status) === 'being return' || isReturnedStatus(o.status)
+  );
+  const retCnt = returnedOrders.length;
+  const retAmt = returnedOrders.reduce((sum, o) => sum + Number(o.total_price || 0), 0);
 
   document.getElementById('statsStrip').innerHTML = `
     <div class="stat">
@@ -739,8 +766,8 @@ function renderStats() {
 }
 
 // ── Bottom bar ──
-let ofdCount = ORDER_DATA.filter(o => o.status === 'Out For Delivery').length;
-let rtsCount = ORDER_DATA.filter(o => o.status === 'RETURNED TO SHIPPER').length;
+let ofdCount = ORDER_DATA.filter(o => isOutForDeliveryStatus(o.status)).length;
+let rtsCount = ORDER_DATA.filter(o => isReturnedStatus(o.status)).length;
 
 function updateBottomBar() {
   const btnD = document.getElementById('btnDeliver');
@@ -775,13 +802,16 @@ function applyFilterSearch() {
   document.querySelectorAll('#shopifyOrderList .card').forEach(card => {
     const status = card.dataset.status || '';
     const search = card.dataset.search || '';
-    const matchFilter = currentFilter === 'All' || status === currentFilter || status.includes(currentFilter);
+    const matchFilter = currentFilter === 'All'
+      || (currentFilter === 'RETURNED TO SHIPPER' && isReturnedStatus(status))
+      || normalizeTrackingStatus(status).includes(normalizeTrackingStatus(currentFilter));
     const matchSearch = !q || search.toLowerCase().includes(q);
     const show = matchFilter && matchSearch;
     card.style.display = show ? '' : 'none';
     if (show) visible++;
   });
   document.getElementById('shopifyCount').textContent = visible;
+  updateSelectAllDisplayedControl();
 }
 
 function escapeHtml(value) {
@@ -959,6 +989,47 @@ function toggleSelect(orderId) {
     if (card) card.classList.add('selected');
   }
   updateBulkBar();
+  updateSelectAllDisplayedControl();
+}
+
+function displayedOrderCards() {
+  return [...document.querySelectorAll('#shopifyOrderList .card')]
+    .filter(card => card.style.display !== 'none');
+}
+
+function setCardSelection(card, selected) {
+  const orderId = String(card.dataset.orderId || '');
+  if (!orderId) return;
+  const checkbox = card.querySelector('input[type=checkbox]');
+  if (selected) {
+    selectedOrders.add(orderId);
+    card.classList.add('selected');
+  } else {
+    selectedOrders.delete(orderId);
+    card.classList.remove('selected');
+  }
+  if (checkbox) checkbox.checked = selected;
+}
+
+function toggleSelectAllDisplayed() {
+  const cards = displayedOrderCards();
+  const shouldSelect = cards.some(card => !selectedOrders.has(String(card.dataset.orderId || '')));
+  cards.forEach(card => setCardSelection(card, shouldSelect));
+  updateBulkBar();
+  updateSelectAllDisplayedControl();
+}
+
+function updateSelectAllDisplayedControl() {
+  const button = document.getElementById('selectAllDisplayedBtn');
+  if (!button) return;
+  const cards = displayedOrderCards();
+  const allSelected = cards.length > 0 && cards.every(card =>
+    selectedOrders.has(String(card.dataset.orderId || ''))
+  );
+  button.disabled = cards.length === 0;
+  button.textContent = allSelected
+    ? `☐ Clear displayed (${cards.length})`
+    : `☑ Select all displayed (${cards.length})`;
 }
 
 function updateBulkBar() {
@@ -979,6 +1050,7 @@ function clearSelection() {
   });
   selectedOrders.clear();
   updateBulkBar();
+  updateSelectAllDisplayedControl();
 }
 
 async function bulkMark(tag) {
@@ -1004,7 +1076,7 @@ async function bulkMark(tag) {
 async function applyDeliveredToAll() {
   const btn = document.getElementById('btnDeliver');
   const lbl = document.getElementById('deliverLabel');
-  const toDeliver = ORDER_DATA.filter(o => o.status === 'Out For Delivery');
+  const toDeliver = ORDER_DATA.filter(o => isOutForDeliveryStatus(o.status));
   if (!toDeliver.length) return;
   btn.disabled = true;
   for (let i = 0; i < toDeliver.length; i++) {
@@ -1020,11 +1092,11 @@ async function applyDeliveredToAll() {
   btn.disabled = false;
 }
 
-// ── Apply Returned to All (RETURNED TO SHIPPER → Returned) ──
+// ── Apply Returned to All (all final return-status variants → Returned) ──
 async function applyReturnedToAll() {
   const btn = document.getElementById('btnReturn');
   const lbl = document.getElementById('returnLabel');
-  const toReturn = ORDER_DATA.filter(o => o.status === 'RETURNED TO SHIPPER');
+  const toReturn = ORDER_DATA.filter(o => isReturnedStatus(o.status));
   if (!toReturn.length) return;
   btn.disabled = true;
   for (let i = 0; i < toReturn.length; i++) {
@@ -1127,6 +1199,7 @@ fetch('/daraz/token-status').then(r => r.json()).then(d => {
 // ── Init ──
 renderStats();
 updateBottomBar();
+applyFilterSearch();
 loadShipperAdvice(false);
 </script>
 {% endblock %}

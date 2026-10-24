@@ -339,10 +339,10 @@
       {% set s = order.status or '' %}
       {% set wa_phone = phone | replace('+','') %}
 
-      {% if s == 'Booked' %}{% set badge_cls = 'sb-booked' %}{% set dot_col = '#4e73df' %}
+      {% if s == 'Booked' or s == 'Order is Booked' %}{% set badge_cls = 'sb-booked' %}{% set dot_col = '#4e73df' %}
       {% elif s == 'Un-Booked' %}{% set badge_cls = 'sb-unbooked' %}{% set dot_col = '#aaa' %}
       {% elif s == 'Delivered' %}{% set badge_cls = 'sb-delivered' %}{% set dot_col = '#1cc88a' %}
-      {% elif s == 'Out For Delivery' %}{% set badge_cls = 'sb-ofd' %}{% set dot_col = '#f6c23e' %}
+      {% elif s == 'Out For Delivery' or (s|lower).startswith('assigned to courier') %}{% set badge_cls = 'sb-ofd' %}{% set dot_col = '#f6c23e' %}
       {% else %}{% set badge_cls = 'sb-return' %}{% set dot_col = '#e74a3b' %}{% endif %}
 
       <div class="card" id="order-card-{{ order.id }}"
@@ -702,20 +702,37 @@ function isReturnedStatus(status) {
 }
 
 function isOutForDeliveryStatus(status) {
-  return normalizeTrackingStatus(status) === 'out for delivery';
+  const normalized = normalizeTrackingStatus(status);
+  return normalized === 'out for delivery' || normalized.startsWith('assigned to courier');
+}
+
+function isBookedStatus(status) {
+  return ['booked', 'order is booked'].includes(normalizeTrackingStatus(status));
+}
+
+function isUnBookedStatus(status) {
+  return normalizeTrackingStatus(status) === 'un-booked';
+}
+
+function statusOrders(predicate) {
+  return ORDER_DATA.filter(order => predicate(order.status));
+}
+
+function statusTotal(orders) {
+  return orders.reduce((sum, order) => sum + Number(order.total_price || 0), 0);
 }
 
 // ── Stats strip ──
 function renderStats() {
-  const counts = {}, totals = {};
   let grandTotal = 0;
   ORDER_DATA.forEach(o => {
-    const s = o.status || 'Un-Booked';
-    counts[s] = (counts[s] || 0) + 1;
-    totals[s] = (totals[s] || 0) + Number(o.total_price || 0);
     grandTotal += Number(o.total_price || 0);
   });
   const fmt = n => n >= 1000 ? Math.round(n / 1000) + 'k' : Math.round(n).toString();
+  const bookedOrders = statusOrders(isBookedStatus);
+  const unBookedOrders = statusOrders(isUnBookedStatus);
+  const outForDeliveryOrders = statusOrders(isOutForDeliveryStatus);
+  const deliveredOrders = statusOrders(status => normalizeTrackingStatus(status) === 'delivered');
   const returnedOrders = ORDER_DATA.filter(o =>
     normalizeTrackingStatus(o.status) === 'being return' || isReturnedStatus(o.status)
   );
@@ -730,23 +747,23 @@ function renderStats() {
     </div>
     <div class="stat-div"></div>
     <div class="stat">
-      <span class="stat-val" style="color:#4e73df">${counts['Booked']||0}</span>
-      <span class="stat-pkr">Rs ${fmt(totals['Booked']||0)}</span>
+      <span class="stat-val" style="color:#4e73df">${bookedOrders.length}</span>
+      <span class="stat-pkr">Rs ${fmt(statusTotal(bookedOrders))}</span>
       <span class="stat-lbl">Booked</span>
     </div>
     <div class="stat">
-      <span class="stat-val" style="color:#8a8b96">${counts['Un-Booked']||0}</span>
-      <span class="stat-pkr">Rs ${fmt(totals['Un-Booked']||0)}</span>
+      <span class="stat-val" style="color:#8a8b96">${unBookedOrders.length}</span>
+      <span class="stat-pkr">Rs ${fmt(statusTotal(unBookedOrders))}</span>
       <span class="stat-lbl">Un-Booked</span>
     </div>
     <div class="stat">
-      <span class="stat-val" style="color:#f6c23e">${counts['Out For Delivery']||0}</span>
-      <span class="stat-pkr">Rs ${fmt(totals['Out For Delivery']||0)}</span>
+      <span class="stat-val" style="color:#f6c23e">${outForDeliveryOrders.length}</span>
+      <span class="stat-pkr">Rs ${fmt(statusTotal(outForDeliveryOrders))}</span>
       <span class="stat-lbl">Out For Del.</span>
     </div>
     <div class="stat">
-      <span class="stat-val" style="color:#1cc88a">${counts['Delivered']||0}</span>
-      <span class="stat-pkr">Rs ${fmt(totals['Delivered']||0)}</span>
+      <span class="stat-val" style="color:#1cc88a">${deliveredOrders.length}</span>
+      <span class="stat-pkr">Rs ${fmt(statusTotal(deliveredOrders))}</span>
       <span class="stat-lbl">Delivered</span>
     </div>
     <div class="stat">
@@ -803,8 +820,11 @@ function applyFilterSearch() {
     const status = card.dataset.status || '';
     const search = card.dataset.search || '';
     const matchFilter = currentFilter === 'All'
+      || (currentFilter === 'Booked' && isBookedStatus(status))
+      || (currentFilter === 'Un-Booked' && isUnBookedStatus(status))
+      || (currentFilter === 'Out For Delivery' && isOutForDeliveryStatus(status))
       || (currentFilter === 'RETURNED TO SHIPPER' && isReturnedStatus(status))
-      || normalizeTrackingStatus(status).includes(normalizeTrackingStatus(currentFilter));
+      || normalizeTrackingStatus(status) === normalizeTrackingStatus(currentFilter);
     const matchSearch = !q || search.toLowerCase().includes(q);
     const show = matchFilter && matchSearch;
     card.style.display = show ? '' : 'none';

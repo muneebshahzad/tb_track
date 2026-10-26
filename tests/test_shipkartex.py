@@ -141,6 +141,8 @@ class ShipkartexTests(unittest.TestCase):
         self.assertIn("if refreshed_count < minimum_safe_count", main_source)
         self.assertIn("Shopify pagination failed after", main_source)
         self.assertIn("Shopify refresh could not process", main_source)
+        self.assertIn("Always fetch the complete set", main_source)
+        self.assertNotIn("if not order_details:\n        print(\"BACKGROUND REFRESH", main_source)
         payment_template = Path('templates/shipkart_payments.html').read_text()
         self.assertIn("from.setDate(from.getDate() - 59)", payment_template)
         self.assertIn("id=\"skReceivableAmount\"", payment_template)

@@ -6173,19 +6173,18 @@ setup_shopify()
 # ── Background refresh ────────────────────────────────────────────────────────
 
 def background_refresh():
-    """Refresh all data every 120 minutes. On first run, does full Shopify fetch."""
+    """Refresh the complete Shopify cache and active courier data."""
     global daraz_orders, order_details
     print(f"BACKGROUND REFRESH: Starting at {dt.datetime.now()}")
 
-    # Full Shopify fetch when order_details is empty (first startup)
-    if not order_details:
-        print("BACKGROUND REFRESH: order_details empty — doing full Shopify fetch.")
-        try:
-            refreshed_orders = asyncio.run(getShopifyOrders())
-            refreshed_count = replace_shopify_order_cache(refreshed_orders, source='Background refresh')
-            print(f"BACKGROUND REFRESH: Shopify fetch complete ({refreshed_count} orders).")
-        except Exception as e:
-            print(f"BACKGROUND REFRESH ERROR (Shopify full fetch): {e}")
+    # Always fetch the complete set. A few webhook-populated orders after startup
+    # must not cause the scheduled full population to be skipped.
+    try:
+        refreshed_orders = asyncio.run(getShopifyOrders())
+        refreshed_count = replace_shopify_order_cache(refreshed_orders, source='Background refresh')
+        print(f"BACKGROUND REFRESH: Shopify fetch complete ({refreshed_count} orders).")
+    except Exception as e:
+        print(f"BACKGROUND REFRESH ERROR (Shopify full fetch): {e}")
 
     try:
         daraz_statuses = ['shipped', 'pending', 'ready_to_ship', 'packed']

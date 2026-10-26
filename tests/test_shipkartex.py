@@ -54,7 +54,15 @@ class ShipkartexTests(unittest.TestCase):
         self.assertTrue(records[0]['cod_paid'])
         self.assertIsNone(records[0]['ship_paid'])
         self.assertEqual(records[0]['net'], 0)
-        self.assertEqual(records[1]['net'], 1750)
+        self.assertEqual(records[1]['net'], 1681)
+
+    def test_payments_applies_tax_to_delivery_charges(self):
+        source = [{'tracking_no': 'LE1', 'payment_status': 'Pending', 'collection_amount': '1000',
+                   'delivery_charges': '400', 'status': 'Delivered', 'order_date': '2026-10-10'}]
+        with patch.dict(os.environ, {'SHIPKARTEX_AUTH_KEY': 'test'}), patch.object(self.client, 'post', return_value=source):
+            record = self.client.payments()[0]
+        self.assertEqual(record['ship_charges'], 510)
+        self.assertEqual(record['net'], 490)
 
     def test_failure_preserves_status(self):
         item = {'tracking_number': '1', 'courier': 'Shipkartex', 'status': 'Out for Delivery'}
@@ -153,6 +161,8 @@ class ShipkartexTests(unittest.TestCase):
         self.assertIn("const isReceived = row => isPaid(row) && !isReturned(row);", payment_template)
         self.assertIn("!isDelivered(row) && !isBooked(row) && !isReturned(row)", payment_template)
         self.assertIn("setCard('Net', receivable, row => row.cod - row.ship_charges);", payment_template)
+        self.assertIn("function sortShipkart(key)", payment_template)
+        self.assertIn("trim().toLowerCase() !== 'new booked'", payment_template)
 
     def test_manual_refresh_does_not_send_shipkartex_to_leopards(self):
         # Load just this route to avoid application's production startup side effects.

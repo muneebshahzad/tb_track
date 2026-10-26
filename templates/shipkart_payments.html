@@ -17,7 +17,9 @@
   .sk-amount { color:#2d2e36; font:700 21px 'DM Mono',monospace; margin:7px 0 3px; }
   .sk-count { color:#858796; font-size:11px; }
   .sk-table { width:100%; border-collapse:collapse; font-size:12px; }
-  .sk-table th { padding:9px 11px; text-align:left; background:#f8f9fc; border-bottom:1px solid #e3e6f0; color:#858796; font-size:10px; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap; }
+  .sk-table th { padding:9px 11px; text-align:left; background:#f8f9fc; border-bottom:1px solid #e3e6f0; color:#858796; font-size:10px; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap; cursor:pointer; user-select:none; }
+  .sk-table th:hover { color:#2476b8; background:#eef5fb; }
+  .sk-sort { display:inline-block; margin-left:4px; opacity:.45; }
   .sk-table td { padding:10px 11px; border-bottom:1px solid #edf0f5; vertical-align:middle; }
   .sk-table tbody tr:hover td { background:#fafbfe; }
   .sk-money { font-family:'DM Mono',monospace; white-space:nowrap; font-weight:600; }
@@ -61,7 +63,16 @@
       <div class="section-header"><strong>Consignments</strong><span class="section-count" id="skTableCount">0</span><span style="margin-left:auto;font-size:11px;color:#858796;" id="skRangeLabel"></span></div>
       <div style="overflow-x:auto;">
         <table class="sk-table">
-          <thead><tr><th>CN</th><th>Order</th><th>Order Date</th><th>Shipment Status</th><th>Payment</th><th>COD</th><th>Shipping</th><th>Net</th></tr></thead>
+          <thead><tr>
+            <th onclick="sortShipkart('cn')">CN <span class="sk-sort" id="skSort-cn">↕</span></th>
+            <th onclick="sortShipkart('order_id')">Order <span class="sk-sort" id="skSort-order_id">↕</span></th>
+            <th onclick="sortShipkart('order_date')">Order Date <span class="sk-sort" id="skSort-order_date">▼</span></th>
+            <th onclick="sortShipkart('status')">Shipment Status <span class="sk-sort" id="skSort-status">↕</span></th>
+            <th onclick="sortShipkart('payment_status')">Payment <span class="sk-sort" id="skSort-payment_status">↕</span></th>
+            <th onclick="sortShipkart('cod')">COD <span class="sk-sort" id="skSort-cod">↕</span></th>
+            <th onclick="sortShipkart('ship_charges')">Shipping <span class="sk-sort" id="skSort-ship_charges">↕</span></th>
+            <th onclick="sortShipkart('net')">Net <span class="sk-sort" id="skSort-net">↕</span></th>
+          </tr></thead>
           <tbody id="skBody"><tr><td colspan="8" style="padding:36px;text-align:center;color:#858796;">Loading ShipKart payments…</td></tr></tbody>
         </table>
       </div>
@@ -73,6 +84,8 @@
 {% block extra_js %}
 <script>
 let shipkartRows = [];
+let shipkartSortKey = 'order_date';
+let shipkartSortDirection = -1;
 const money = value => 'Rs ' + Math.round(Number(value || 0)).toLocaleString('en-PK');
 const isDelivered = row => /^delivered/i.test(row.status || '');
 const isReturned = row => /return|cancel/i.test(row.status || '');
@@ -103,8 +116,24 @@ function renderShipkartStats() {
 
 function filteredShipkartRows() {
   const query = document.getElementById('skSearch').value.trim().toLowerCase();
-  if (!query) return shipkartRows;
-  return shipkartRows.filter(row => [row.cn, row.order_id, row.status, row.payment_status].some(value => String(value || '').toLowerCase().includes(query)));
+  const rows = query
+    ? shipkartRows.filter(row => [row.cn, row.order_id, row.status, row.payment_status].some(value => String(value || '').toLowerCase().includes(query)))
+    : shipkartRows.slice();
+  return rows.sort((left, right) => {
+    const leftValue = shipkartSortKey === 'net' ? (isReceivable(left) ? left.cod-left.ship_charges : 0) : left[shipkartSortKey];
+    const rightValue = shipkartSortKey === 'net' ? (isReceivable(right) ? right.cod-right.ship_charges : 0) : right[shipkartSortKey];
+    if (['cod','ship_charges','net'].includes(shipkartSortKey)) return (Number(leftValue || 0) - Number(rightValue || 0)) * shipkartSortDirection;
+    return String(leftValue || '').localeCompare(String(rightValue || ''), undefined, {numeric:true}) * shipkartSortDirection;
+  });
+}
+
+function sortShipkart(key) {
+  if (shipkartSortKey === key) shipkartSortDirection *= -1;
+  else { shipkartSortKey = key; shipkartSortDirection = 1; }
+  document.querySelectorAll('.sk-sort').forEach(arrow => { arrow.textContent = '↕'; arrow.style.opacity = '.45'; });
+  const active = document.getElementById(`skSort-${key}`);
+  if (active) { active.textContent = shipkartSortDirection === 1 ? '▲' : '▼'; active.style.opacity = '1'; }
+  renderShipkartTable();
 }
 
 function renderShipkartTable() {
@@ -143,7 +172,7 @@ async function loadShipkartPayments() {
     const response = await fetch(`/api/shipkartex/payments?from_date=${encodeURIComponent(from)}&to_date=${encodeURIComponent(to)}`);
     const payload = await response.json();
     if (!response.ok || Number(payload.status || 0) !== 1) throw new Error(payload.error || 'Could not load ShipKart payments');
-    shipkartRows = payload.data || [];
+    shipkartRows = (payload.data || []).filter(row => String(row.status || '').trim().toLowerCase() !== 'new booked');
     document.getElementById('skRangeLabel').textContent = `${from} to ${to}`;
     renderShipkartStats(); renderShipkartTable();
   } catch (error) {

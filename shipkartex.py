@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal, ROUND_HALF_UP
 
 import requests
 
@@ -102,7 +103,10 @@ class ShipkartexClient:
             if end and order_date and order_date > end:
                 continue
             cod = float(row.get('collection_amount') or 0)
-            charges = float(row.get('delivery_charges') or 0)
+            base_charges = Decimal(str(row.get('delivery_charges') or 0))
+            charges = float((base_charges * Decimal('1.1') * Decimal('1.16')).quantize(
+                Decimal('1'), rounding=ROUND_HALF_UP
+            ))
             payment_status = str(row.get('payment_status') or '').strip()
             shipment_status = str(row.get('status') or '').strip()
             cod_paid = payment_status.lower() == 'paid'

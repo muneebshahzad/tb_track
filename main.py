@@ -1107,8 +1107,7 @@ def fetch_all_shopify_orders(start_date, fetch_status):
             status=fetch_status,
         )
     except Exception as e:
-        print(f"Error fetching orders: {e}")
-        return []
+        raise RuntimeError(f"Shopify order fetch failed before the first page: {e}") from e
 
     page_count = 0
     while True:
@@ -1120,14 +1119,34 @@ def fetch_all_shopify_orders(start_date, fetch_status):
                 break
             orders = orders.next_page()
         except Exception as e:
-            print(f"Error fetching next page: {e}")
-            break
+            raise RuntimeError(
+                f"Shopify pagination failed after {page_count} page(s) and {len(all_orders)} orders: {e}"
+            ) from e
 
     print(
         f"Fetched {len(all_orders)} Shopify orders across {page_count} page(s) "
         f"with status={fetch_status}, created_at_min={start_date}."
     )
     return all_orders
+
+
+def replace_shopify_order_cache(refreshed_orders, source='refresh'):
+    """Replace the shared cache only when a refresh looks complete."""
+    if not refreshed_orders:
+        raise RuntimeError(f'{source} returned no Shopify orders')
+    with order_details_lock:
+        previous_count = len(order_details)
+        refreshed_count = len(refreshed_orders)
+        configured_floor = max(1, int(os.getenv('SHOPIFY_MIN_EXPECTED_ORDERS', '50')))
+        minimum_safe_count = max(configured_floor, int(previous_count * 0.8))
+        if refreshed_count < minimum_safe_count:
+            raise RuntimeError(
+                f'{source} returned only {refreshed_count} Shopify orders; expected at least '
+                f'{minimum_safe_count} based on the configured floor and {previous_count} cached orders; '
+                'keeping the existing cache'
+            )
+        order_details[:] = refreshed_orders
+        return refreshed_count
 
 
 async def getShopifyOrders(force_status=None):
@@ -1171,12 +1190,14 @@ async def getShopifyOrders(force_status=None):
 
     tasks   = [process_with_semaphore(o) for o in all_orders]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-
+    processing_errors = [result for result in results if isinstance(result, Exception)]
+    if processing_errors:
+        raise RuntimeError(
+            f'Shopify refresh could not process {len(processing_errors)} of {len(all_orders)} orders; '
+            'the existing cache was preserved'
+        ) from processing_errors[0]
     for r in results:
-        if isinstance(r, Exception):
-            print(f"Error processing order: {r}")
-        else:
-            result.append(r)
+        result.append(r)
 
     try:
         result = enrich_orders_with_protected_customer_data(result)
@@ -1298,10 +1319,8 @@ def refresh_data():
     try:
         refreshed_orders = asyncio.run(getShopifyOrders())
         refresh_daraz_cache_if_needed(force=True)
-        if refreshed_orders:
-            order_details = refreshed_orders
-            return jsonify({'message': 'Data refreshed successfully', 'count': len(order_details), 'daraz_count': len(daraz_orders)})
-        return jsonify({'message': 'Refresh returned no Shopify orders; keeping existing data.', 'count': len(order_details), 'daraz_count': len(daraz_orders)}), 502
+        refreshed_count = replace_shopify_order_cache(refreshed_orders, source='Manual refresh')
+        return jsonify({'message': 'Data refreshed successfully', 'count': refreshed_count, 'daraz_count': len(daraz_orders)})
     except Exception as e:
         print(f"Error refreshing data: {e}")
         return jsonify({'message': 'Failed to refresh data'}), 500
@@ -6163,11 +6182,8 @@ def background_refresh():
         print("BACKGROUND REFRESH: order_details empty — doing full Shopify fetch.")
         try:
             refreshed_orders = asyncio.run(getShopifyOrders())
-            if refreshed_orders:
-                order_details = refreshed_orders
-                print(f"BACKGROUND REFRESH: Shopify fetch complete ({len(order_details)} orders).")
-            else:
-                print("BACKGROUND REFRESH: Shopify fetch returned 0 orders; leaving current order cache unchanged.")
+            refreshed_count = replace_shopify_order_cache(refreshed_orders, source='Background refresh')
+            print(f"BACKGROUND REFRESH: Shopify fetch complete ({refreshed_count} orders).")
         except Exception as e:
             print(f"BACKGROUND REFRESH ERROR (Shopify full fetch): {e}")
 

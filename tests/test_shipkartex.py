@@ -137,6 +137,8 @@ class ShipkartexTests(unittest.TestCase):
         self.assertIn('if (!window.bulkActionInProgress) window.location.reload();', base_template)
         self.assertIn("timeZone: 'Asia/Karachi'", base_template)
         self.assertIn('window.setInterval(() => checkState(false), 3600000);', base_template)
+        self.assertIn('window.setInterval(() => checkState(false, true), 10000);', base_template)
+        self.assertIn('waitingForStartup && startedEmpty && Number(payload.count || 0) > 0', base_template)
         self.assertNotIn('}, 480000);', template)
         main_source = Path('main.py').read_text()
         self.assertIn('if tag.strip().lower() == "archived":', main_source)

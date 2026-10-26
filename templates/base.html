@@ -248,6 +248,8 @@ function triggerRefresh(e) {
   if (!watchedPaths.has(window.location.pathname)) return;
 
   let fingerprint = null;
+  const shopifyCountElement = document.getElementById('shopifyCount');
+  const startedEmpty = shopifyCountElement && Number(shopifyCountElement.textContent || 0) === 0;
   function isPakistanPeakRefreshTime() {
     const hour = Number(new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Karachi',
@@ -257,14 +259,21 @@ function triggerRefresh(e) {
     return hour >= 9 || hour <= 2;
   }
 
-  async function checkState(initial = false) {
-    if (!initial && !isPakistanPeakRefreshTime()) return;
+  async function checkState(initial = false, waitingForStartup = false) {
+    if (!initial && !waitingForStartup && !isPakistanPeakRefreshTime()) return;
     if (window.bulkActionInProgress) return;
     try {
       const response = await fetch('/api/shopify/order-state', { credentials: 'same-origin' });
       if (!response.ok) return;
       const payload = await response.json();
       if (!payload.fingerprint) return;
+      if (waitingForStartup && startedEmpty && Number(payload.count || 0) > 0) {
+        showToast('Shopify orders loaded. Refreshing...', 1200);
+        window.setTimeout(() => {
+          if (!window.bulkActionInProgress) window.location.reload();
+        }, 500);
+        return;
+      }
       if (window.bulkActionInProgress) {
         fingerprint = payload.fingerprint;
         return;
@@ -286,6 +295,7 @@ function triggerRefresh(e) {
   }
 
   checkState(true);
+  if (startedEmpty) window.setInterval(() => checkState(false, true), 10000);
   window.setInterval(() => checkState(false), 3600000);
 })();
 </script>

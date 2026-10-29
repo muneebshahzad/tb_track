@@ -248,8 +248,24 @@ function triggerRefresh(e) {
   if (!watchedPaths.has(window.location.pathname)) return;
 
   let fingerprint = null;
+  let reloadScheduled = false;
+  let startupPollTimer = null;
   const shopifyCountElement = document.getElementById('shopifyCount');
   const startedEmpty = shopifyCountElement && Number(shopifyCountElement.textContent || 0) === 0;
+
+  function scheduleOrderReload(message, delay) {
+    if (reloadScheduled) return;
+    reloadScheduled = true;
+    if (startupPollTimer) {
+      window.clearInterval(startupPollTimer);
+      startupPollTimer = null;
+    }
+    showToast(message, 1200);
+    window.setTimeout(() => {
+      if (!window.bulkActionInProgress) window.location.reload();
+      else reloadScheduled = false;
+    }, delay);
+  }
   function isPakistanPeakRefreshTime() {
     const hour = Number(new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Karachi',
@@ -268,10 +284,7 @@ function triggerRefresh(e) {
       const payload = await response.json();
       if (!payload.fingerprint) return;
       if (waitingForStartup && startedEmpty && Number(payload.count || 0) > 0) {
-        showToast('Shopify orders loaded. Refreshing...', 1200);
-        window.setTimeout(() => {
-          if (!window.bulkActionInProgress) window.location.reload();
-        }, 500);
+        scheduleOrderReload('Shopify orders loaded. Refreshing...', 500);
         return;
       }
       if (window.bulkActionInProgress) {
@@ -284,10 +297,7 @@ function triggerRefresh(e) {
       }
       if (payload.fingerprint !== fingerprint) {
         fingerprint = payload.fingerprint;
-        showToast('Shopify orders updated. Refreshing...', 1200);
-        window.setTimeout(() => {
-          if (!window.bulkActionInProgress) window.location.reload();
-        }, 900);
+        scheduleOrderReload('Shopify orders updated. Refreshing...', 900);
       }
     } catch (error) {
       return;
@@ -295,7 +305,13 @@ function triggerRefresh(e) {
   }
 
   checkState(true);
-  if (startedEmpty) window.setInterval(() => checkState(false, true), 10000);
+  if (startedEmpty) {
+    startupPollTimer = window.setInterval(() => checkState(false, true), 10000);
+    window.setTimeout(() => {
+      if (startupPollTimer) window.clearInterval(startupPollTimer);
+      startupPollTimer = null;
+    }, 10 * 60 * 1000);
+  }
   window.setInterval(() => checkState(false), 3600000);
 })();
 </script>

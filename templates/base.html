@@ -248,23 +248,25 @@ function triggerRefresh(e) {
   if (!watchedPaths.has(window.location.pathname)) return;
 
   let fingerprint = null;
-  let reloadScheduled = false;
   let startupPollTimer = null;
   const shopifyCountElement = document.getElementById('shopifyCount');
   const startedEmpty = shopifyCountElement && Number(shopifyCountElement.textContent || 0) === 0;
 
-  function scheduleOrderReload(message, delay) {
-    if (reloadScheduled) return;
-    reloadScheduled = true;
+  function showOrderUpdateNotice(message) {
     if (startupPollTimer) {
       window.clearInterval(startupPollTimer);
       startupPollTimer = null;
     }
-    showToast(message, 1200);
-    window.setTimeout(() => {
-      if (!window.bulkActionInProgress) window.location.reload();
-      else reloadScheduled = false;
-    }, delay);
+    let notice = document.getElementById('orderUpdateNotice');
+    if (!notice) {
+      notice = document.createElement('button');
+      notice.id = 'orderUpdateNotice';
+      notice.type = 'button';
+      notice.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:10000;padding:12px 18px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.2);cursor:pointer';
+      notice.addEventListener('click', () => window.location.reload());
+      document.body.appendChild(notice);
+    }
+    notice.textContent = message;
   }
   function isPakistanPeakRefreshTime() {
     const hour = Number(new Intl.DateTimeFormat('en-US', {
@@ -284,7 +286,8 @@ function triggerRefresh(e) {
       const payload = await response.json();
       if (!payload.fingerprint) return;
       if (waitingForStartup && startedEmpty && Number(payload.count || 0) > 0) {
-        scheduleOrderReload('Shopify orders loaded. Refreshing...', 500);
+        fingerprint = payload.fingerprint;
+        showOrderUpdateNotice('Shopify orders loaded — click to refresh');
         return;
       }
       if (window.bulkActionInProgress) {
@@ -297,7 +300,7 @@ function triggerRefresh(e) {
       }
       if (payload.fingerprint !== fingerprint) {
         fingerprint = payload.fingerprint;
-        scheduleOrderReload('Shopify orders updated. Refreshing...', 900);
+        showOrderUpdateNotice('New order data available — click to refresh');
       }
     } catch (error) {
       return;

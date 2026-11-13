@@ -1,168 +1,34 @@
 {% extends 'base.html' %}
-{% block title %}TB Track – Pending Orders{% endblock %}
-
+{% block title %}TickBags – Pending Orders{% endblock %}
 {% block content %}
 <style>
-  .stats-grid3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 20px; }
-  .split-tables { display: flex; gap: 16px; padding: 16px; }
-  .split-table { flex: 1; border-radius: 8px; border: 1px solid #e3e6f0; overflow: hidden; }
-  .split-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .split-table th { padding: 8px 10px; text-align: left; font-weight: 700; color: #858796; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; background: #f8f9fc; }
-  .split-table td { padding: 8px 10px; border-bottom: 1px solid #e3e6f0; vertical-align: middle; }
-  .split-table tr:hover td { background: #f8f9fc; }
-  .done-btn { width: 28px; height: 28px; border-radius: 50%; border: none; background: #1cc88a; color: #fff; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
-  .pending-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .pending-table th { padding: 9px 14px; text-align: left; font-weight: 700; color: #858796; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e3e6f0; background: #f8f9fc; white-space: nowrap; }
-  .pending-table td { padding: 10px 14px; border-bottom: 1px solid #e3e6f0; vertical-align: top; }
-  .pending-table tr:hover td { background: #f8f9fc; }
-  @media (max-width: 767px) {
-    .stats-grid3 { grid-template-columns: repeat(2,1fr); }
-    .split-tables { flex-direction: column; }
-  }
+.pending-shell{display:flex;flex-direction:column;height:100%;overflow:hidden}.pending-topbar{height:52px;background:#fff;border-bottom:1px solid #e3e6f0;display:flex;align-items:center;padding:0 20px;gap:12px;flex-shrink:0}.pending-title{font-size:16px;font-weight:700;color:#3a3b45}.pending-scroll{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:16px}.stats-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.section-grid{display:grid;grid-template-columns:.8fr 1.2fr;gap:16px;align-items:start}.summary-list,.order-list{display:flex;flex-direction:column;gap:10px}.summary-row{display:grid;grid-template-columns:52px 1fr auto;gap:12px;align-items:center;padding:10px 12px;border:1px solid #e3e6f0;border-radius:10px;background:#fff}.summary-thumb{width:52px;height:52px;border-radius:9px;overflow:hidden;background:#f2f4f8;display:flex;align-items:center;justify-content:center}.summary-thumb img{width:100%;height:100%;object-fit:cover}.summary-title{font-size:13px;font-weight:700;color:#2d2e36}.summary-meta{font-size:10px;color:#858796;margin-top:4px}.summary-qty{font-size:22px;font-weight:800;color:#4e73df}.order-card{border:1px solid #e3e6f0;border-radius:12px;background:#fff;overflow:hidden}.order-head{padding:12px 14px;display:flex;align-items:flex-start;gap:12px}.order-id{font-family:'DM Mono',monospace;font-size:14px;font-weight:700;color:#4e73df;text-decoration:none}.order-date{font-size:10px;color:#9a9dab;margin-top:2px}.order-badges{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.payment-badge{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;white-space:nowrap}.payment-badge.paid{background:rgba(28,200,138,.12);color:#16845b}.payment-badge.partial{background:rgba(246,194,62,.18);color:#8b6500}.payment-badge.unpaid{background:rgba(231,74,59,.11);color:#c0392b}.order-body{border-top:1px solid #eef0f6;padding:12px 14px;display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.order-items{display:flex;flex-direction:column;gap:8px}.item-row{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;padding:8px 10px;border:1px solid #e8eaef;border-radius:9px;background:#f8f9fc}.item-row img{width:44px;height:44px;border-radius:8px;object-fit:cover}.item-title{font-size:12px;font-weight:600;color:#2d2e36}.item-meta{font-size:10px;color:#858796;margin-top:2px}.item-qty{font-size:11px;font-weight:700;color:#4e73df}.order-side{display:flex;flex-direction:column;gap:10px}.mini-block{padding:10px 12px;border:1px solid #e8eaef;border-radius:10px}.mini-label{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#858796;margin-bottom:6px}.mini-value{font-size:12px;color:#2d2e36;line-height:1.45}.money-line{display:flex;justify-content:space-between;gap:10px;font-size:11px;color:#6f7280}.money-line strong{color:#2d2e36}.filter-chip{border:1px solid #dce2ee;background:#fff;color:#6f7280;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer}.filter-chip.active{background:#4e73df;border-color:#4e73df;color:#fff}.empty-state{padding:30px 16px;text-align:center;color:#858796;font-size:13px}.hidden-order{display:none}.search-input{width:180px;padding:6px 10px;border:1px solid #dce2ee;border-radius:8px;font:12px 'DM Sans',sans-serif}.results-count{font-size:11px;color:#858796}
+@media(max-width:1000px){.stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.section-grid,.order-body{grid-template-columns:1fr}}@media(max-width:767px){.pending-topbar{height:auto;min-height:52px;padding:10px 14px;flex-wrap:wrap}.pending-scroll{padding:12px}.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.search-input{width:140px}.summary-row{grid-template-columns:46px 1fr auto}.summary-thumb{width:46px;height:46px}}
 </style>
-
-<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
-  <!-- Topbar -->
-  <div class="topbar">
-    <span class="topbar-title">Pending Orders</span>
-    <div style="flex:1"></div>
-    <input type="datetime-local" id="dateFilter" onchange="filterItems()"
-      style="padding:5px 10px;border-radius:7px;border:1px solid #e3e6f0;font-size:12px;font-family:'DM Sans',sans-serif;color:#3a3b45;cursor:pointer;"/>
-    <div class="search-box">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#858796" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <input id="itemSearch" placeholder="Search items…" style="width:160px;" oninput="filterItems()"/>
-    </div>
+<div class="pending-shell">
+ <div class="pending-topbar"><span class="pending-title">Pending Orders</span><div style="flex:1"></div><button class="filter-chip active" data-filter="all">All</button><button class="filter-chip" data-filter="unpaid">Unpaid COD</button><button class="filter-chip" data-filter="paid">Paid</button><input class="search-input" id="orderSearch" type="search" placeholder="Search orders, customer, item…"></div>
+ <div class="pending-scroll">
+  <div class="stats-grid">
+   <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,.1)">📋</div><div><div class="stat-label">All Orders</div><div class="stat-value" style="color:#4e73df">{{ all_orders|length }}</div></div></div>
+   <div class="stat-card"><div class="stat-icon" style="background:rgba(28,200,138,.1)">📦</div><div><div class="stat-label">Unique Items</div><div class="stat-value" style="color:#1cc88a">{{ pending_items|length }}</div></div></div>
+   <div class="stat-card"><div class="stat-icon" style="background:rgba(246,194,62,.12)">🔢</div><div><div class="stat-label">Total Qty</div><div class="stat-value" style="color:#b88700">{{ pending_items|sum(attribute='quantity') }}</div></div></div>
+   <div class="stat-card"><div class="stat-icon" style="background:rgba(28,200,138,.12)">💳</div><div><div class="stat-label">Paid Value</div><div class="stat-value" style="color:#1cc88a;font-size:15px">PKR {{ summary.paid_value|int|format_number }}</div></div></div>
+   <div class="stat-card"><div class="stat-icon" style="background:rgba(231,74,59,.1)">🧾</div><div><div class="stat-label">Unpaid COD</div><div class="stat-value" style="color:#e74a3b;font-size:15px">PKR {{ summary.unpaid_cod|int|format_number }}</div></div></div>
   </div>
-
-  <div style="flex:1;overflow:auto;padding:20px;">
-
-    <!-- Stats -->
-    {% set ns = namespace(total=0) %}
-    {% for o in all_orders %}{% set ns.total = ns.total + (o.total_price|float) %}{% endfor %}
-    <div class="stats-grid3">
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(78,115,223,0.1)">📦</div><div><div class="stat-label">Items to Pack</div><div class="stat-value" style="color:#4e73df" id="statItems">{{ pending_items|length }}</div></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(246,194,62,0.1)">🔢</div><div><div class="stat-label">Total Qty</div><div class="stat-value" style="color:#f6c23e" id="statQty">{{ pending_items|sum(attribute='quantity') }}</div></div></div>
-      <div class="stat-card"><div class="stat-icon" style="background:rgba(28,200,138,0.1)">💰</div><div><div class="stat-label">Orders Value</div><div class="stat-value" style="color:#1cc88a;font-size:15px;" id="statVal">Rs {{ ns.total|int|format_number }}</div></div></div>
-    </div>
-
-    <!-- Items to Pack -->
-    <div class="section-card" style="margin-bottom:20px;">
-      <div class="section-header">
-        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Items to Pack</span>
-        <span class="section-count" id="packCount">{{ pending_items|length }}</span>
-      </div>
-      <div class="split-tables" id="splitTablesContainer">
-        {% set half = ((pending_items|length) / 2)|round(0,'ceil')|int %}
-        {% for side in [pending_items[:half], pending_items[half:]] %}
-        <div class="split-table" id="table{{ loop.index }}">
-          <table>
-            <thead><tr><th>Image</th><th>Title</th><th>Qty</th><th>Done</th></tr></thead>
-            <tbody>
-              {% for item in side %}
-              <tr data-title="{{ item.item_title|lower }}" data-date="{{ item.order_date }}">
-                <td>
-                  <div style="width:44px;height:44px;border-radius:6px;background:#e3e6f0;display:flex;align-items:center;justify-content:center;font-size:9px;color:#858796;font-family:'DM Mono',monospace;overflow:hidden;">
-                    {% if item.item_image and item.item_image != 'N/A' %}<img src="{{ item.item_image }}" style="width:100%;height:100%;object-fit:cover;">{% else %}IMG{% endif %}
-                  </div>
-                </td>
-                <td><span contenteditable="true" style="outline:none;cursor:text;">{{ item.item_title }}</span></td>
-                <td style="font-weight:700;color:#4e73df;">{{ item.quantity }}</td>
-                <td><button class="done-btn" onclick="markDone(this)">✓</button></td>
-              </tr>
-              {% endfor %}
-              {% if not side %}
-              <tr><td colspan="4" style="padding:20px;text-align:center;color:#858796;">No items</td></tr>
-              {% endif %}
-            </tbody>
-          </table>
-        </div>
-        {% endfor %}
-      </div>
-      <div style="padding:8px 20px 12px;border-top:1px solid #e3e6f0;display:flex;gap:24px;">
-        <span style="font-size:12px;color:#858796;">Total Items: <strong style="color:#3a3b45;" id="footerItems">{{ pending_items|length }}</strong></span>
-        <span style="font-size:12px;color:#858796;">Total Qty: <strong style="color:#3a3b45;" id="footerQty">{{ pending_items|sum(attribute='quantity') }}</strong></span>
-        <span style="font-size:12px;color:#858796;">Total Value: <strong style="color:#1cc88a;">Rs {{ ns.total|int|format_number }}</strong></span>
-      </div>
-    </div>
-
-    <!-- All Pending Orders -->
-    <div class="section-card">
-      <div class="section-header">
-        <span style="font-size:14px;font-weight:700;color:#3a3b45;">All Pending Orders</span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table class="pending-table">
-          <thead>
-            <tr><th>Pending Since</th><th>Order #</th><th>Platform</th><th>Total</th><th>Items</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            {% for order in all_orders %}
-            {% set days = ((now - order.date|parse_date).days + 1) if order.date else 0 %}
-            <tr>
-              <td>
-                <span style="font-size:18px;font-weight:700;color:{% if days >= 3 %}#e74a3b{% elif days >= 1 %}#f6c23e{% else %}#1cc88a{% endif %};">{{ days }}d</span>
-              </td>
-              <td style="font-family:'DM Mono',monospace;font-weight:700;color:#4e73df;">#{{ order.order_id }}</td>
-              <td style="color:#858796;">{{ order.order_via }}</td>
-              <td style="font-weight:600;color:#3a3b45;">Rs {{ order.total_price|float|int|format_number }}</td>
-              <td>
-                <div style="display:flex;flex-direction:column;gap:2px;">
-                  {% for item in order.items_list %}
-                  <div style="font-size:11px;color:#3a3b45;">
-                    <span style="font-weight:600;">{{ item.quantity }}×</span> {{ item.item_title }}
-                    {% if item.tracking_number and item.tracking_number != 'N/A' %}
-                    <span style="margin-left:6px;font-family:'DM Mono',monospace;font-size:10px;color:#4e73df;background:#dde4fb;padding:1px 5px;border-radius:4px;">{{ item.tracking_number }}</span>
-                    {% endif %}
-                  </div>
-                  {% endfor %}
-                </div>
-              </td>
-              <td>{{ status_badge(order.status) }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="6" style="padding:36px;text-align:center;color:#858796;">No pending orders.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
+  <div class="section-grid">
+   <div class="section-card"><div class="section-header"><span style="font-size:14px;font-weight:700;color:#3a3b45">Items to Pack</span><span class="section-count">{{ pending_items|length }}</span></div><div class="summary-list" style="padding:12px">{% for item in pending_items %}<div class="summary-row"><div class="summary-thumb">{% if item.item_image and item.item_image != 'N/A' %}<img src="{{ item.item_image }}" alt="">{% else %}📦{% endif %}</div><div><div class="summary-title">{{ item.item_title }}</div><div class="summary-meta">Pending quantity</div></div><div class="summary-qty">{{ item.quantity }}</div></div>{% else %}<div class="empty-state">No pending items right now.</div>{% endfor %}</div></div>
+   <div class="section-card"><div class="section-header"><span style="font-size:14px;font-weight:700;color:#3a3b45">All Pending Orders</span><span class="results-count"><strong id="visibleCount">{{ all_orders|length }}</strong> shown</span></div><div class="order-list" id="orderList" style="padding:12px">
+    {% for order in all_orders %}<div class="order-card" data-payment="{{ order.payment_status_class }}" data-search="{{ order.order_id }} {{ order.customer_name }} {{ order.customer_phone }} {{ order.customer_city }} {{ order.status }} {% for item in order.items_list %}{{ item.item_title }} {{ item.tracking_number }} {% endfor %}">
+     <div class="order-head"><div style="flex:1;min-width:0">{% set display_id = order.order_id|string|replace('#','') %}{% if order.order_link %}<a class="order-id" href="{{ order.order_link }}" target="_blank" rel="noopener">#{{ display_id }}</a>{% else %}<span class="order-id">#{{ display_id }}</span>{% endif %}<div class="order-date">{{ order.date }} · {{ order.order_via }}</div></div><div class="order-badges"><span class="payment-badge {{ order.payment_status_class }}">{{ order.payment_status_label }}</span>{{ status_badge(order.status) }}</div></div>
+     <div class="order-body"><div class="order-items">{% for item in order.items_list %}<div class="item-row">{% if item.item_image and item.item_image != 'N/A' %}<img src="{{ item.item_image }}" alt="">{% else %}<div style="width:44px;height:44px;border-radius:8px;background:#e3e6f0;display:flex;align-items:center;justify-content:center">📦</div>{% endif %}<div><div class="item-title">{{ item.item_title }}</div><div class="item-meta">{% if item.tracking_number and item.tracking_number != 'N/A' %}{{ item.tracking_number }} · {% endif %}{{ item.status }}</div></div><div class="item-qty">×{{ item.quantity }}</div></div>{% endfor %}</div><div class="order-side"><div class="mini-block"><div class="mini-label">Customer</div><div class="mini-value">{{ order.customer_name or 'No customer name' }}{% if order.customer_phone %}<br>{{ order.customer_phone }}{% endif %}{% if order.customer_address %}<br>{{ order.customer_address }}{% endif %}{% if order.customer_city %}<br>{{ order.customer_city }}{% endif %}</div></div><div class="mini-block"><div class="mini-label">Order Total</div><div class="money-line"><span>{{ order.payment_status_label }}</span><strong>PKR {{ order.total_price|float|int|format_number }}</strong></div></div></div></div>
+    </div>{% else %}<div class="empty-state">No pending orders right now.</div>{% endfor %}
+   </div></div>
   </div>
+ </div>
 </div>
 {% endblock %}
-
 {% block extra_js %}
 <script>
-function markDone(btn) {
-  const row = btn.closest('tr');
-  row.style.transition = 'opacity 0.3s';
-  row.style.opacity = '0';
-  setTimeout(() => { row.remove(); updateStats(); }, 300);
-}
-function updateStats() {
-  const rows = document.querySelectorAll('#splitTablesContainer tr[data-title]');
-  let qty = 0;
-  rows.forEach(r => {
-    if (r.style.display !== 'none') {
-      const q = parseInt(r.querySelector('td:nth-child(3)')?.textContent) || 0;
-      qty += q;
-    }
-  });
-  const visible = [...document.querySelectorAll('#splitTablesContainer tr[data-title]')].filter(r => r.style.display !== 'none').length;
-  document.getElementById('statItems').textContent = visible;
-  document.getElementById('statQty').textContent = qty;
-  document.getElementById('packCount').textContent = visible;
-  document.getElementById('footerItems').textContent = visible;
-  document.getElementById('footerQty').textContent = qty;
-}
-function filterItems() {
-  const q = document.getElementById('itemSearch').value.toLowerCase();
-  const d = document.getElementById('dateFilter').value.slice(0,10);
-  document.querySelectorAll('#splitTablesContainer tr[data-title]').forEach(row => {
-    const matchQ = !q || row.dataset.title.includes(q);
-    const matchD = !d || row.dataset.date >= d;
-    row.style.display = matchQ && matchD ? '' : 'none';
-  });
-  updateStats();
-}
+let paymentFilter='all';function applyOrderFilters(){const q=(document.getElementById('orderSearch').value||'').trim().toLowerCase();let count=0;document.querySelectorAll('#orderList .order-card').forEach(card=>{const payment=card.dataset.payment||'unpaid';const matchesPayment=paymentFilter==='all'||(paymentFilter==='paid'?(payment==='paid'||payment==='partial'):payment==='unpaid');const matchesSearch=!q||(card.dataset.search||'').toLowerCase().includes(q);const show=matchesPayment&&matchesSearch;card.classList.toggle('hidden-order',!show);if(show)count++});document.getElementById('visibleCount').textContent=count}document.querySelectorAll('[data-filter]').forEach(button=>button.addEventListener('click',()=>{paymentFilter=button.dataset.filter;document.querySelectorAll('[data-filter]').forEach(item=>item.classList.toggle('active',item===button));applyOrderFilters()}));document.getElementById('orderSearch').addEventListener('input',applyOrderFilters);
 </script>
 {% endblock %}

@@ -44,13 +44,18 @@
   .approval-preview { padding:0 14px 12px;color:#8a6d3b;font-size:11px;line-height:1.4; }
   .approval-card:not(.collapsed) .approval-preview { display:none; }
   .approval-list { display: flex; flex-direction: column; gap: 8px; }
-  .approval-item { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 12px 14px; border-top: 1px solid rgba(20,33,61,0.08); }
+  .approval-item { display: grid; grid-template-columns: 18px 56px 1fr auto; gap: 12px; align-items: center; padding: 12px 14px; border-top: 1px solid rgba(20,33,61,0.08); }
   .approval-item:first-child { border-top: none; }
   .approval-thumb { width: 56px; height: 56px; border-radius: 10px; overflow: hidden; background: #f2f4f8; display: flex; align-items: center; justify-content: center; }
   .approval-thumb img { width: 100%; height: 100%; object-fit: cover; }
   .approval-title { font-size: 13px; font-weight: 700; color: #2d2e36; margin-bottom: 4px; }
   .approval-meta { font-size: 11px; color: #8a8b96; line-height: 1.45; }
   .approval-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .approval-select { width:18px;height:18px;accent-color:#4e73df;cursor:pointer; }
+  .approval-bulk-bar { display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:1px solid rgba(20,33,61,0.08);background:#fffaf2; }
+  .approval-bulk-label { display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#8b5a00;cursor:pointer; }
+  .approval-bulk-btn { margin-left:auto;border:1px solid #1cc88a;background:#1cc88a;color:#fff;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif; }
+  .approval-bulk-btn:disabled { opacity:.5;cursor:default; }
   .approval-request { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; margin-bottom: 6px; }
   .approval-request.deliver { background: #fff3cd; color: #8b5a00; }
   .approval-request.cancel { background: #fde8e6; color: #b12727; }
@@ -58,6 +63,9 @@
   /* ── Shipper advice ── */
   .shipper-advice-card { background: #fff4eb; border: 1px solid #f2d1a6; border-radius: 12px; overflow: hidden; }
   .shipper-advice-head { display:flex; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid rgba(20,33,61,0.08); flex-wrap:wrap; }
+  .shipper-advice-toggle { border:1px solid #f2d1a6;background:#fff;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:700;color:#8b5a00;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap; }
+  .shipper-advice-card.collapsed .shipper-advice-list { display:none; }
+  .shipper-advice-card.collapsed .shipper-advice-head { border-bottom:none; }
   .shipper-advice-list { display:flex; flex-direction:column; gap:0; }
   .shipper-advice-item { display:grid; grid-template-columns: 56px 1fr auto; gap:12px; align-items:start; padding:12px 14px; border-top:1px solid rgba(20,33,61,0.08); }
   .shipper-advice-item:first-child { border-top:none; }
@@ -207,7 +215,7 @@
   @media (max-width: 679px) {
     .daraz-row { grid-template-columns: 1fr 1fr; }
     .daraz-col-headers { display: none; }
-    .approval-item { grid-template-columns: 56px 1fr; }
+    .approval-item { grid-template-columns: 18px 56px 1fr; }
     .approval-actions { grid-column: 1 / -1; justify-content: stretch; }
     .shipper-advice-item { grid-template-columns: 56px 1fr; }
     .shipper-advice-actions { grid-column: 1 / -1; width:100%; }
@@ -233,13 +241,14 @@
   <div class="stats-strip" id="statsStrip"></div>
 
   <div id="shipperAdviceMount" style="padding:10px 14px 0;display:none;max-width:960px;">
-    <div class="shipper-advice-card">
+    <div class="shipper-advice-card collapsed" id="shipperAdviceCard">
       <div class="shipper-advice-head">
         <div style="width:24px;height:24px;border-radius:6px;background:#f2b632;display:flex;align-items:center;justify-content:center;font-size:12px;">⚠️</div>
         <span style="font-size:13px;font-weight:700;color:#3a3b45;">Leopards Shipper Advice</span>
         <span class="section-count" id="shipperAdviceCount" style="background:rgba(242,182,50,0.14);color:#8b5a00;">0</span>
         <span style="font-size:11px;color:#8a8b96;">Urgent undelivered shipments waiting for Reattempt or Return advice.</span>
-        <button class="refresh-btn" style="margin-left:auto;" onclick="loadShipperAdvice(true)">🔄 Refresh Advice</button>
+        <button class="shipper-advice-toggle" id="shipperAdviceToggle" style="margin-left:auto;" type="button" onclick="toggleShipperAdvice()" aria-expanded="false" aria-controls="shipperAdviceList">Expand</button>
+        <button class="refresh-btn" style="margin-left:0;" onclick="loadShipperAdvice(true)">🔄 Refresh Advice</button>
       </div>
       <div class="shipper-advice-list" id="shipperAdviceList">
         <div class="shipper-advice-empty">Loading shipper advice…</div>
@@ -290,8 +299,19 @@
           {{ employee_approvals|length }} employee request{{ '' if employee_approvals|length == 1 else 's' }} waiting for approval.
         </div>
         <div class="approval-list" id="employeeApprovalList">
+          <div class="approval-bulk-bar">
+            <label class="approval-bulk-label"><input class="approval-select" id="approvalSelectAll" type="checkbox" onchange="toggleAllEmployeeApprovals(this.checked)"> Select all</label>
+            <span id="approvalSelectedCount" style="font-size:11px;color:#8a8b96;">0 selected</span>
+            <button class="approval-bulk-btn" id="bulkApproveEmployeeBtn" type="button" onclick="bulkApproveEmployeeRequests()" disabled>Approve selected</button>
+          </div>
           {% for approval in employee_approvals %}
-          <div class="approval-item">
+          <div class="approval-item" data-approval-row>
+            <input class="approval-select employee-approval-checkbox" type="checkbox"
+              data-order-id="{{ approval.order_id }}"
+              data-tracking-number="{{ approval.tracking_number }}"
+              data-requested-status="{{ approval.requested_status }}"
+              onchange="updateEmployeeApprovalSelection()"
+              aria-label="Select approval for order {{ approval.order_id }}">
             <div class="approval-thumb">
               {% if approval.item_image and approval.item_image != 'None' %}<img src="{{ approval.item_image }}" alt="">{% else %}📦{% endif %}
             </div>
@@ -930,6 +950,16 @@ function renderShipperAdvice() {
   }).join('');
 }
 
+function toggleShipperAdvice() {
+  const card = document.getElementById('shipperAdviceCard');
+  const toggle = document.getElementById('shipperAdviceToggle');
+  if (!card || !toggle) return;
+  const collapsed = card.classList.toggle('collapsed');
+  toggle.textContent = collapsed ? 'Expand' : 'Fold';
+  toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  try { localStorage.setItem('tickbags_shipper_advice_collapsed', collapsed ? '1' : '0'); } catch (_) {}
+}
+
 async function loadShipperAdvice(showFeedback = false) {
   try {
     const response = await fetch('/api/leopards/shipper-advice');
@@ -994,22 +1024,70 @@ function markOrder(orderId, tag) {
   .catch(() => showToast('Request failed'));
 }
 
-function approveEmployeeRequest(orderId, trackingNumber, requestedStatus) {
-  fetch('/employee_status/approve', {
+async function submitEmployeeApproval(orderId, trackingNumber, requestedStatus) {
+  const response = await fetch('/employee_status/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ order_id: orderId, tracking_number: trackingNumber, requested_status: requestedStatus })
-  })
-  .then(r => r.json())
-  .then(d => {
-    if (d.success) {
-      showToast(d.message || 'Approval applied');
-      setTimeout(() => location.reload(), 900);
-      return;
+  });
+  const payload = await response.json();
+  if (!response.ok || !payload.success) throw new Error(payload.error || 'Approval failed');
+  return payload;
+}
+
+async function approveEmployeeRequest(orderId, trackingNumber, requestedStatus) {
+  try {
+    const result = await submitEmployeeApproval(orderId, trackingNumber, requestedStatus);
+    showToast(result.message || 'Approval applied');
+    setTimeout(() => location.reload(), 900);
+  } catch (error) {
+    showToast('Failed: ' + (error.message || 'Approval failed'));
+  }
+}
+
+function updateEmployeeApprovalSelection() {
+  const boxes = [...document.querySelectorAll('.employee-approval-checkbox')];
+  const selected = boxes.filter(box => box.checked);
+  const selectAll = document.getElementById('approvalSelectAll');
+  const count = document.getElementById('approvalSelectedCount');
+  const button = document.getElementById('bulkApproveEmployeeBtn');
+  if (selectAll) {
+    selectAll.checked = boxes.length > 0 && selected.length === boxes.length;
+    selectAll.indeterminate = selected.length > 0 && selected.length < boxes.length;
+  }
+  if (count) count.textContent = `${selected.length} selected`;
+  if (button) button.disabled = selected.length === 0;
+}
+
+function toggleAllEmployeeApprovals(checked) {
+  document.querySelectorAll('.employee-approval-checkbox').forEach(box => { box.checked = checked; });
+  updateEmployeeApprovalSelection();
+}
+
+async function bulkApproveEmployeeRequests() {
+  const selected = [...document.querySelectorAll('.employee-approval-checkbox:checked')];
+  if (!selected.length) return;
+  const deliveries = selected.filter(box => box.dataset.requestedStatus === 'Delivered in Lahore').length;
+  const cancellations = selected.length - deliveries;
+  if (!window.confirm(`Approve ${selected.length} employee request${selected.length === 1 ? '' : 's'} (${deliveries} deliveries, ${cancellations} cancellations)?`)) return;
+
+  const button = document.getElementById('bulkApproveEmployeeBtn');
+  if (button) { button.disabled = true; button.textContent = 'Approving…'; }
+  let approved = 0;
+  const failures = [];
+  for (const box of selected) {
+    try {
+      await submitEmployeeApproval(box.dataset.orderId, box.dataset.trackingNumber, box.dataset.requestedStatus);
+      approved += 1;
+      box.closest('[data-approval-row]')?.remove();
+    } catch (error) {
+      failures.push(`#${box.dataset.orderId}: ${error.message || 'Failed'}`);
+      box.checked = false;
     }
-    showToast('Failed: ' + (d.error || 'Approval failed'));
-  })
-  .catch(() => showToast('Approval request failed'));
+  }
+  showToast(failures.length ? `${approved} approved; ${failures.length} failed.` : `${approved} employee request${approved === 1 ? '' : 's'} approved.`);
+  if (failures.length) console.error('Bulk employee approval failures', failures);
+  setTimeout(() => location.reload(), failures.length ? 1600 : 900);
 }
 
 function toggleEmployeeApprovals() {
@@ -1302,6 +1380,13 @@ fetch('/daraz/token-status').then(r => r.json()).then(d => {
 renderStats();
 updateBottomBar();
 applyFilterSearch();
+try {
+  if (localStorage.getItem('tickbags_shipper_advice_collapsed') === '0') {
+    document.getElementById('shipperAdviceCard')?.classList.remove('collapsed');
+    const adviceToggle = document.getElementById('shipperAdviceToggle');
+    if (adviceToggle) { adviceToggle.textContent = 'Fold'; adviceToggle.setAttribute('aria-expanded', 'true'); }
+  }
+} catch (_) {}
 loadShipperAdvice(false);
 </script>
 {% endblock %}

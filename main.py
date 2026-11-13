@@ -2464,6 +2464,8 @@ def daraz_token_status():
 def pending_orders():
     all_orders = []
     pending_items = []
+    paid_value = 0.0
+    unpaid_cod = 0.0
 
     global daraz_orders, order_details
 
@@ -2483,8 +2485,16 @@ def pending_orders():
                 'tracking_number': daraz_order['items_list'][0]['tracking_number'],
                 'date':           daraz_order['date'],
                 'items_list':     daraz_order['items_list'],
-                'total_price':    daraz_order['total_price']
+                'total_price':    daraz_order['total_price'],
+                'financial_status': 'Pending',
+                'payment_status_label': 'Unpaid COD',
+                'payment_status_class': 'unpaid',
+                'customer_name': (daraz_order.get('customer') or {}).get('name', ''),
+                'customer_phone': (daraz_order.get('customer') or {}).get('phone', ''),
+                'customer_address': (daraz_order.get('customer') or {}).get('address', ''),
+                'order_link': '',
             })
+            unpaid_cod += parse_money(daraz_order.get('total_price', 0))
             for item in daraz_order['items_list']:
                 add_or_update_item(pending_items, {
                     'item_image': item['item_image'],
@@ -2514,8 +2524,29 @@ def pending_orders():
                 'tracking_number': shopify_order['tracking_id'],
                 'date':           shopify_order['created_at'],
                 'items_list':     shopify_items,
-                'total_price':    shopify_order['total_price']
+                'total_price':    shopify_order['total_price'],
+                'financial_status': shopify_order.get('financial_status', 'Pending'),
+                'payment_status_label': (
+                    'Paid' if str(shopify_order.get('financial_status', '')).lower() == 'paid'
+                    else 'Partially Paid' if 'partially' in str(shopify_order.get('financial_status', '')).lower()
+                    else 'Unpaid COD'
+                ),
+                'payment_status_class': (
+                    'paid' if str(shopify_order.get('financial_status', '')).lower() == 'paid'
+                    else 'partial' if 'partially' in str(shopify_order.get('financial_status', '')).lower()
+                    else 'unpaid'
+                ),
+                'customer_name': (shopify_order.get('customer_details') or {}).get('name', ''),
+                'customer_phone': (shopify_order.get('customer_details') or {}).get('phone', ''),
+                'customer_address': (shopify_order.get('customer_details') or {}).get('address', ''),
+                'customer_city': (shopify_order.get('customer_details') or {}).get('city', ''),
+                'order_link': shopify_order.get('order_link', ''),
             })
+            order_value = parse_money(shopify_order.get('total_price', 0))
+            if str(shopify_order.get('financial_status', '')).lower() in {'paid', 'partially_paid'}:
+                paid_value += order_value
+            else:
+                unpaid_cod += order_value
             for item in shopify_items:
                 add_or_update_item(pending_items, {
                     'item_image': item['item_image'],
@@ -2525,7 +2556,9 @@ def pending_orders():
                 })
 
     half = len(pending_items) // 2
-    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items, half=half)
+    all_orders.sort(key=lambda order: str(order.get('date') or ''), reverse=True)
+    summary = {'paid_value': round(paid_value, 2), 'unpaid_cod': round(unpaid_cod, 2)}
+    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items, half=half, summary=summary)
 
 
 @app.route('/orders')
